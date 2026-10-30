@@ -19,7 +19,7 @@
 | Write boundary | No external writes. The example produces a local draft order preview only. |
 | Model providers | Anthropic Claude (remote) and LM Studio (local), both behind the provider abstraction. |
 | Core and desktop stack | Rust core; Tauri/Vue desktop UI |
-| Licence | Apache 2.0; selected but not yet applied |
+| Licence | GNU GPL version 3 only (`GPL-3.0-only`); applied in the root `LICENSE`. Supersedes the earlier Apache 2.0 selection. |
 | Demo platform | macOS |
 | Fixture delivery | Fixtures are served by fixture-backed MCP servers that speak the MCP protocol and implement a defined tool contract, so a live server implementing the same contract can replace one through configuration alone. |
 | Example contracts | Contract-first. The example scenario's tool contracts are defined in `docs/specs/`. A live server, such as one for the user's own POS once complete, can implement them later. |

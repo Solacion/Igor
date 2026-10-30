@@ -38,4 +38,10 @@ with pnpm and Bun).
 
 ## Licence
 
-Apache 2.0 has been selected but not yet applied.
+IGOR is licensed under the GNU General Public License version 3 only
+(`GPL-3.0-only`). See [LICENSE](LICENSE) for the full terms.
+
+Distributed derivatives and combined works must comply with GPLv3. Consider
+this when embedding the core in another application. Third-party dependencies
+retain their own licences; independently maintained MCP servers are not
+relicensed by this repository.

@@ -1,6 +1,7 @@
 {
   "name": "igor",
   "private": true,
+  "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
     "docs": "vitepress dev docs --host 127.0.0.1",
