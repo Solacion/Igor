@@ -1,0 +1,7 @@
+# Private development process notes; never include in repository commits.
+/DEV-JOURNAL.private.md
+
+# Documentation tooling and generated site.
+node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
