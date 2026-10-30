@@ -1,0 +1,12 @@
+{
+  "id": "msg_fixture_malformed",
+  "type": "message",
+  "role": "assistant",
+  "model": "fixture-model",
+  "content": [
+    { "type": "tool_use", "id": "toolu_fixture_3", "name": "sales__create_draft_order", "input": "{\"supplier\": \"X\"" }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": { "input_tokens": 100, "output_tokens": 20 }
+}

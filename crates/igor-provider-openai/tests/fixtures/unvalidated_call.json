@@ -1,0 +1,39 @@
+{
+  "id": "chatcmpl-fixture",
+  "object": "chat.completion",
+  "created": 0,
+  "model": "fixture-model",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_fixture_1",
+            "type": "function",
+            "function": {
+              "name": "sales/create_draft_order",
+              "arguments": "{\"supplier\": \"X\"}"
+            }
+          },
+          {
+            "id": "call_fixture_2",
+            "type": "function",
+            "function": {
+              "name": "sales__get_stock_levels",
+              "arguments": "{\"sku\": 7}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 100,
+    "completion_tokens": 20,
+    "total_tokens": 120
+  }
+}
