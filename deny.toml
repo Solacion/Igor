@@ -1,0 +1,21 @@
+# Explicit licence policy for the locked Rust workspace, including local GPL crates.
+# A new licence needs review; this is not a replacement for distribution notices.
+[licenses]
+confidence-threshold = 0.95
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "GPL-3.0-only",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[advisories]
+db-urls = ["https://github.com/RustSec/advisory-db"]
+yanked = "deny"
+# Do not suppress advisories or transitive unmaintained packages for the demo.
+unmaintained = "all"

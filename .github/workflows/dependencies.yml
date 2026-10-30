@@ -1,0 +1,58 @@
+name: Dependency checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: dependencies-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dependencies:
+    name: Rust dependency licences and advisories
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned toolchain
+        run: rustup toolchain install
+
+      - name: Install pinned cargo-deny
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=0.20.2
+          case "$(uname -m)" in
+            arm64)
+              target=aarch64-apple-darwin
+              checksum=fe67d82a10d8597a3549364cb733a3f9cc1bfff9031b7ae46384a9f2a72090c3
+              ;;
+            x86_64)
+              target=x86_64-apple-darwin
+              checksum=248da7f581724e470071990c088ffc55c811981715f4cbdb258621fb79f8b7a6
+              ;;
+            *) echo 'Unsupported runner architecture' >&2; exit 1 ;;
+          esac
+          asset="cargo-deny-$version-$target"
+          tools_dir="$RUNNER_TEMP/igor-dependency-tools"
+          mkdir -p "$tools_dir"
+          curl --fail --silent --show-error --location --retry 3 \
+            --max-time 120 \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/$version/$asset.tar.gz" \
+            --output "$tools_dir/$asset.tar.gz"
+          printf '%s  %s\n' "$checksum" "$tools_dir/$asset.tar.gz" | shasum -a 256 --check
+          tar -xzf "$tools_dir/$asset.tar.gz" -C "$tools_dir"
+          echo "$tools_dir/$asset" >> "$GITHUB_PATH"
+
+      - name: Check locked dependencies
+        run: cargo deny --locked check licenses advisories
