@@ -1,0 +1,55 @@
+# Sample IGOR configuration for the example purchasing scenario.
+#
+# It points only at the fixture MCP servers and needs no credentials to load. Relative paths
+# resolve against this file's directory. Build the fixture server first:
+#   cargo build -p igor-fixture-server
+#
+# Tool names follow the example contracts. The fixture server reads one fixture file, given
+# relative to the server's working directory (by default this file's directory).
+
+# Local model through LM Studio's OpenAI-compatible server. No API key needed.
+[[providers]]
+id = "lm_studio"
+kind = "openai_compatible"
+base_url = "http://127.0.0.1:1234/v1"
+model = "local-model" # Replace with a loaded model that supports native tool calling.
+
+# Anthropic Claude. The key is read from the environment when the provider is used;
+# it is never written in this file.
+[[providers]]
+id = "claude"
+kind = "anthropic"
+model = "claude-model" # Replace with the demo model (open question in docs/specs/decisions.md).
+api_key = { env = "ANTHROPIC_API_KEY" }
+
+[[servers]]
+id = "sales"
+transport = "stdio"
+command = "../target/debug/igor-fixture-server"
+args = ["--fixture", "../crates/igor-fixture-server/fixtures/sales.json"]
+# The child inherits nothing from IGOR's environment unless listed in `env_allowlist`. The fixture
+# server needs no variables; a bare command such as `node` would need "PATH".
+startup_timeout_ms = 10000
+
+# Not runnable yet: fixtures/weather.json is added by #50. Until then this server exits at
+# startup; the entry is kept so the sample shows the full two-server scenario.
+[[servers]]
+id = "weather"
+transport = "stdio"
+command = "../target/debug/igor-fixture-server"
+args = ["--fixture", "../crates/igor-fixture-server/fixtures/weather.json"]
+
+# Host classification is the only source of tool permissions. Tools not listed are
+# unclassified: hidden from the model and refused if called.
+[permissions.sales]
+get_sales_history = "read"
+get_stock_levels = "read"
+create_draft_order = "write"
+
+[permissions.weather]
+get_forecast = "read"
+
+[limits]
+max_iterations = 10
+max_result_bytes = 32768
+tool_call_timeout_ms = 30000
