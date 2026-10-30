@@ -179,7 +179,7 @@ pub struct Limits {
 impl Limits {
     /// Default [`Limits::max_iterations`].
     pub const DEFAULT_MAX_ITERATIONS: u32 = 10;
-    /// Default [`Limits::max_result_bytes`] (32 KiB, matching the `igor-core` result-size default).
+    /// Default [`Limits::max_result_bytes`] (32 KiB).
     pub const DEFAULT_MAX_RESULT_BYTES: usize = 32 * 1024;
     /// Default [`Limits::tool_call_timeout`].
     pub const DEFAULT_TOOL_CALL_TIMEOUT: Duration = Duration::from_secs(30);

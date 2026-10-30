@@ -44,25 +44,20 @@ pub(crate) fn parse(source: &str, base_dir: &Path, origin: Origin) -> Result<Con
     })
 }
 
-/// Replaces double-quoted values in a parser message, such as the string in
+/// Hides double-quoted values in a parser message, such as the string in
 /// `invalid type: string "...", expected u64`, so a secret typed into the wrong field is not
-/// echoed. Field names, which the parser quotes with backticks, stay visible.
+/// echoed. Everything from the first to the last `"` is replaced as one unit, so escaped quotes
+/// inside a value cannot expose part of it. Field names, which the parser quotes with backticks,
+/// stay visible.
 fn hide_quoted_values(message: &str) -> String {
-    let mut out = String::with_capacity(message.len());
-    let mut parts = message.split('"');
-    if let Some(first) = parts.next() {
-        out.push_str(first);
+    match (message.find('"'), message.rfind('"')) {
+        (Some(first), Some(last)) if first < last => format!(
+            "{}\"[value not shown]\"{}",
+            &message[..first],
+            &message[last + 1..]
+        ),
+        _ => message.to_owned(),
     }
-    let mut inside = true;
-    for part in parts {
-        if inside {
-            out.push_str("\"[value not shown]\"");
-        } else {
-            out.push_str(part);
-        }
-        inside = !inside;
-    }
-    out
 }
 
 fn line_column(source: &str, offset: usize) -> (usize, usize) {
@@ -376,6 +371,14 @@ mod tests {
         assert_eq!(
             hide_quoted_values("missing field `command`"),
             "missing field `command`"
+        );
+    }
+
+    #[test]
+    fn values_with_escaped_quotes_are_hidden_whole() {
+        assert_eq!(
+            hide_quoted_values(r#"invalid type: string "ab\"cd", expected u64"#),
+            r#"invalid type: string "[value not shown]", expected u64"#
         );
     }
 
