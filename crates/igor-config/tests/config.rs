@@ -258,6 +258,16 @@ fn invalid_values_name_field_and_problem() -> TestResult {
             Problem::InvalidUrl("must not embed credentials; use api_key with an env reference"),
         ),
         (
+            "plain http to a remote host",
+            (
+                "model = \"m\"",
+                "model = \"m\"\nbase_url = \"http://api.example.com/v1\"",
+            ),
+            "",
+            "providers[0].base_url",
+            Problem::InvalidUrl("plain http:// is only allowed for localhost; use https://"),
+        ),
+        (
             "base url without scheme",
             ("model = \"m\"", "model = \"m\"\nbase_url = \"example.com\""),
             "",

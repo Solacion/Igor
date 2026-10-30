@@ -183,10 +183,11 @@ fn providers(raw: Vec<RawProvider>) -> Result<Vec<ProviderConfig>, Invalid> {
 }
 
 fn check_base_url(url: &str) -> Result<(), Problem> {
-    let rest = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-        .ok_or(Problem::InvalidUrl("must start with http:// or https://"))?;
+    let (rest, plain_http) = match (url.strip_prefix("https://"), url.strip_prefix("http://")) {
+        (Some(rest), _) => (rest, false),
+        (None, Some(rest)) => (rest, true),
+        (None, None) => return Err(Problem::InvalidUrl("must start with http:// or https://")),
+    };
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
     if authority.is_empty() {
         return Err(Problem::InvalidUrl("missing host"));
@@ -196,7 +197,22 @@ fn check_base_url(url: &str) -> Result<(), Problem> {
             "must not embed credentials; use api_key with an env reference",
         ));
     }
+    // Plain HTTP would send API keys unencrypted, so allow it only for this machine.
+    if plain_http && !is_loopback_host(authority) {
+        return Err(Problem::InvalidUrl(
+            "plain http:// is only allowed for localhost; use https://",
+        ));
+    }
     Ok(())
+}
+
+/// True when `authority` (host with optional port) names this machine.
+fn is_loopback_host(authority: &str) -> bool {
+    let host = match authority.strip_prefix('[') {
+        Some(bracketed) => bracketed.split(']').next().unwrap_or_default(),
+        None => authority.split(':').next().unwrap_or_default(),
+    };
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
 
 fn secret_ref(raw: RawSecret, field: impl FnOnce() -> String) -> Result<SecretRef, Invalid> {
