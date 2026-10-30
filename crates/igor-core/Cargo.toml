@@ -10,10 +10,21 @@ publish.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+jsonschema.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
 tokio-util.workspace = true
+
+[features]
+# Deterministic test support (scripted provider, manual clock). Off by default so the runtime
+# does not ship it; enable from other crates' dev-dependencies.
+testing = []
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true
