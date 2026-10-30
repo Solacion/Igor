@@ -36,6 +36,8 @@
 
 ## Cut order if time runs short
 
+Items 2 to 4 are already outside the accepted demo scope; they are listed so they stay out if scope grows.
+
 1. Issue and pull request templates
 2. macOS Keychain
 3. Persistence
