@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use igor_core::CancellationToken;
 use igor_core::provider::{ProviderError, ProviderErrorKind};
+use thiserror::Error;
 
 /// Default bound on one request, including reading the response. Non-streaming responses with a
 /// large `max_tokens`, and local models, can take minutes.
@@ -21,6 +22,22 @@ pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Largest successful response body accepted, in bytes.
 pub const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+
+/// An adapter could not be created.
+#[derive(Debug, Error)]
+pub enum BuildError {
+    /// The configuration entry is for a different provider kind.
+    #[error("provider {id:?} is not of kind `{expected}`")]
+    WrongKind {
+        /// Provider id.
+        id: String,
+        /// The kind the adapter accepts, as written in the configuration.
+        expected: &'static str,
+    },
+    /// The HTTP client could not be built.
+    #[error("cannot build HTTP client: {0}")]
+    Client(#[from] reqwest::Error),
+}
 
 /// Builds the HTTP client an adapter uses. Redirects are never followed: an adapter's custom
 /// key header (such as `x-api-key`) would otherwise be forwarded to whatever host a base URL
