@@ -10,7 +10,7 @@ IGOR uses the first of these that applies:
 2. The `IGOR_CONFIG` environment variable.
 3. `~/Library/Application Support/igor/config.toml`.
 
-Relative paths in the file resolve against the file's directory.
+Relative paths in the file resolve against the file's directory, made absolute when the file is loaded.
 
 ## Sample
 
@@ -27,8 +27,7 @@ api_key = { env = "ANTHROPIC_API_KEY" }
 id = "sales"                  # [a-z][a-z0-9_-]*, at most 32 characters, unique
 transport = "stdio"           # only stdio is supported
 command = "../target/debug/igor-fixture-server"
-args = ["--fixtures", "fixtures/sales"]
-env_allowlist = ["PATH"]
+args = ["--fixture", "../crates/igor-fixture-server/fixtures/sales.json"]
 
 [permissions.sales]
 create_draft_order = "write"
@@ -92,9 +91,14 @@ A tool that is not listed is unclassified. IGOR hides it from the model and refu
 | `max_result_bytes` | 32768 | 1024 to 16777216 bytes per tool result |
 | `tool_call_timeout_ms` | 30000 | 100 to 600000 |
 
+## Limitations
+
+- `env` accepts only secret references. A non-secret value must be exported in IGOR's environment and referenced, or passed as an argument.
+- Resolved secrets are redacted in output but are not zeroed in memory when dropped.
+
 ## Errors
 
 IGOR stops at the first problem it finds. Unknown keys are errors.
 
-- A parse error gives the file, line and column, for example ``config.toml:12:1: missing field `command` ``.
+- A parse error gives the file, line and column, for example ``config.toml:12:1: missing field `command` ``. Quoted values in parse errors are replaced with `[value not shown]`, so a secret typed into the wrong field is not echoed.
 - A validation error gives the file, the field path and the problem, for example `config.toml: servers[1].id: server id "sales" is declared more than once`.

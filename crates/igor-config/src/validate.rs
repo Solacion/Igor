@@ -34,7 +34,7 @@ pub(crate) fn parse(source: &str, base_dir: &Path, origin: Origin) -> Result<Con
             origin: origin.clone(),
             line,
             column,
-            message: err.message().to_owned(),
+            message: hide_quoted_values(err.message()),
         }
     })?;
     validate(raw, base_dir).map_err(|(field, problem)| ConfigError::Invalid {
@@ -42,6 +42,27 @@ pub(crate) fn parse(source: &str, base_dir: &Path, origin: Origin) -> Result<Con
         field,
         problem,
     })
+}
+
+/// Replaces double-quoted values in a parser message, such as the string in
+/// `invalid type: string "...", expected u64`, so a secret typed into the wrong field is not
+/// echoed. Field names, which the parser quotes with backticks, stay visible.
+fn hide_quoted_values(message: &str) -> String {
+    let mut out = String::with_capacity(message.len());
+    let mut parts = message.split('"');
+    if let Some(first) = parts.next() {
+        out.push_str(first);
+    }
+    let mut inside = true;
+    for part in parts {
+        if inside {
+            out.push_str("\"[value not shown]\"");
+        } else {
+            out.push_str(part);
+        }
+        inside = !inside;
+    }
+    out
 }
 
 fn line_column(source: &str, offset: usize) -> (usize, usize) {
@@ -345,6 +366,18 @@ fn is_tool_name(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quoted_values_are_hidden_but_field_names_stay() {
+        assert_eq!(
+            hide_quoted_values(r#"invalid type: string "sk-ant-x", expected u64"#),
+            r#"invalid type: string "[value not shown]", expected u64"#
+        );
+        assert_eq!(
+            hide_quoted_values("missing field `command`"),
+            "missing field `command`"
+        );
+    }
 
     #[test]
     fn line_column_is_one_based() {

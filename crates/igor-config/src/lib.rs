@@ -41,20 +41,26 @@ pub struct Config {
 
 impl Config {
     /// Reads and validates the configuration file at `path`. Relative server paths resolve
-    /// against the file's directory.
+    /// against the file's directory, made absolute, so they do not depend on how `path` was
+    /// written.
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
-        let source = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
+        let read_error = |source| ConfigError::Read {
             path: path.to_path_buf(),
             source,
-        })?;
-        let base_dir = path.parent().unwrap_or(Path::new(""));
-        validate::parse(&source, base_dir, Origin::File(path.to_path_buf()))
+        };
+        let source = std::fs::read_to_string(path).map_err(read_error)?;
+        let base_dir = absolute_dir(path.parent()).map_err(read_error)?;
+        validate::parse(&source, &base_dir, Origin::File(path.to_path_buf()))
     }
 
     /// Parses and validates configuration text. Relative server paths resolve against
-    /// `base_dir`.
+    /// `base_dir`, made absolute against the current directory.
     pub fn from_toml_str(source: &str, base_dir: &Path) -> Result<Self, ConfigError> {
-        validate::parse(source, base_dir, Origin::Inline)
+        let absolute = absolute_dir(Some(base_dir)).map_err(|source| ConfigError::Read {
+            path: base_dir.to_path_buf(),
+            source,
+        })?;
+        validate::parse(source, &absolute, Origin::Inline)
     }
 
     /// Configured model providers, in file order.
@@ -85,6 +91,14 @@ impl Config {
     /// Agent execution limits.
     pub fn limits(&self) -> &Limits {
         &self.limits
+    }
+}
+
+/// Makes `dir` absolute; an empty or missing directory means the current directory.
+fn absolute_dir(dir: Option<&Path>) -> std::io::Result<PathBuf> {
+    match dir {
+        Some(dir) if !dir.as_os_str().is_empty() => std::path::absolute(dir),
+        _ => std::env::current_dir(),
     }
 }
 

@@ -61,12 +61,46 @@ fn sample_config_loads_and_needs_no_credentials() -> TestResult {
         Classification::Write
     );
     assert_eq!(
-        permissions.classify(&tool("weather", "get_weather_forecast")?),
+        permissions.classify(&tool("weather", "get_forecast")?),
         Classification::Read
     );
+    for name in ["get_stock_levels", "get_sales_history"] {
+        assert_eq!(
+            permissions.classify(&tool("sales", name)?),
+            Classification::Read
+        );
+    }
     let local = config.provider("lm_studio").ok_or("lm_studio missing")?;
     assert_eq!(local.kind, ProviderKind::OpenAiCompatible);
     assert!(local.api_key.is_none());
+    Ok(())
+}
+
+#[test]
+fn relative_config_paths_resolve_to_absolute_server_paths() -> TestResult {
+    // Tests run in the crate directory, so this path is relative to it.
+    let config = Config::load(Path::new("../../examples/igor.toml"))?;
+    for server in config.servers() {
+        assert!(server.cwd.is_absolute(), "{}", server.cwd.display());
+        assert!(server.command.is_absolute(), "{}", server.command.display());
+        assert!(server.cwd.ends_with("examples"));
+    }
+    let inline = Config::from_toml_str(BASE, Path::new(""))?;
+    let sales = inline
+        .server(&ServerId::new("sales")?)
+        .ok_or("sales missing")?;
+    assert_eq!(sales.cwd, std::env::current_dir()?);
+    Ok(())
+}
+
+#[test]
+fn parse_errors_do_not_echo_values() -> TestResult {
+    let source = format!("{BASE}\n[limits]\nmax_iterations = \"{SENTINEL}\"\n");
+    let err = parse(&source).err().ok_or("expected an error")?;
+    assert!(matches!(err, ConfigError::Parse { .. }), "{err}");
+    let message = err.to_string();
+    assert!(!message.contains(SENTINEL), "{message}");
+    assert!(message.contains("[value not shown]"), "{message}");
     Ok(())
 }
 
