@@ -19,31 +19,71 @@ use igor_core::provider::{ProviderError, ProviderErrorKind};
 /// large `max_tokens`, and local models, can take minutes.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// Largest response body accepted, in bytes.
+/// Largest successful response body accepted, in bytes.
 pub const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
-/// Reads the response body, refusing bodies above [`MAX_RESPONSE_BYTES`].
-pub async fn read_body(
-    mut response: reqwest::Response,
+/// How much of an error response body is read to describe the error, in bytes.
+const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
+
+/// Sends a JSON request and returns the body of a successful response.
+///
+/// The status is classified before the body is accepted: an error response keeps its status
+/// classification (and retryability) even when its body is large, because only the first
+/// [`MAX_ERROR_BODY_BYTES`] are read to describe it. A successful body above
+/// [`MAX_RESPONSE_BYTES`] is refused as malformed. `secret` is scrubbed from every message.
+pub async fn send_json(
+    request: reqwest::RequestBuilder,
+    body: String,
     secret: &str,
 ) -> Result<Vec<u8>, ProviderError> {
+    let response = request
+        .header("content-type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .map_err(|err| errors::transport_error(&err, secret))?;
+    let status = response.status();
+    if status.is_success() {
+        return match read_capped(response, MAX_RESPONSE_BYTES, secret).await? {
+            (bytes, false) => Ok(bytes),
+            (_, true) => Err(errors::error(
+                ProviderErrorKind::MalformedResponse,
+                false,
+                &format!("response body exceeds {MAX_RESPONSE_BYTES} bytes"),
+                secret,
+            )),
+        };
+    }
+    let retry_after = retry_after(&response);
+    let (bytes, truncated) = read_capped(response, MAX_ERROR_BODY_BYTES, secret).await?;
+    // A truncated body is not valid JSON; describe the error by its status alone.
+    let detail: &[u8] = if truncated { &[] } else { &bytes };
+    Err(errors::status_error(
+        status.as_u16(),
+        retry_after.as_deref(),
+        detail,
+        secret,
+    ))
+}
+
+/// Reads at most `cap` bytes of the body; the flag is true when the body was longer.
+async fn read_capped(
+    mut response: reqwest::Response,
+    cap: usize,
+    secret: &str,
+) -> Result<(Vec<u8>, bool), ProviderError> {
     let mut bytes = Vec::new();
     while let Some(chunk) = response
         .chunk()
         .await
         .map_err(|err| errors::transport_error(&err, secret))?
     {
-        if bytes.len() + chunk.len() > MAX_RESPONSE_BYTES {
-            return Err(errors::error(
-                ProviderErrorKind::MalformedResponse,
-                false,
-                &format!("response body exceeds {MAX_RESPONSE_BYTES} bytes"),
-                secret,
-            ));
+        if bytes.len() + chunk.len() > cap {
+            return Ok((bytes, true));
         }
         bytes.extend_from_slice(&chunk);
     }
-    Ok(bytes)
+    Ok((bytes, false))
 }
 
 /// Runs `request` unless `cancel` fires first. A request already cancelled is never started.
@@ -65,7 +105,7 @@ where
 }
 
 /// Reads the `retry-after` header as text, when present.
-pub fn retry_after(response: &reqwest::Response) -> Option<String> {
+fn retry_after(response: &reqwest::Response) -> Option<String> {
     response
         .headers()
         .get("retry-after")

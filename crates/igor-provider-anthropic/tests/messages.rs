@@ -12,7 +12,9 @@ use igor_core::provider::{
     ContentBlock, Message, ModelRequest, Provider, ProviderError, ProviderErrorKind, Role,
     StopReason, ToolSpec,
 };
-use igor_provider_anthropic::{API_VERSION, AnthropicProvider, AnthropicSettings};
+use igor_provider_anthropic::{
+    API_VERSION, AnthropicProvider, AnthropicSettings, MAX_RESPONSE_BYTES,
+};
 use igor_provider_http::stub::{Reply, Stub};
 use serde_json::{Value, json};
 
@@ -173,6 +175,24 @@ async fn several_tool_calls_in_one_turn_drop_thinking_blocks() -> TestResult {
     let results = &second.body["messages"][2]["content"];
     assert_eq!(results[1]["type"], "tool_result");
     assert_eq!(results[1]["is_error"], true);
+    Ok(())
+}
+
+#[tokio::test]
+async fn oversized_error_body_keeps_its_status() -> TestResult {
+    let result = complete_once(Reply::Http {
+        status: 429,
+        headers: vec![("retry-after", "5")],
+        body: "<html>".repeat(MAX_RESPONSE_BYTES / 6 + 1),
+    })
+    .await?;
+    let err = result.err().ok_or("expected an error")?;
+    assert_eq!(err.kind, ProviderErrorKind::RateLimited);
+    assert!(
+        err.retryable,
+        "a rate limit stays retryable however large its body"
+    );
+    assert!(err.message.contains("retry after 5s"), "{}", err.message);
     Ok(())
 }
 

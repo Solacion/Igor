@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use igor_config::{ProviderConfig, ProviderKind, Secret};
 use igor_core::CancellationToken;
 use igor_core::provider::{ModelRequest, ModelResponse, Provider, ProviderError};
-use igor_provider_http::{cancellable, errors, read_body, retry_after};
+use igor_provider_http::{cancellable, errors, send_json};
 use thiserror::Error;
 
 pub use igor_provider_http::{DEFAULT_REQUEST_TIMEOUT, MAX_RESPONSE_BYTES};
@@ -106,30 +106,11 @@ impl OpenAiCompatibleProvider {
     async fn send(&self, request: &ModelRequest) -> Result<ModelResponse, ProviderError> {
         let secret = self.api_key.as_ref().map_or("", Secret::expose);
         let body = wire::request_body(&self.model, request);
-        let mut http = self
-            .client
-            .post(&self.endpoint)
-            .header("content-type", "application/json")
-            .body(body.to_string());
+        let mut http = self.client.post(&self.endpoint);
         if let Some(key) = &self.api_key {
             http = http.bearer_auth(key.expose());
         }
-        let response = http
-            .send()
-            .await
-            .map_err(|err| errors::transport_error(&err, secret))?;
-
-        let status = response.status();
-        let retry_after = retry_after(&response);
-        let bytes = read_body(response, secret).await?;
-        if !status.is_success() {
-            return Err(errors::status_error(
-                status.as_u16(),
-                retry_after.as_deref(),
-                &bytes,
-                secret,
-            ));
-        }
+        let bytes = send_json(http, body.to_string(), secret).await?;
         wire::parse_response(&bytes)
             .map_err(|err| errors::error(err.kind, err.retryable, &err.message, secret))
     }
