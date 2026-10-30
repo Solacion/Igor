@@ -9,6 +9,7 @@ IGOR is a Cargo workspace. The toolchain is pinned in `rust-toolchain.toml`; doc
 | `igor-core` | Domain-neutral runtime: provider and tool-backend interfaces, routing, permissions, approvals, session loop, runtime events | No MCP library, provider SDK or UI |
 | `igor-config` | Loads and validates the TOML host configuration: providers, servers, tool permissions, limits, secret references | `igor-core`, `toml` |
 | `igor-provider-anthropic` | Anthropic Messages API adapter implementing `igor_core::provider::Provider` | `igor-core`, `igor-config`, `reqwest` (rustls) |
+| `igor-provider-openai` | OpenAI-compatible chat completions adapter (LM Studio) implementing `igor_core::provider::Provider` | `igor-core`, `igor-config`, `reqwest` (rustls) |
 | `igor-mcp` | `rmcp` client implementing `igor_core::tools::ToolBackend` over stdio | `igor-core`, `rmcp` |
 | `igor-fixture-server` | Generic fixture-backed MCP server for tests and the demo | `rmcp`; never `igor-core` |
 | `igor-cli` | Headless harness over the session API; fallback demo | `igor-core`, `igor-mcp`, providers |

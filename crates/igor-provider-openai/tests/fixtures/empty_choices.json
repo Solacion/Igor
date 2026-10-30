@@ -1,0 +1,7 @@
+{
+  "id": "chatcmpl-fixture",
+  "object": "chat.completion",
+  "created": 0,
+  "model": "fixture-model",
+  "choices": []
+}
