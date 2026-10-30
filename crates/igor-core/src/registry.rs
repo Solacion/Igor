@@ -7,6 +7,7 @@
 //! the alias table, never parsed.
 
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 
 use jsonschema::Validator;
 use jsonschema::error::ValidationErrorKind;
@@ -178,12 +179,35 @@ pub enum CallRejection {
 /// Only [`ToolRegistry::prepare_call`] creates one. It is deliberately not `Clone`: one model
 /// call yields at most one dispatch. Pass it to [`crate::approval::ApprovalGate::admit`] to
 /// obtain a dispatch permit, directly for a read and after operator approval for a write.
-#[derive(Debug, PartialEq)]
+/// There is deliberately no way to take the arguments out other than through the gate.
+#[derive(PartialEq)]
 pub struct ValidatedCall {
     tool: ToolId,
     classification: Classification,
     fingerprint: ToolFingerprint,
     arguments: Map<String, Value>,
+}
+
+impl fmt::Debug for ValidatedCall {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ValidatedCall")
+            .field("tool", &self.tool)
+            .field("classification", &self.classification)
+            .field("fingerprint", &self.fingerprint)
+            .field("arguments", &RedactedArguments(&self.arguments))
+            .finish()
+    }
+}
+
+/// Shows argument names but not values in `Debug` output, so logs cannot leak them (#10).
+pub(crate) struct RedactedArguments<'a>(pub(crate) &'a Map<String, Value>);
+
+impl fmt::Debug for RedactedArguments<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_map()
+            .entries(self.0.keys().map(|key| (key, format_args!("<redacted>"))))
+            .finish()
+    }
 }
 
 impl ValidatedCall {
@@ -205,11 +229,6 @@ impl ValidatedCall {
     /// Validated arguments.
     pub fn arguments(&self) -> &Map<String, Value> {
         &self.arguments
-    }
-
-    /// Consumes the call and returns its arguments.
-    pub fn into_arguments(self) -> Map<String, Value> {
-        self.arguments
     }
 
     /// Splits the call into its parts, for the approval gate.
@@ -772,6 +791,16 @@ mod tests {
                 .iter()
                 .all(|spec| spec.description.len() <= MAX_DESCRIPTION_BYTES)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn debug_output_redacts_argument_values() -> TestResult {
+        let registry = two_server_registry()?;
+        let call = registry.prepare_call("sales__lookup", json!({ "sku": "s3cret-sku" }))?;
+        let debug = format!("{call:?}");
+        assert!(debug.contains("sku"), "{debug}");
+        assert!(!debug.contains("s3cret-sku"), "{debug}");
         Ok(())
     }
 

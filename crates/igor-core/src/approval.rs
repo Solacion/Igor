@@ -21,6 +21,7 @@
 //! process, so no other implementation needs to reproduce the hash.
 
 use std::collections::BTreeMap;
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -30,7 +31,7 @@ use thiserror::Error;
 use crate::CancellationToken;
 use crate::canonical::{sha256_digest_type, write_canonical_object, write_string};
 use crate::policy::Classification;
-use crate::registry::{ToolFingerprint, ToolRegistry, ValidatedCall};
+use crate::registry::{RedactedArguments, ToolFingerprint, ToolRegistry, ValidatedCall};
 use crate::tools::{BackendError, ServerId, ToolBackend, ToolId, ToolOutput};
 
 #[cfg(doc)]
@@ -44,12 +45,23 @@ sha256_digest_type!(
 
 /// Permission to send one call to one server. Created only by [`ApprovalGate`]. Not `Clone`:
 /// dispatch consumes it, so one permit sends at most one request.
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub struct DispatchPermit {
     call_id: String,
     tool: ToolId,
     arguments: Map<String, Value>,
     approval_id: Option<String>,
+}
+
+impl fmt::Debug for DispatchPermit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DispatchPermit")
+            .field("call_id", &self.call_id)
+            .field("tool", &self.tool)
+            .field("arguments", &RedactedArguments(&self.arguments))
+            .field("approval_id", &self.approval_id)
+            .finish()
+    }
 }
 
 impl DispatchPermit {
@@ -121,7 +133,9 @@ impl DispatchError {
 }
 
 /// A write call waiting for the operator, as shown to the client.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `Debug` output omits the arguments; clients display [`Self::canonical_arguments`] directly.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApprovalRequest {
     /// Identifier to pass to [`ApprovalGate::resolve`].
     pub approval_id: String,
@@ -136,6 +150,22 @@ pub struct ApprovalRequest {
     pub canonical_arguments: String,
     /// Hash the client must echo to approve or deny.
     pub action_hash: ActionHash,
+}
+
+impl fmt::Debug for ApprovalRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ApprovalRequest")
+            .field("approval_id", &self.approval_id)
+            .field("call_id", &self.call_id)
+            .field("tool", &self.tool)
+            .field("fingerprint", &self.fingerprint)
+            .field(
+                "canonical_arguments",
+                &format_args!("<redacted, {} bytes>", self.canonical_arguments.len()),
+            )
+            .field("action_hash", &self.action_hash)
+            .finish()
+    }
 }
 
 /// The operator's answer to an [`ApprovalRequest`].
@@ -202,13 +232,24 @@ pub enum ApprovalError {
     },
 }
 
-#[derive(Debug)]
 struct Pending {
     call_id: String,
     tool: ToolId,
     fingerprint: ToolFingerprint,
     arguments: Map<String, Value>,
     action_hash: ActionHash,
+}
+
+impl fmt::Debug for Pending {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Pending")
+            .field("call_id", &self.call_id)
+            .field("tool", &self.tool)
+            .field("fingerprint", &self.fingerprint)
+            .field("arguments", &RedactedArguments(&self.arguments))
+            .field("action_hash", &self.action_hash)
+            .finish()
+    }
 }
 
 impl Pending {
@@ -220,6 +261,16 @@ impl Pending {
         }
     }
 }
+
+/// Maximum number of approvals pending at once in one gate. The session loop holds at most one,
+/// because it suspends the turn on each write call; the bound protects other callers.
+pub const MAX_PENDING_APPROVALS: usize = 32;
+
+/// [`ApprovalGate::admit`] refused a write call because [`MAX_PENDING_APPROVALS`] are pending.
+/// The call was not admitted and nothing runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("too many approvals are pending (limit {MAX_PENDING_APPROVALS})")]
+pub struct TooManyPending;
 
 /// Holds write calls until the operator approves or denies them. One gate per session.
 ///
@@ -239,16 +290,27 @@ impl ApprovalGate {
 
     /// Admits a validated call: a read call gets a permit, a write call becomes a pending
     /// approval. Every call needs a new approval, even if an identical one was approved before.
-    pub fn admit(&mut self, call: ValidatedCall, call_id: impl Into<String>) -> Admission {
+    ///
+    /// A [`ValidatedCall`] is only ever [`Classification::Read`] or [`Classification::Write`]:
+    /// [`ToolRegistry::prepare_call`] refuses every other class. Anything that is not `Read` is
+    /// held for approval, so an unexpected class fails safe.
+    pub fn admit(
+        &mut self,
+        call: ValidatedCall,
+        call_id: impl Into<String>,
+    ) -> Result<Admission, TooManyPending> {
         let call_id = call_id.into();
         let (tool, classification, fingerprint, arguments) = call.into_parts();
         if classification == Classification::Read {
-            return Admission::Ready(DispatchPermit {
+            return Ok(Admission::Ready(DispatchPermit {
                 call_id,
                 tool,
                 arguments,
                 approval_id: None,
-            });
+            }));
+        }
+        if self.pending.len() >= MAX_PENDING_APPROVALS {
+            return Err(TooManyPending);
         }
 
         let mut canonical_arguments = String::new();
@@ -274,7 +336,7 @@ impl ApprovalGate {
                 action_hash,
             },
         );
-        Admission::ApprovalRequired(request)
+        Ok(Admission::ApprovalRequired(request))
     }
 
     /// Applies the operator's decision to a pending approval.
@@ -450,7 +512,7 @@ mod tests {
             arguments: Value,
         ) -> Result<ApprovalRequest, Box<dyn std::error::Error>> {
             let call = self.registry.prepare_call(alias, arguments)?;
-            match self.gate.admit(call, "call-1") {
+            match self.gate.admit(call, "call-1")? {
                 Admission::ApprovalRequired(request) => Ok(request),
                 Admission::Ready(_) => Err("write call was not held for approval".into()),
             }
@@ -478,7 +540,7 @@ mod tests {
         let call = fx
             .registry
             .prepare_call("sales__lookup", json!({ "supplier": "X" }))?;
-        let Admission::Ready(permit) = fx.gate.admit(call, "call-1") else {
+        let Admission::Ready(permit) = fx.gate.admit(call, "call-1")? else {
             return Err("read call was held".into());
         };
         assert_eq!(permit.approval_id(), None);
@@ -744,6 +806,47 @@ mod tests {
             .resolve(&request.approval_id, wrong, Decision::Approve, &fx.registry);
         assert!(matches!(result, Err(ApprovalError::HashMismatch { .. })));
         assert_eq!(fx.gate.pending_count(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn pending_approvals_are_bounded() -> TestResult {
+        let mut fx = Fixture::new()?;
+        for _ in 0..MAX_PENDING_APPROVALS {
+            fx.request("sales__create_order", order())?;
+        }
+        let call = fx.registry.prepare_call("sales__create_order", order())?;
+        assert_eq!(fx.gate.admit(call, "call-x"), Err(TooManyPending));
+        assert_eq!(fx.gate.pending_count(), MAX_PENDING_APPROVALS);
+        let read = fx
+            .registry
+            .prepare_call("sales__lookup", json!({ "supplier": "X" }))?;
+        assert!(matches!(
+            fx.gate.admit(read, "call-y"),
+            Ok(Admission::Ready(_))
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn debug_output_redacts_arguments() -> TestResult {
+        let mut fx = Fixture::new()?;
+        let secret = json!({ "supplier": "s3cret-supplier" });
+        let request = fx.request("sales__create_order", secret.clone())?;
+        let permit = approved(fx.gate.resolve(
+            &request.approval_id,
+            request.action_hash,
+            Decision::Approve,
+            &fx.registry,
+        )?)?;
+        fx.request("sales__create_order", secret)?;
+        for debug in [
+            format!("{request:?}"),
+            format!("{permit:?}"),
+            format!("{:?}", fx.gate),
+        ] {
+            assert!(!debug.contains("s3cret-supplier"), "{debug}");
+        }
         Ok(())
     }
 
