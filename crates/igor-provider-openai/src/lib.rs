@@ -17,7 +17,8 @@ use igor_config::{ProviderConfig, ProviderKind, Secret};
 use igor_core::CancellationToken;
 use igor_core::provider::{ModelRequest, ModelResponse, Provider, ProviderError};
 use igor_provider_http::{cancellable, errors, send_json};
-use thiserror::Error;
+
+pub use igor_provider_http::BuildError;
 
 pub use igor_provider_http::{DEFAULT_REQUEST_TIMEOUT, MAX_RESPONSE_BYTES};
 pub use wire::TOOL_ERROR_PREFIX;
@@ -55,26 +56,13 @@ impl OpenAiSettings {
         if config.kind != ProviderKind::OpenAiCompatible {
             return Err(BuildError::WrongKind {
                 id: config.id.clone(),
+                expected: "openai_compatible",
             });
         }
         let mut settings = Self::new(&config.base_url, &config.model);
         settings.api_key = api_key;
         Ok(settings)
     }
-}
-
-/// The provider could not be created.
-#[derive(Debug, Error)]
-pub enum BuildError {
-    /// The configuration entry is not an `openai_compatible` provider.
-    #[error("provider {id:?} is not of kind `openai_compatible`")]
-    WrongKind {
-        /// Provider id.
-        id: String,
-    },
-    /// The HTTP client could not be built.
-    #[error("cannot build HTTP client: {0}")]
-    Client(#[from] reqwest::Error),
 }
 
 /// OpenAI-compatible chat completions provider.
@@ -109,8 +97,7 @@ impl OpenAiCompatibleProvider {
             http = http.bearer_auth(key.expose());
         }
         let bytes = send_json(http, body.to_string(), secret).await?;
-        wire::parse_response(&bytes)
-            .map_err(|err| errors::error(err.kind, err.retryable, &err.message, secret))
+        wire::parse_response(&bytes).map_err(|err| errors::scrub(err, secret))
     }
 }
 

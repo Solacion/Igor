@@ -312,3 +312,121 @@ async fn startup_failures_are_reported() -> TestResult {
     );
     Ok(())
 }
+
+/// A fixture with one tool per protocol-level fault.
+fn fault_fixture(dir: &Path) -> std::io::Result<PathBuf> {
+    let path = dir.join("faults.json");
+    let tools: Vec<Value> = ["hang", "early", "crash", "malformed", "oversized", "fast"]
+        .iter()
+        .map(|name| json!({ "name": name, "inputSchema": { "type": "object" } }))
+        .collect();
+    let fixture = json!({
+        "server": { "name": "faults", "version": "1" },
+        "tools": tools,
+        "calls": [
+            { "tool": "hang", "arguments": {}, "fault": { "hang": true } },
+            { "tool": "early", "arguments": {}, "fault": { "crash_before_response": true } },
+            { "tool": "crash", "arguments": {}, "fault": { "crash_after_record": true } },
+            { "tool": "malformed", "arguments": {}, "fault": { "malformed_response": true } },
+            { "tool": "oversized", "arguments": {}, "fault": { "oversized_result": 1_048_576 } },
+            { "tool": "fast", "arguments": {}, "result": { "content": [] } }
+        ]
+    });
+    std::fs::write(&path, fixture.to_string())?;
+    Ok(path)
+}
+
+async fn fault_backend(
+    name: &str,
+    call_timeout: Duration,
+) -> Result<(McpBackend, PathBuf), Box<dyn std::error::Error>> {
+    let dir = test_dir(name)?;
+    let log = dir.join("calls.jsonl");
+    let mut config = config(&fault_fixture(&dir)?, &log)?;
+    config.call_timeout = call_timeout;
+    Ok((
+        McpBackend::connect(ServerId::new("faults")?, &config).await?,
+        log,
+    ))
+}
+
+#[tokio::test]
+async fn hang_is_outcome_unknown_after_timeout() -> TestResult {
+    let (backend, log) = fault_backend("hang", Duration::from_millis(300)).await?;
+    let result = backend
+        .call_tool("hang", Map::new(), CancellationToken::new())
+        .await;
+    assert!(
+        matches!(result, Err(BackendError::OutcomeUnknown(_))),
+        "{result:?}"
+    );
+    backend
+        .call_tool("fast", Map::new(), CancellationToken::new())
+        .await?;
+    assert_eq!(logged_tools(&log)?, ["hang", "fast"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn crash_after_record_is_outcome_unknown_then_not_connected() -> TestResult {
+    let (backend, log) = fault_backend("crash", Duration::from_secs(10)).await?;
+    let result = backend
+        .call_tool("crash", Map::new(), CancellationToken::new())
+        .await;
+    assert!(
+        matches!(result, Err(BackendError::OutcomeUnknown(_))),
+        "{result:?}"
+    );
+    // The server recorded the call before exiting: the write may have happened.
+    assert_eq!(logged_tools(&log)?, ["crash"]);
+    let next = backend
+        .call_tool("fast", Map::new(), CancellationToken::new())
+        .await;
+    assert_eq!(next, Err(BackendError::NotConnected));
+    Ok(())
+}
+
+#[tokio::test]
+async fn crash_before_response_is_not_logged() -> TestResult {
+    let (backend, log) = fault_backend("early", Duration::from_secs(10)).await?;
+    let result = backend
+        .call_tool("early", Map::new(), CancellationToken::new())
+        .await;
+    assert!(
+        matches!(result, Err(BackendError::OutcomeUnknown(_))),
+        "{result:?}"
+    );
+    // The server exited before recording the call.
+    assert!(logged_tools(&log)?.is_empty());
+    assert!(!backend.is_connected());
+    Ok(())
+}
+
+#[tokio::test]
+async fn malformed_response_is_outcome_unknown() -> TestResult {
+    let (backend, log) = fault_backend("malformed", Duration::from_millis(500)).await?;
+    let result = backend
+        .call_tool("malformed", Map::new(), CancellationToken::new())
+        .await;
+    assert!(
+        matches!(result, Err(BackendError::OutcomeUnknown(_))),
+        "{result:?}"
+    );
+    // rmcp skips the line that is not JSON-RPC; the session stays up and the call times out.
+    assert!(backend.is_connected());
+    assert_eq!(logged_tools(&log)?, ["malformed"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn oversized_result_is_returned_unbounded() -> TestResult {
+    let (backend, _log) = fault_backend("oversized", Duration::from_secs(10)).await?;
+    let output = backend
+        .call_tool("oversized", Map::new(), CancellationToken::new())
+        .await?;
+    match output.content.as_slice() {
+        [ToolContent::Text { text }] => assert_eq!(text.len(), 1_048_576),
+        other => return Err(format!("unexpected content {other:?}").into()),
+    }
+    Ok(())
+}

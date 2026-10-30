@@ -829,7 +829,6 @@ dependencies = [
  "igor-provider-http",
  "reqwest",
  "serde_json",
- "thiserror",
  "tokio",
 ]
 
@@ -841,6 +840,7 @@ dependencies = [
  "igor-core",
  "reqwest",
  "serde_json",
+ "thiserror",
  "tokio",
 ]
 
@@ -854,7 +854,6 @@ dependencies = [
  "igor-provider-http",
  "reqwest",
  "serde_json",
- "thiserror",
  "tokio",
 ]
 

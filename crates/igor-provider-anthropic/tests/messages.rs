@@ -8,22 +8,17 @@ use std::time::Duration;
 
 use igor_config::Secret;
 use igor_core::CancellationToken;
-use igor_core::provider::{
-    ContentBlock, Message, ModelRequest, Provider, ProviderError, ProviderErrorKind, Role,
-    StopReason,
-};
+use igor_core::provider::{ContentBlock, Message, Provider, ProviderErrorKind, Role, StopReason};
 use igor_provider_anthropic::{
     API_VERSION, AnthropicProvider, AnthropicSettings, MAX_RESPONSE_BYTES,
 };
 use igor_provider_http::stub::{
-    Reply, Stub, check_cancellation_aborts_an_in_flight_request, check_hanging_server_times_out,
-    fixture, ok, sample_request, status,
+    Reply, SENTINEL_KEY, Stub, check_cancellation_aborts_an_in_flight_request,
+    check_hanging_server_times_out, complete_once, fixture, ok, sample_request, status,
 };
 use serde_json::{Value, json};
 
 type TestResult = Result<(), Box<dyn Error>>;
-
-const SENTINEL_KEY: &str = "IGOR-TEST-SECRET-7f3a";
 
 const DIR: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -33,31 +28,12 @@ fn provider(base_url: &str, timeout: Duration) -> Result<AnthropicProvider, Box<
     Ok(AnthropicProvider::new(settings)?)
 }
 
-fn request() -> ModelRequest {
-    sample_request()
-}
-
-fn provider_for(base_url: &str, timeout: Duration) -> Result<AnthropicProvider, Box<dyn Error>> {
-    provider(base_url, timeout)
-}
-
-async fn complete_once(reply: Reply) -> Result<Result<StopReason, ProviderError>, Box<dyn Error>> {
-    let stub = Stub::start(vec![reply]).await?;
-    let provider = provider(&stub.base_url, Duration::from_secs(5))?;
-    let result = provider
-        .complete(request(), CancellationToken::new())
-        .await
-        .map(|response| response.stop_reason);
-    stub.abort();
-    Ok(result)
-}
-
 #[tokio::test]
 async fn text_turn_round_trip_sends_headers_and_body() -> TestResult {
     let stub = Stub::start(vec![ok(DIR, "text_turn.json")]).await?;
     let provider = provider(&stub.base_url, Duration::from_secs(5))?;
     let response = provider
-        .complete(request(), CancellationToken::new())
+        .complete(sample_request(), CancellationToken::new())
         .await?;
     assert_eq!(response.stop_reason, StopReason::EndTurn);
     assert_eq!(
@@ -89,7 +65,7 @@ async fn several_tool_calls_in_one_turn_drop_thinking_blocks() -> TestResult {
     let provider = provider(&stub.base_url, Duration::from_secs(5))?;
 
     let first = provider
-        .complete(request(), CancellationToken::new())
+        .complete(sample_request(), CancellationToken::new())
         .await?;
     assert_eq!(first.stop_reason, StopReason::ToolUse);
     let calls: Vec<(&str, &Value)> = first
@@ -116,7 +92,7 @@ async fn several_tool_calls_in_one_turn_drop_thinking_blocks() -> TestResult {
     assert_eq!(first.content.len(), 3, "thinking block is not exposed");
 
     // The session sends the assistant turn back unchanged, plus the tool results.
-    let mut next = request();
+    let mut next = sample_request();
     next.messages.push(Message {
         role: Role::Assistant,
         content: first.content.clone(),
@@ -156,10 +132,13 @@ async fn several_tool_calls_in_one_turn_drop_thinking_blocks() -> TestResult {
 
 #[tokio::test]
 async fn cut_off_error_body_keeps_its_status() -> TestResult {
-    let result = complete_once(Reply::Truncated {
-        status: 401,
-        body: r#"{"type":"error","error":{"#.into(),
-    })
+    let result = complete_once(
+        &provider,
+        Reply::Truncated {
+            status: 401,
+            body: r#"{"type":"error","error":{"#.into(),
+        },
+    )
     .await?;
     let err = result.err().ok_or("expected an error")?;
     assert_eq!(
@@ -171,11 +150,14 @@ async fn cut_off_error_body_keeps_its_status() -> TestResult {
 
 #[tokio::test]
 async fn oversized_error_body_keeps_its_status() -> TestResult {
-    let result = complete_once(Reply::Http {
-        status: 429,
-        headers: vec![("retry-after", "5")],
-        body: "<html>".repeat(MAX_RESPONSE_BYTES / 6 + 1),
-    })
+    let result = complete_once(
+        &provider,
+        Reply::Http {
+            status: 429,
+            headers: vec![("retry-after", "5")],
+            body: "<html>".repeat(MAX_RESPONSE_BYTES / 6 + 1),
+        },
+    )
     .await?;
     let err = result.err().ok_or("expected an error")?;
     assert_eq!(err.kind, ProviderErrorKind::RateLimited);
@@ -232,7 +214,7 @@ async fn http_errors_map_to_core_errors() -> TestResult {
         ),
     ];
     for (reply, kind, retryable, text) in cases {
-        let err = complete_once(reply)
+        let err = complete_once(&provider, reply)
             .await?
             .err()
             .ok_or("expected an error")?;
@@ -244,12 +226,12 @@ async fn http_errors_map_to_core_errors() -> TestResult {
 
 #[tokio::test]
 async fn hanging_server_times_out() -> TestResult {
-    check_hanging_server_times_out(&provider_for).await
+    check_hanging_server_times_out(&provider).await
 }
 
 #[tokio::test]
 async fn cancellation_aborts_an_in_flight_request() -> TestResult {
-    check_cancellation_aborts_an_in_flight_request(&provider_for).await
+    check_cancellation_aborts_an_in_flight_request(&provider).await
 }
 
 #[tokio::test]
@@ -258,7 +240,7 @@ async fn already_cancelled_request_is_not_sent() -> TestResult {
     let provider = provider(&stub.base_url, Duration::from_secs(5))?;
     let cancel = CancellationToken::new();
     cancel.cancel();
-    let err = provider.complete(request(), cancel).await.err();
+    let err = provider.complete(sample_request(), cancel).await.err();
     assert_eq!(err.map(|e| e.kind), Some(ProviderErrorKind::Cancelled));
     assert_eq!(stub.accepted(), 0, "nothing was sent");
     stub.abort();
@@ -269,11 +251,14 @@ async fn already_cancelled_request_is_not_sent() -> TestResult {
 async fn redirects_are_not_followed() -> TestResult {
     // If the redirect were followed, the key would go to the redirect target (nothing listens
     // there, so the error would be a transport failure instead of the 307).
-    let result = complete_once(Reply::Http {
-        status: 307,
-        headers: vec![("location", "http://127.0.0.1:9/v1/messages")],
-        body: "{}".into(),
-    })
+    let result = complete_once(
+        &provider,
+        Reply::Http {
+            status: 307,
+            headers: vec![("location", "http://127.0.0.1:9/v1/messages")],
+            body: "{}".into(),
+        },
+    )
     .await?;
     let err = result.err().ok_or("expected an error")?;
     assert_eq!(err.kind, ProviderErrorKind::InvalidRequest);
@@ -286,11 +271,14 @@ async fn api_key_never_appears_in_errors() -> TestResult {
     let echo = format!(
         r#"{{"type":"error","error":{{"type":"authentication_error","message":"bad key {SENTINEL_KEY}"}}}}"#
     );
-    let err = complete_once(Reply::Http {
-        status: 401,
-        headers: Vec::new(),
-        body: echo,
-    })
+    let err = complete_once(
+        &provider,
+        Reply::Http {
+            status: 401,
+            headers: Vec::new(),
+            body: echo,
+        },
+    )
     .await?
     .err()
     .ok_or("expected an error")?;

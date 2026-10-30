@@ -8,9 +8,16 @@ use rmcp::model::{
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler};
+use tokio::io::AsyncWriteExt;
 
 use crate::call_log::CallLog;
-use crate::fixture::{Fixture, MatchKind, unrecorded_message};
+use crate::fixture::{Fixture, MatchKind, Response, unrecorded_message};
+
+/// Exit status of the process after a `crash_before_response` or `crash_after_record` fault.
+pub(crate) const CRASH_EXIT_CODE: i32 = 3;
+
+/// Line written to stdout by the `malformed_response` fault. It is not JSON.
+pub(crate) const MALFORMED_LINE: &[u8] = b"{this is not json-rpc\n";
 
 /// Newest MCP protocol revision the fixture server negotiates. It is the newest revision that
 /// still has an `initialize` handshake.
@@ -60,6 +67,9 @@ impl ServerHandler for FixtureServer {
         let lookup = self
             .fixture
             .lookup(&request.name, request.arguments.as_ref());
+        if let Some(Response::CrashBeforeLog) = lookup.recorded.map(|r| &r.response) {
+            std::process::exit(CRASH_EXIT_CODE);
+        }
         if let Some(log) = &self.call_log {
             log.record(&request.name, &lookup.canonical_arguments, lookup.kind)
                 .await
@@ -80,7 +90,7 @@ impl ServerHandler for FixtureServer {
                         }
                     }
                 }
-                Ok(recorded.result.clone().into())
+                respond(&recorded.response).await
             }
             (_, None) => Ok(
                 CallToolResult::error(vec![ContentBlock::text(unrecorded_message(
@@ -89,6 +99,31 @@ impl ServerHandler for FixtureServer {
                 ))])
                 .into(),
             ),
+        }
+    }
+}
+
+/// Sends a recorded response or applies a protocol-level fault.
+async fn respond(response: &Response) -> Result<CallToolResponse, ErrorData> {
+    match response {
+        Response::Result(result) => Ok(result.clone().into()),
+        Response::Hang => std::future::pending().await,
+        // Handled in `call_tool` before the call is logged.
+        Response::CrashBeforeLog => std::process::exit(CRASH_EXIT_CODE),
+        // The call log was flushed before this point, so the call is recorded.
+        Response::CrashAfterRecord => std::process::exit(CRASH_EXIT_CODE),
+        Response::Malformed => {
+            // Written through the process's stdout, the MCP transport. A whole line is written
+            // while the client waits for this response, so it is not interleaved with a frame.
+            let mut stdout = tokio::io::stdout();
+            let written = async {
+                stdout.write_all(MALFORMED_LINE).await?;
+                stdout.flush().await
+            };
+            written
+                .await
+                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+            std::future::pending().await
         }
     }
 }

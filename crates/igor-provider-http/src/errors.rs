@@ -87,6 +87,12 @@ pub fn transport_error(err: &reqwest::Error, secret: &str) -> ProviderError {
     }
 }
 
+/// Scrubs `secret` from an adapter's own error and bounds its message, keeping kind and
+/// retryability.
+pub fn scrub(err: ProviderError, secret: &str) -> ProviderError {
+    error(err.kind, err.retryable, &err.message, secret)
+}
+
 /// A successful response the adapter cannot understand. Not retryable.
 pub fn malformed(message: String) -> ProviderError {
     ProviderError {

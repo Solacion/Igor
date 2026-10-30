@@ -70,12 +70,31 @@ impl MatchKind {
     }
 }
 
+/// Largest `oversized_result` a fixture may request, in bytes (64 MiB).
+pub(crate) const MAX_OVERSIZED_RESULT_BYTES: usize = 64 * 1024 * 1024;
+
+/// What the server does for a matched call.
+#[derive(Debug, Clone)]
+pub(crate) enum Response {
+    /// Return this `tools/call` result.
+    Result(CallToolResult),
+    /// Never respond (`hang` fault).
+    Hang,
+    /// Exit the process before the call is logged (`crash_before_response` fault).
+    CrashBeforeLog,
+    /// Exit the process without responding (`crash_after_record` fault).
+    CrashAfterRecord,
+    /// Write a line that is not JSON-RPC instead of a response, then never respond
+    /// (`malformed_response` fault).
+    Malformed,
+}
+
 /// A recorded response, with its fault already applied.
 #[derive(Debug, Clone)]
 pub(crate) struct Recorded {
-    /// Result returned to the client.
-    pub result: CallToolResult,
-    /// Delay before the result is returned (`delay_ms` fault).
+    /// What to send back.
+    pub response: Response,
+    /// Delay before the response (`delay_ms` fault).
     pub delay: Option<Duration>,
 }
 
@@ -142,12 +161,21 @@ enum Arguments {
     Wildcard(String),
 }
 
-/// Faults supported by this version. Unknown fault names are rejected at load time.
+/// Supported faults. Unknown fault names are rejected at load time.
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct Fault {
     delay_ms: Option<u64>,
     tool_error: Option<String>,
+    oversized_result: Option<usize>,
+    #[serde(default)]
+    hang: bool,
+    #[serde(default)]
+    crash_before_response: bool,
+    #[serde(default)]
+    crash_after_record: bool,
+    #[serde(default)]
+    malformed_response: bool,
 }
 
 impl Fixture {
@@ -261,22 +289,49 @@ fn recorded_response(
     result: Option<CallToolResult>,
     fault: Fault,
 ) -> Result<Recorded, FixtureError> {
-    let result = match (result, fault.tool_error) {
-        (Some(result), None) => result,
-        (None, Some(message)) => CallToolResult::error(vec![ContentBlock::text(message)]),
-        (Some(_), Some(_)) => {
+    let mut responses = Vec::new();
+    if let Some(result) = result {
+        responses.push(Response::Result(result));
+    }
+    if let Some(message) = fault.tool_error {
+        responses.push(Response::Result(CallToolResult::error(vec![
+            ContentBlock::text(message),
+        ])));
+    }
+    if let Some(bytes) = fault.oversized_result {
+        if bytes > MAX_OVERSIZED_RESULT_BYTES {
             return Err(FixtureError::Invalid(format!(
-                "calls[{index}] has both result and fault.tool_error; use one"
+                "calls[{index}].fault.oversized_result exceeds {MAX_OVERSIZED_RESULT_BYTES} bytes"
             )));
         }
-        (None, None) => {
+        responses.push(Response::Result(CallToolResult::success(vec![
+            ContentBlock::text("x".repeat(bytes)),
+        ])));
+    }
+    if fault.hang {
+        responses.push(Response::Hang);
+    }
+    if fault.crash_before_response {
+        responses.push(Response::CrashBeforeLog);
+    }
+    if fault.crash_after_record {
+        responses.push(Response::CrashAfterRecord);
+    }
+    if fault.malformed_response {
+        responses.push(Response::Malformed);
+    }
+    let response = match <[Response; 1]>::try_from(responses) {
+        Ok([response]) => response,
+        Err(_) => {
             return Err(FixtureError::Invalid(format!(
-                "calls[{index}] needs a result or fault.tool_error"
+                "calls[{index}] needs exactly one of result, fault.tool_error, \
+fault.oversized_result, fault.hang, fault.crash_before_response, fault.crash_after_record \
+or fault.malformed_response"
             )));
         }
     };
     Ok(Recorded {
-        result,
+        response,
         delay: fault.delay_ms.map(Duration::from_millis),
     })
 }
@@ -348,7 +403,10 @@ mod tests {
         );
         let other = f.lookup("lookup", args(json!({ "a": 2 })).as_ref());
         assert_eq!(other.kind, MatchKind::Fallback);
-        assert_eq!(other.recorded.and_then(|r| r.result.is_error), Some(true));
+        assert!(matches!(
+            other.recorded.map(|r| &r.response),
+            Some(Response::Result(result)) if result.is_error == Some(true)
+        ));
         Ok(())
     }
 
@@ -378,10 +436,46 @@ mod tests {
                 { "tool": "lookup", "arguments": "*", "result": { "content": [] } },
                 { "tool": "lookup", "arguments": "*", "result": { "content": [] } }
             ]),
+            json!([{ "tool": "lookup", "arguments": {},
+                     "fault": { "hang": true, "crash_after_record": true } }]),
+            json!([{ "tool": "lookup", "arguments": {}, "fault": { "explode": true } }]),
+            json!([{ "tool": "lookup", "arguments": {},
+                     "fault": { "oversized_result": MAX_OVERSIZED_RESULT_BYTES + 1 } }]),
         ];
         for calls in cases {
             assert!(fixture(calls.clone()).is_err(), "should reject {calls}");
         }
+    }
+
+    #[test]
+    fn parses_each_fault() -> Result<(), FixtureError> {
+        let f = fixture(json!([
+            { "tool": "lookup", "arguments": { "f": "hang" }, "fault": { "hang": true } },
+            { "tool": "lookup", "arguments": { "f": "early" }, "fault": { "crash_before_response": true } },
+            { "tool": "lookup", "arguments": { "f": "crash" }, "fault": { "crash_after_record": true } },
+            { "tool": "lookup", "arguments": { "f": "bad" }, "fault": { "malformed_response": true } },
+            { "tool": "lookup", "arguments": { "f": "big" }, "fault": { "oversized_result": 10 } }
+        ]))?;
+        let response = |name: &str| {
+            f.lookup("lookup", args(json!({ "f": name })).as_ref())
+                .recorded
+                .map(|r| r.response.clone())
+        };
+        assert!(matches!(response("hang"), Some(Response::Hang)));
+        assert!(matches!(response("early"), Some(Response::CrashBeforeLog)));
+        assert!(matches!(
+            response("crash"),
+            Some(Response::CrashAfterRecord)
+        ));
+        assert!(matches!(response("bad"), Some(Response::Malformed)));
+        let Some(Response::Result(big)) = response("big") else {
+            return Err(FixtureError::Invalid("oversized_result not parsed".into()));
+        };
+        assert_eq!(
+            serde_json::to_value(&big.content).ok(),
+            Some(json!([{ "type": "text", "text": "xxxxxxxxxx" }]))
+        );
+        Ok(())
     }
 
     #[test]
