@@ -4,8 +4,8 @@
 # resolve against this file's directory. Build the fixture server first:
 #   cargo build -p igor-fixture-server
 #
-# Provisional: the fixture server arguments and read-tool names follow the planned contracts
-# (#25, #27) and will be aligned when those land. `create_draft_order` is agreed.
+# Tool names follow the example contracts. The fixture server reads one fixture file, given
+# relative to the server's working directory (by default this file's directory).
 
 # Local model through LM Studio's OpenAI-compatible server. No API key needed.
 [[providers]]
@@ -26,17 +26,16 @@ api_key = { env = "ANTHROPIC_API_KEY" }
 id = "sales"
 transport = "stdio"
 command = "../target/debug/igor-fixture-server"
-args = ["--fixtures", "fixtures/sales"]
-# The child gets only these variables from IGOR's environment, plus any set in `env`.
-env_allowlist = ["PATH"]
+args = ["--fixture", "../crates/igor-fixture-server/fixtures/sales.json"]
+# The child inherits nothing from IGOR's environment unless listed in `env_allowlist`. The fixture
+# server needs no variables; a bare command such as `node` would need "PATH".
 startup_timeout_ms = 10000
 
 [[servers]]
 id = "weather"
 transport = "stdio"
 command = "../target/debug/igor-fixture-server"
-args = ["--fixtures", "fixtures/weather"]
-env_allowlist = ["PATH"]
+args = ["--fixture", "../crates/igor-fixture-server/fixtures/weather.json"]
 
 # Host classification is the only source of tool permissions. Tools not listed are
 # unclassified: hidden from the model and refused if called.
@@ -46,7 +45,7 @@ get_stock_levels = "read"
 create_draft_order = "write"
 
 [permissions.weather]
-get_weather_forecast = "read"
+get_forecast = "read"
 
 [limits]
 max_iterations = 10
