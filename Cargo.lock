@@ -800,6 +800,7 @@ dependencies = [
 name = "igor-fixture-server"
 version = "0.1.0"
 dependencies = [
+ "jsonschema",
  "rmcp",
  "serde",
  "serde_json",
