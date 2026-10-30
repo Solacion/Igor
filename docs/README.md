@@ -5,6 +5,7 @@
 - [Product and demo specification](specs/igor.md): purpose, scope, requirements and acceptance criteria.
 - [Architecture proposal](specs/architecture.md): boundaries, interfaces and execution flow.
 - [Decisions and open questions](specs/decisions.md): agreed direction, proposals and unresolved choices.
+- [Tool contracts](specs/contracts/README.md): example scenario tools, result shapes, error results and the fixture file format.
 
 ## Planning
 
