@@ -36,25 +36,29 @@ impl ResultSizeLimit {
     /// appends the [`TRUNCATION_MARKER`], so the result is at most [`Self::max_bytes`] long.
     pub fn apply(self, mut text: String) -> BoundedText {
         let original_bytes = text.len();
-        if original_bytes <= self.max_bytes {
-            return BoundedText {
-                text,
-                truncated: false,
-                original_bytes,
-            };
-        }
-        let mut keep = self.max_bytes - TRUNCATION_MARKER.len();
-        while !text.is_char_boundary(keep) {
-            keep -= 1;
-        }
-        text.truncate(keep);
-        text.push_str(TRUNCATION_MARKER);
+        let truncated = truncate_with_marker(&mut text, self.max_bytes, TRUNCATION_MARKER);
         BoundedText {
             text,
-            truncated: true,
+            truncated,
             original_bytes,
         }
     }
+}
+
+/// Cuts `text` at a character boundary and appends `marker` so the result is at most `max_bytes`
+/// long. Returns whether it was cut. `max_bytes` must be at least `marker.len()`; if it is not,
+/// the result is `marker` alone.
+pub(crate) fn truncate_with_marker(text: &mut String, max_bytes: usize, marker: &str) -> bool {
+    if text.len() <= max_bytes {
+        return false;
+    }
+    let mut keep = max_bytes.saturating_sub(marker.len());
+    while !text.is_char_boundary(keep) {
+        keep -= 1;
+    }
+    text.truncate(keep);
+    text.push_str(marker);
+    true
 }
 
 impl Default for ResultSizeLimit {

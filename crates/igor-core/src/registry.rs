@@ -10,11 +10,13 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use jsonschema::Validator;
+use jsonschema::error::ValidationErrorKind;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::canonical::{to_hex, write_canonical, write_string};
+use crate::limits::truncate_with_marker;
 use crate::policy::Classification;
 use crate::provider::ToolSpec;
 use crate::tools::{ToolDescriptor, ToolId};
@@ -31,8 +33,18 @@ const ALIAS_SEPARATOR: &str = "__";
 /// Hex digits of the tool-identity hash appended to an alias that needs disambiguation.
 const ALIAS_HASH_HEX_LEN: usize = 16;
 
+/// Maximum size of a server-supplied tool description sent to the model, in bytes. Longer
+/// descriptions are truncated with [`DESCRIPTION_TRUNCATION_MARKER`].
+pub const MAX_DESCRIPTION_BYTES: usize = 4 * 1024;
+
+/// Marker ending a description cut at [`MAX_DESCRIPTION_BYTES`].
+pub const DESCRIPTION_TRUNCATION_MARKER: &str = "\n[IGOR: description truncated]";
+
 /// Maximum number of schema violations reported for one call.
 const MAX_REPORTED_ARGUMENT_ERRORS: usize = 10;
+
+/// Maximum number of characters of an unknown model-supplied tool name quoted in an error.
+const MAX_QUOTED_NAME_CHARS: usize = MAX_ALIAS_LEN;
 
 /// SHA-256 over the canonical JSON of a tool's server, name, description and input schema.
 ///
@@ -77,7 +89,7 @@ impl RegisteredTool {
         &self.alias
     }
 
-    /// Server-supplied description. Untrusted text.
+    /// Server-supplied description, at most [`MAX_DESCRIPTION_BYTES`]. Untrusted text.
     pub fn description(&self) -> Option<&str> {
         self.description.as_deref()
     }
@@ -136,10 +148,10 @@ pub struct ExcludedTool {
 /// A model's tool call was refused before dispatch.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CallRejection {
-    /// The name matches no alias in this registry. Untrusted model text.
+    /// The name matches no alias in this registry.
     #[error("unknown tool {alias:?}")]
     UnknownTool {
-        /// The name the model used.
+        /// The name the model used, cut to 64 characters plus `…`. Untrusted model text.
         alias: String,
     },
     /// The tool exists but its classification does not allow calls.
@@ -155,16 +167,18 @@ pub enum CallRejection {
     InvalidArguments {
         /// The tool.
         tool: ToolId,
-        /// Schema violations, at most ten.
+        /// Schema violations, at most ten, each naming the argument location and the failed
+        /// schema keyword. Argument values are never included.
         errors: Vec<String>,
     },
 }
 
 /// A tool call that passed alias resolution, the permission check and schema validation.
 ///
-/// Only [`ToolRegistry::prepare_call`] creates one. A [`Classification::Write`] call still needs
-/// operator approval before dispatch.
-#[derive(Debug, Clone, PartialEq)]
+/// Only [`ToolRegistry::prepare_call`] creates one. It is deliberately not `Clone`: one model
+/// call yields at most one dispatch. A [`Classification::Write`] call still needs operator
+/// approval before dispatch.
+#[derive(Debug, PartialEq)]
 pub struct ValidatedCall {
     tool: ToolId,
     classification: Classification,
@@ -311,7 +325,7 @@ impl ToolRegistry {
         let tool = self
             .resolve_alias(alias)
             .ok_or_else(|| CallRejection::UnknownTool {
-                alias: alias.to_owned(),
+                alias: quote_name(alias),
             })?;
         if !tool.classification.is_offered() {
             return Err(CallRejection::NotPermitted {
@@ -323,11 +337,7 @@ impl ToolRegistry {
             .validator
             .iter_errors(&arguments)
             .take(MAX_REPORTED_ARGUMENT_ERRORS)
-            .map(|error| {
-                let path = error.instance_path().as_str();
-                let path = if path.is_empty() { "/" } else { path };
-                format!("{path}: {error}")
-            })
+            .map(|error| describe_violation(&error))
             .collect();
         if !errors.is_empty() {
             return Err(CallRejection::InvalidArguments {
@@ -347,6 +357,34 @@ impl ToolRegistry {
             fingerprint: tool.fingerprint,
             arguments,
         })
+    }
+}
+
+/// Describes a schema violation by location and keyword, without the offending value, which may
+/// be sensitive. For `required`, names the missing property, which comes from the schema.
+fn describe_violation(error: &jsonschema::ValidationError<'_>) -> String {
+    let path = error.instance_path().as_str();
+    let path = if path.is_empty() { "/" } else { path };
+    match error.kind() {
+        ValidationErrorKind::Required { property } => {
+            let name = property
+                .as_str()
+                .map_or_else(|| property.to_string(), quote_name);
+            format!("{path}: missing required property {name:?}")
+        }
+        kind => format!(
+            "{path}: does not satisfy '{}' (schema {})",
+            kind.keyword(),
+            error.schema_path().as_str()
+        ),
+    }
+}
+
+/// Cuts an untrusted name to [`MAX_QUOTED_NAME_CHARS`] characters, marking the cut with `…`.
+fn quote_name(name: &str) -> String {
+    match name.char_indices().nth(MAX_QUOTED_NAME_CHARS) {
+        Some((cut, _)) => format!("{}…", name.get(..cut).unwrap_or(name)),
+        None => name.to_owned(),
     }
 }
 
@@ -451,6 +489,14 @@ fn register(
     }
 
     let fingerprint = fingerprint(&id, description.as_deref(), &canonical_schema);
+    let description = description.map(|mut text| {
+        truncate_with_marker(
+            &mut text,
+            MAX_DESCRIPTION_BYTES,
+            DESCRIPTION_TRUNCATION_MARKER,
+        );
+        text
+    });
     let classification = classes
         .get(&id)
         .copied()
@@ -626,6 +672,77 @@ mod tests {
                 "{case}: {result:?}"
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn argument_errors_do_not_echo_values() -> TestResult {
+        let registry = two_server_registry()?;
+        let secret = "s3cret-value";
+        let cases = [
+            json!({ "sku": 7, "count": secret }),
+            json!({ "sku": "A1", secret: true }),
+            json!({ "count": 1 }),
+        ];
+        for arguments in cases {
+            let Err(CallRejection::InvalidArguments { errors, .. }) =
+                registry.prepare_call("sales__lookup", arguments)
+            else {
+                return Err("expected invalid arguments".into());
+            };
+            let text = errors.join("; ");
+            assert!(!text.contains(secret), "{text}");
+            assert!(!text.contains('7'), "{text}");
+        }
+        let Err(CallRejection::InvalidArguments { errors, .. }) =
+            registry.prepare_call("sales__lookup", json!({ "count": 1 }))
+        else {
+            return Err("expected invalid arguments".into());
+        };
+        assert_eq!(errors, [r#"/: missing required property "sku""#]);
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_tool_names_are_cut_in_errors() -> TestResult {
+        let registry = two_server_registry()?;
+        let long = "x".repeat(1000);
+        let Err(CallRejection::UnknownTool { alias }) = registry.prepare_call(&long, json!({}))
+        else {
+            return Err("expected unknown tool".into());
+        };
+        assert_eq!(alias, format!("{}…", "x".repeat(MAX_QUOTED_NAME_CHARS)));
+        Ok(())
+    }
+
+    #[test]
+    fn long_descriptions_are_truncated_with_a_marker() -> TestResult {
+        let at_limit = id("s", "at_limit")?;
+        let above_limit = id("s", "above_limit")?;
+        let mut fits = descriptor(&at_limit, lookup_schema());
+        fits.description = Some("d".repeat(MAX_DESCRIPTION_BYTES));
+        let mut too_long = descriptor(&above_limit, lookup_schema());
+        too_long.description = Some("d".repeat(MAX_DESCRIPTION_BYTES + 1));
+        let classes = HashMap::from([
+            (at_limit.clone(), Classification::Read),
+            (above_limit.clone(), Classification::Read),
+        ]);
+        let registry = ToolRegistry::build([fits, too_long], &classes);
+
+        let description = |tool: &ToolId| registry.get(tool).and_then(RegisteredTool::description);
+        assert_eq!(
+            description(&at_limit),
+            Some("d".repeat(MAX_DESCRIPTION_BYTES).as_str())
+        );
+        let cut = description(&above_limit).ok_or("missing description")?;
+        assert_eq!(cut.len(), MAX_DESCRIPTION_BYTES);
+        assert!(cut.ends_with(DESCRIPTION_TRUNCATION_MARKER));
+        let specs = registry.tool_specs();
+        assert!(
+            specs
+                .iter()
+                .all(|spec| spec.description.len() <= MAX_DESCRIPTION_BYTES)
+        );
         Ok(())
     }
 
