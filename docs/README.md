@@ -10,6 +10,10 @@
 
 - [Delivery plan](planning/delivery-plan.md): proposed milestones, validation and review process.
 
+## Development
+
+- [Pull request review standards](development/review-standards.md): gated agent code and security reviews.
+
 ## User guides
 
 - [User guide status and intended workflow](user-guides/README.md).
