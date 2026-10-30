@@ -1,6 +1,6 @@
 # Desktop shell preview
 
-This is the first shell slice of [#51](https://github.com/Solacion/Igor/issues/51), not the completed desktop application. It embeds `igor-core`, shows a real read-only IPC connection check and provides a small Vue UI. It does not run conversations, load credentials, connect MCP servers, or send model requests. The terminal MVP remains the priority.
+This is the first shell slice of [#51](https://github.com/Solacion/Igor/issues/51), not the completed desktop application. It embeds `igor-core`, shows a footer readiness indicator backed by read-only IPC and provides a small Vue UI. It does not run conversations, load credentials, connect MCP servers, or send model requests. The terminal MVP remains the priority.
 
 ## Start on macOS
 
@@ -11,7 +11,7 @@ pnpm install --frozen-lockfile
 pnpm run desktop
 ```
 
-The command starts Vite on loopback port 1420 and opens the native Tauri window. The first run downloads/builds Tauri's Rust dependencies and needs network access. Click **Check connection** to repeat the local read-only check. Models and tools correctly remain “Not connected yet”.
+The command starts Vite on loopback port 1420 and opens the native Tauri window. The first run downloads/builds Tauri's Rust dependencies and needs network access. A green circle and **Ready** in the footer appear after the local read-only check passes. This indicates that the embedded desktop backend is ready, not that a model or MCP server is connected. An unavailable backend shows a retry action; there is no separate connection card.
 
 Opening just the frontend in a browser cannot access native IPC; the UI explains that it needs the native window rather than simulating a successful connection. Close the native window or press Ctrl+C in the launch terminal to stop the preview.
 
