@@ -24,6 +24,7 @@
 
 ## User guides
 
+- [Desktop shell preview](user-guides/desktop.md): local startup and current limits.
 - [User guide status and intended workflow](user-guides/README.md).
 
 Specifications describe intended behaviour, not existing capabilities. Update the relevant specification when an approved decision changes scope. Add operational instructions only once they can be verified against a working implementation.

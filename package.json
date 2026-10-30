@@ -8,7 +8,10 @@
     "verify": "bash scripts/verify.sh",
     "docs": "vitepress dev docs --host 127.0.0.1",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs --host 127.0.0.1"
+    "docs:preview": "vitepress preview docs --host 127.0.0.1",
+    "desktop": "pnpm --filter @igor/desktop tauri dev",
+    "desktop:check": "pnpm --filter @igor/desktop check",
+    "desktop:build": "pnpm --filter @igor/desktop tauri build --debug --ci"
   },
   "devDependencies": {
     "vitepress": "1.6.4"
