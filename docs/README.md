@@ -16,6 +16,12 @@
 - [Pull request review standards](development/review-standards.md): gated agent code and security reviews.
 - [Workspace](development/workspace.md): crates, dependency rules and local checks.
 
+## Verification
+
+- [Prepare and verify a checkout](user-guides/verification.md).
+- [Foundation verification, 30 October 2026](verification/2026-10-30-foundation-checks.md): actual local results and limitations.
+- [Verification record template](verification/run-template.md): separate automated, manual and live-provider evidence.
+
 ## User guides
 
 - [User guide status and intended workflow](user-guides/README.md).
