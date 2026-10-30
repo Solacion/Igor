@@ -37,3 +37,5 @@ These apply to every tool in every contract.
 **Protocol errors.** An unknown tool name or malformed request is a JSON-RPC error (`-32602` for an unknown tool), as for any MCP server.
 
 **Untrusted content.** Descriptions, messages and every result field are untrusted data. Hosts render them as text and never follow instructions found in them.
+
+- [Desktop session bridge](desktop-sessions.md): native IPC, events, approvals and lifecycle.

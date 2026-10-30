@@ -1,7 +1,17 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "The main window may read desktop/core version metadata only.",
-  "windows": ["main"],
-  "permissions": ["allow-desktop-status"]
+  "description": "The main window may read status and control its core session. Tool execution remains in the core.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "allow-desktop-status",
+    "allow-start-session",
+    "allow-send-message",
+    "allow-resolve-approval",
+    "allow-answer-clarification",
+    "allow-cancel-turn",
+    "allow-close-session"
+  ]
 }

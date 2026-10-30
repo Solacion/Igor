@@ -1,6 +1,80 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod composition;
+mod sessions;
+
+use igor_core::events::{EventEnvelope, TurnOutcome};
+use igor_core::session::EventSink;
 use serde::{Deserialize, Serialize};
+use sessions::{
+    ApprovalRequest, BridgeError, ClarificationRequest, DesktopRuntime, MessageRequest,
+    SessionInfo, SessionRequest, StartRequest,
+};
+use std::sync::Arc;
+use tauri::{Manager, State, ipc::Channel};
+
+struct ChannelSink {
+    channel: Channel<EventEnvelope>,
+    cancel: igor_core::CancellationToken,
+}
+impl EventSink for ChannelSink {
+    fn emit(&self, event: EventEnvelope) {
+        if self.channel.send(event).is_err() {
+            self.cancel.cancel();
+        }
+    }
+}
+
+#[tauri::command]
+async fn start_session(
+    request: StartRequest,
+    events: Channel<EventEnvelope>,
+    runtime: State<'_, Arc<DesktopRuntime>>,
+) -> Result<SessionInfo, BridgeError> {
+    runtime
+        .start(request, |cancel| {
+            Arc::new(ChannelSink {
+                channel: events,
+                cancel,
+            })
+        })
+        .await
+}
+#[tauri::command]
+async fn send_message(
+    request: MessageRequest,
+    runtime: State<'_, Arc<DesktopRuntime>>,
+) -> Result<TurnOutcome, BridgeError> {
+    runtime.send(request).await
+}
+#[tauri::command]
+fn resolve_approval(
+    request: ApprovalRequest,
+    runtime: State<'_, Arc<DesktopRuntime>>,
+) -> Result<(), BridgeError> {
+    runtime.approve(request)
+}
+#[tauri::command]
+fn answer_clarification(
+    request: ClarificationRequest,
+    runtime: State<'_, Arc<DesktopRuntime>>,
+) -> Result<(), BridgeError> {
+    runtime.clarify(request)
+}
+#[tauri::command]
+fn cancel_turn(
+    request: SessionRequest,
+    runtime: State<'_, Arc<DesktopRuntime>>,
+) -> Result<(), BridgeError> {
+    runtime.cancel(request)
+}
+#[tauri::command]
+fn close_session(
+    request: SessionRequest,
+    runtime: State<'_, Arc<DesktopRuntime>>,
+) -> Result<(), BridgeError> {
+    runtime.close(request)
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -33,7 +107,24 @@ fn desktop_status(request: StatusRequest) -> DesktopStatus {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![desktop_status])
+        .manage(Arc::new(DesktopRuntime::default()))
+        .on_window_event(|window, event| {
+            if matches!(
+                event,
+                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
+            ) {
+                window.state::<Arc<DesktopRuntime>>().shutdown();
+            }
+        })
+        .invoke_handler(tauri::generate_handler![
+            desktop_status,
+            start_session,
+            send_message,
+            resolve_approval,
+            answer_clarification,
+            cancel_turn,
+            close_session
+        ])
         .run(tauri::generate_context!())?;
     Ok(())
 }

@@ -41,7 +41,7 @@ jobs:
         run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
       - name: Lint desktop Rust
         run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --locked -- -D warnings
-      - name: Test IPC input and metadata
+      - name: Test session bridge and IPC
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked
       - name: Build macOS application
         run: pnpm --filter @igor/desktop tauri build --debug --ci

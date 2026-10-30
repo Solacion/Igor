@@ -13,12 +13,20 @@ publish = false
 tauri-build = { version = "=2.7.4", features = [] }
 
 [dependencies]
+igor-config = { path = "../../../crates/igor-config" }
+igor-mcp = { path = "../../../crates/igor-mcp" }
+igor-provider-anthropic = { path = "../../../crates/igor-provider-anthropic" }
+igor-provider-openai = { path = "../../../crates/igor-provider-openai" }
+tokio = { version = "1.54.1", features = ["rt", "sync", "time"] }
+thiserror = "2.0.21"
+serde_json = "1.0.154"
 igor-core = { path = "../../../crates/igor-core" }
 serde = { version = "1.0.229", features = ["derive"] }
 tauri = { version = "=2.12.5", features = [] }
 
 [dev-dependencies]
-serde_json = "1.0.154"
+igor-core = { path = "../../../crates/igor-core", features = ["testing"] }
+tokio = { version = "1.54.1", features = ["macros", "rt", "sync", "time"] }
 
 [lints.rust]
 unsafe_code = "forbid"
