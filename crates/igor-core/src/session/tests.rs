@@ -370,6 +370,33 @@ async fn model_request_limit_ends_the_turn() -> TestResult {
 }
 
 #[tokio::test]
+async fn tool_calls_cut_off_at_the_output_limit_are_not_run() -> TestResult {
+    let mut h = harness(vec![ScriptedTurn::respond(ModelResponse {
+        content: vec![tool_use("u1", "sales__lookup", json!({}))],
+        stop_reason: StopReason::MaxTokens,
+    })])?;
+    let (outcome, _) = run(&mut h, "cut off", Operator::default()).await;
+    assert_eq!(
+        outcome,
+        TurnOutcome::LimitReached {
+            limit: LimitKind::OutputTokens
+        }
+    );
+    h.provider.verify()?;
+    assert!(
+        h.sales.calls().is_empty(),
+        "no cut-off call reached the server"
+    );
+    let answered = h.session.messages().last().is_some_and(|m| {
+        m.content.iter().any(|b| {
+            matches!(b, ContentBlock::ToolResult { tool_use_id, is_error: true, .. } if tool_use_id == "u1")
+        })
+    });
+    assert!(answered, "the cut-off call still gets a result");
+    Ok(())
+}
+
+#[tokio::test]
 async fn tool_call_limit_ends_the_turn_without_dispatching_more() -> TestResult {
     let config = SessionConfig {
         max_tool_calls: 1,

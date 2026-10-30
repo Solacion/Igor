@@ -228,6 +228,7 @@ impl CallResult {
 const CANCELLED_NOT_EXECUTED: &str = "Not executed: the turn was cancelled.";
 const TOOL_LIMIT_NOT_EXECUTED: &str =
     "Not executed: the tool-call limit for this request was reached.";
+const OUTPUT_LIMIT_NOT_EXECUTED: &str = "Not executed: the response was cut off at the output-token limit, so the arguments may be incomplete.";
 const DENIED: &str = "Denied by the operator. The action was not executed. Do not retry it unless \
 the operator asks.";
 const INVALIDATED: &str = "Not executed: the approval became invalid because the tool definition \
@@ -347,6 +348,22 @@ impl Session {
                         limit: LimitKind::OutputTokens,
                     },
                     _ => TurnOutcome::Completed,
+                };
+            }
+            if stop_reason == StopReason::MaxTokens {
+                // A response cut off at the output limit may hold truncated arguments: run none of
+                // its calls, but answer each so the conversation stays valid.
+                let results = uses
+                    .into_iter()
+                    .map(|(tool_use_id, _, _)| ContentBlock::ToolResult {
+                        tool_use_id,
+                        content: OUTPUT_LIMIT_NOT_EXECUTED.to_owned(),
+                        is_error: true,
+                    })
+                    .collect();
+                self.push_user_blocks(results);
+                return TurnOutcome::LimitReached {
+                    limit: LimitKind::OutputTokens,
                 };
             }
             if let Some(outcome) = self.run_tool_calls(uses, &mut tool_calls, cancel).await {
