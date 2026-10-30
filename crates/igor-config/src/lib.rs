@@ -120,7 +120,8 @@ pub struct ProviderConfig {
     pub kind: ProviderKind,
     /// Model name sent to the provider.
     pub model: String,
-    /// API base URL (`http` or `https`, without credentials).
+    /// API base URL without credentials: `https`, or plain `http` only for `localhost`,
+    /// `127.0.0.1` or `[::1]`.
     pub base_url: String,
     /// API key reference. Required for [`ProviderKind::Anthropic`].
     pub api_key: Option<SecretRef>,

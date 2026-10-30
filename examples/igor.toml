@@ -31,6 +31,8 @@ args = ["--fixture", "../crates/igor-fixture-server/fixtures/sales.json"]
 # server needs no variables; a bare command such as `node` would need "PATH".
 startup_timeout_ms = 10000
 
+# Not runnable yet: fixtures/weather.json is added by #50. Until then this server exits at
+# startup; the entry is kept so the sample shows the full two-server scenario.
 [[servers]]
 id = "weather"
 transport = "stdio"
