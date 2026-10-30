@@ -11,11 +11,12 @@ IGOR is a planned standalone, embeddable, local-first AI agent runtime. It will 
 - [Architecture proposal](docs/specs/architecture.md)
 - [Decisions and open questions](docs/specs/decisions.md)
 - [Delivery plan](docs/planning/delivery-plan.md)
+- [Pull request review standards](docs/development/review-standards.md)
 - [User guide](docs/user-guides/README.md)
 
 The first milestone is a small, reproducible interview demo of the generic runtime. An example purchasing scenario uses fixture-backed sales and weather MCP servers to show multi-server tool use and human approval.
 
-Specifications live in this repository. Agreed implementation tasks will be tracked manually in GitHub Issues after approval. No issues or implementation work are authorised by these documents alone.
+Specifications live in this repository. The backlog is tracked in [GitHub Issues](https://github.com/Solacion/Igor/issues) as epics, features and user stories. Every pull request into `main` must pass the gated agent code and security reviews.
 
 ## View the docs locally
 
