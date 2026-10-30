@@ -49,7 +49,7 @@ impl SecretRef {
         if value.is_empty() {
             return Err(SecretError::Empty { var: var() });
         }
-        Ok(Secret(value))
+        Ok(Secret::new(value))
     }
 }
 
@@ -58,6 +58,12 @@ impl SecretRef {
 pub struct Secret(String);
 
 impl Secret {
+    /// Wraps a secret value obtained outside configuration, for example in tests or from an
+    /// embedding host. Prefer [`SecretRef::resolve`] for configured secrets.
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
     /// Returns the secret value. Call only where the value is sent to its destination, such as
     /// an HTTP authentication header, and never pass the result to logs, events or errors.
     pub fn expose(&self) -> &str {
