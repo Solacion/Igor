@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The main window may read desktop/core version metadata only.",
+  "windows": ["main"],
+  "permissions": ["allow-desktop-status"]
+}

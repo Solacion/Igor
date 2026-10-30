@@ -24,6 +24,7 @@
 
 ## User guides
 
+- [Desktop shell preview](user-guides/desktop.md): local startup and current limits.
 - [User guide status and intended workflow](user-guides/README.md).
 - [Command-line harness](user-guides/cli.md): run a request headlessly, including the offline scripted demo.
 
