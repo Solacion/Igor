@@ -1,0 +1,24 @@
+{
+  "turns": [
+    {
+      "text": "Checking stock and recent sales.",
+      "tool_calls": [
+        { "id": "t1", "name": "sales__get_stock_levels",
+          "input": { "supplier_id": "supplier-x", "date": "2026-07-13" } },
+        { "id": "t2", "name": "sales__get_sales_history",
+          "input": { "supplier_id": "supplier-x", "from": "2026-07-06", "to": "2026-07-12" } }
+      ]
+    },
+    {
+      "tool_calls": [
+        { "id": "t3", "name": "sales__create_draft_order",
+          "input": {
+            "supplier_id": "supplier-x",
+            "delivery_date": "2026-07-15",
+            "lines": [{ "sku": "COLA-330", "quantity": 12, "rationale": "Hot week ahead." }]
+          } }
+      ]
+    },
+    { "text": "Prepared a draft order for supplier-x. Nothing was sent to the supplier." }
+  ]
+}

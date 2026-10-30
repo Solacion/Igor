@@ -757,6 +757,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "igor-cli"
+version = "0.1.0"
+dependencies = [
+ "igor-config",
+ "igor-core",
+ "igor-mcp",
+ "igor-provider-anthropic",
+ "igor-provider-openai",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "igor-config"
 version = "0.1.0"
 dependencies = [
