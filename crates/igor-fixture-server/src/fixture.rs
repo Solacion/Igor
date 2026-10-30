@@ -100,11 +100,11 @@ struct ToolEntries {
 #[derive(Debug)]
 pub struct Fixture {
     /// Server name reported in `initialize`.
-    pub server_name: String,
+    pub(crate) server_name: String,
     /// Server version reported in `initialize`.
-    pub server_version: String,
+    pub(crate) server_version: String,
     /// Tool definitions returned verbatim by `tools/list`.
-    pub tools: Vec<Tool>,
+    pub(crate) tools: Vec<Tool>,
     entries: HashMap<String, ToolEntries>,
 }
 
@@ -158,22 +158,20 @@ impl Fixture {
             path: display.clone(),
             source,
         })?;
+        Self::parse(&text, display)
+    }
+
+    /// Parses and validates fixture JSON text; `path` labels parse errors.
+    fn parse(text: &str, path: String) -> Result<Self, FixtureError> {
         let file: FixtureFile =
-            serde_json::from_str(&text).map_err(|source| FixtureError::Parse {
-                path: display,
-                source,
-            })?;
+            serde_json::from_str(text).map_err(|source| FixtureError::Parse { path, source })?;
         Self::from_file(file)
     }
 
-    /// Parses and validates fixture JSON text.
-    pub fn from_json(text: &str) -> Result<Self, FixtureError> {
-        let file: FixtureFile =
-            serde_json::from_str(text).map_err(|source| FixtureError::Parse {
-                path: "<inline>".into(),
-                source,
-            })?;
-        Self::from_file(file)
+    /// Parses inline fixture JSON in unit tests.
+    #[cfg(test)]
+    fn from_json(text: &str) -> Result<Self, FixtureError> {
+        Self::parse(text, "<inline>".into())
     }
 
     fn from_file(file: FixtureFile) -> Result<Self, FixtureError> {
