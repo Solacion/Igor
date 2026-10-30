@@ -44,10 +44,11 @@ Both example servers are fixture-backed MCP servers with realistic sample data. 
 8. Require explicit approval before any write-classified tool invocation. Approval must identify the destination and exact proposed action and arguments. Changed arguments require fresh approval.
 9. Refuse denied or unclassified write actions. Model output and tool content cannot grant permissions or approve actions.
 10. Handle connection failures, model errors, invalid tool arguments and missing data visibly, without claiming success or silently repeating writes.
+11. Ask the operator for input when required information is missing or uncertain, such as dates, periods, suppliers or quantities, instead of assuming it.
 
 ### Boundaries
 
-The demo performs no external writes. In the example scenario, it produces a local draft order preview only; it does not submit orders or make payments. The runtime's approval rules still apply to write-classified tools and are verified with deterministic fixtures.
+IGOR may call write-classified tools on MCP servers that support them, only after explicit approval. In the example scenario, the fixture tool `create_draft_order` creates a draft only; the demo submits no orders, makes no payments and changes no external system. Approval rules are verified with deterministic fixtures and shown in the demo.
 
 Production deployment, broad provider compatibility, voice, background scheduling, multi-user access and a full HTTP API are outside the first milestone unless explicitly brought into scope.
 
@@ -59,7 +60,7 @@ Production deployment, broad provider compatibility, voice, background schedulin
 - Give tool operations bounded timeouts and cancellation. Specify safe retry behaviour per operation; never automatically retry a write whose outcome is unknown.
 - Provide reproducible fixtures and a documented verification path that requires no live external services.
 - Serve fixtures through fixture-backed MCP servers, not through test doubles inside the core. Each fixture server implements a defined tool contract (tool names, input schemas and `tools/call` result shapes), so a live server implementing the same contract can replace it through configuration alone.
-- Keep dependencies, configuration examples and startup instructions reproducible. The demo targets macOS; exact commands will be established with the implementation.
+- Keep dependencies, configuration examples and startup instructions reproducible. The demo targets macOS and is due on Tuesday 3 November 2026; exact commands will be established with the implementation.
 
 ## Demo acceptance criteria
 
@@ -71,6 +72,6 @@ Production deployment, broad provider compatibility, voice, background schedulin
 - Automated tests exercise the core boundaries using deterministic fixtures; a documented smoke test covers the desktop workflow.
 - Review evidence records checks run, known limitations and changes made after review.
 
-## Approval boundary
+## Work tracking
 
-This draft authorises no code, GitHub Issues, publication or external writes. Review the open decisions before translating the agreed demo scope into implementation tasks.
+Agreed work is tracked in [GitHub Issues](https://github.com/Solacion/Igor/issues). Each pull request into `main` must pass the gated agent code and security reviews. See [decisions](decisions.md) for accepted choices and the cut order.

@@ -7,10 +7,11 @@ IGOR is currently in planning. There is no installable application or verified s
 1. Open IGOR with the configured model provider and MCP server connections.
 2. Confirm connection status.
 3. Make a request, such as the example "Create an order for supplier X", which uses sales and weather data.
-4. Inspect tool activity, evidence, assumptions and any proposed action preview.
-5. Approve or deny actions that require approval.
+4. Answer any clarifying questions, such as the order date or period; IGOR asks rather than assumes.
+5. Inspect tool activity, evidence, assumptions and the proposed action with its exact arguments.
+6. Approve or deny the action. Write-classified tools run only after explicit approval.
 
-The demo performs no external writes.
+In the demo, the approved action is `create_draft_order`, which creates a draft only and changes no external system. The same flow can be run headlessly with `igor-cli`.
 
 ## Guides to add with the implementation
 

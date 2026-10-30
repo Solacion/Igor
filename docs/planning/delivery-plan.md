@@ -1,6 +1,6 @@
-# Proposed delivery plan
+# Delivery plan
 
-These are planning milestones, not created GitHub Issues. No code work has started.
+The milestones below are tracked as epics, features, user stories and tasks in [GitHub Issues](https://github.com/Solacion/Igor/issues). The interview deadline is Tuesday 3 November 2026; the [cut order](../specs/decisions.md#cut-order-if-time-runs-short) applies if time runs short.
 
 | Milestone | Intended outcome | Completion evidence |
 | --- | --- | --- |
@@ -10,9 +10,9 @@ These are planning milestones, not created GitHub Issues. No code work has start
 | 4. Deliver desktop flow | Ask, inspect recommendation, review draft and approve/deny applicable actions | Recorded manual smoke test and failure-path checks |
 | 5. Prepare interview handoff | Clean setup, demo script, limitations and review evidence | Successful documented reproduction from a clean checkout |
 
-## Implementation process after approval
+## Implementation process
 
-Create GitHub Issues manually from the agreed milestones. Each issue should state the user-visible result, scope, acceptance criteria, dependencies and relevant specification links. Keep tasks small enough for focused implementation and review.
+Each issue should state the user-visible result, scope, acceptance criteria, dependencies and relevant specification links. Keep tasks small enough for focused implementation and review.
 
 Use Claude Code to implement approved tasks. Every pull request into `main` must pass the gated agent code and security reviews described in the [review standards](../development/review-standards.md). Review resulting changes, run relevant checks, record findings and address material defects before considering a task complete. Automation through Oddyseus/n8n is not required.
 
@@ -20,7 +20,7 @@ Use Claude Code to implement approved tasks. Every pull request into `main` must
 
 - Unit tests: tool identity collisions, argument validation, permission defaults, approval binding, denial and cancellation.
 - Integration tests: both MCP servers, provider responses, missing data, timeouts and uncertain write outcomes using controlled fixtures.
-- Desktop smoke test: one complete example scenario plus a denied action and a server failure.
+- Desktop smoke test: one complete example scenario plus a denied action and a server failure, run manually on macOS and recorded under `docs/verification/`.
 - Reproduction check: documented prerequisites, safe sample configuration, exact startup/test steps and expected demo results.
 
 Live-provider checks should be clearly separated from deterministic tests and document any credentials, network access and cost required. Add actual commands and results only when the implementation exists.

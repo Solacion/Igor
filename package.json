@@ -3,6 +3,7 @@
   "private": true,
   "license": "GPL-3.0-only",
   "type": "module",
+  "packageManager": "pnpm@12.11.2",
   "scripts": {
     "docs": "vitepress dev docs --host 127.0.0.1",
     "docs:build": "vitepress build docs",

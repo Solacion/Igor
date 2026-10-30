@@ -20,22 +20,19 @@ Specifications live in this repository. The backlog is tracked in [GitHub Issues
 
 ## View the docs locally
 
-With Node.js 22 or newer, install dependencies once using `npm install`
-(or `pnpm install` / `bun install`). Then run one of:
+With Node.js 22 or newer and pnpm, install dependencies once using
+`pnpm install`. Then run:
 
 ```sh
-npm run docs
 pnpm run docs
-bun run docs
 ```
 
 Open the local URL printed in the terminal. VitePress renders the Markdown
 as HTML and updates the browser automatically when documentation changes.
 Press Ctrl+C to stop. The private development journal is outside the docs site.
 
-Use `npm run docs:build` to generate static HTML in `docs/.vitepress/dist`,
-and `npm run docs:preview` to preview that build (equivalent scripts work
-with pnpm and Bun).
+Use `pnpm run docs:build` to generate static HTML in `docs/.vitepress/dist`,
+and `pnpm run docs:preview` to preview that build.
 
 ## Licence
 

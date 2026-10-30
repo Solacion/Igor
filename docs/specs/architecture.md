@@ -9,7 +9,8 @@ Status: stack agreed (Rust core, Tauri/Vue UI); no implementation exists.
 | Core runtime | Session orchestration, provider interface, tool routing, permissions and approvals | Rust |
 | Desktop application | User conversation, connection status, tool activity and approval UI | Tauri + Vue |
 | Model adapters | Translate provider requests, responses and tool calls into core types | Rust adapters; Anthropic Claude and LM Studio first |
-| MCP client | Connect to multiple servers, discover tools and route validated calls | Transport and library selection pending |
+| MCP client | Connect to multiple servers, discover tools and route validated calls | [`rmcp`](https://crates.io/crates/rmcp); stdio transport for the demo |
+| `igor-cli` | Headless harness over the same session API and events; fallback demo | Rust binary |
 | Optional API | Expose the same runtime to other clients | HTTP; deferred from initial demo |
 | Example MCP servers | Serve sample sales/stock and weather data for the example scenario | Fixture-backed MCP servers; not part of the runtime |
 
@@ -39,14 +40,19 @@ The example scenario's tool contracts are defined in this repository, and its fi
 
 The core cannot tell a fixture server from a live one. Integration tests and the default demo configuration point at fixture servers; a live demo changes only the connection configuration. A contract check validates each server's `tools/list` definitions and sample `tools/call` results against the contract. The same check applies to any live replacement.
 
-## Contracts to settle before implementation
+## Settled for the demo
 
-- Tool-calling behaviour and model defaults for Anthropic Claude and LM Studio, including handling weaker local tool use.
-- MCP transports, server lifecycle and connection configuration.
-- Example scenario tool contracts (tools, input schemas, result shapes, error results) and draft preview format.
-- Fixture file format, argument matching rules and behaviour for unrecorded calls.
-- Approval lifetime, binding to action arguments and cancellation semantics.
-- Session persistence, storage location and credential handling.
+See [decisions](decisions.md): stdio transport with `rmcp`; environment-variable secret references; in-memory sessions with a redacted activity export; host-configured permissions with deny by default; clarification requests instead of assumptions.
+
+## Contracts to settle during implementation
+
+Tracked in the linked issues.
+
+- Default models for Anthropic Claude and LM Studio; LM Studio must support native tool calling (#12, #13, #14).
+- Server lifecycle and connection configuration (#16, #9).
+- Example scenario tool contracts, including `create_draft_order` and date inputs (#25).
+- Fixture file format, argument matching rules and behaviour for unrecorded calls (#27).
+- Approval binding, lifetime and cancellation semantics (#19).
 
 ## Starting core and UI
 
