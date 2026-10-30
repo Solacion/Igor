@@ -59,7 +59,7 @@ impl CallLog {
     /// Appends one record and flushes it.
     ///
     /// Record shape: `{"seq":1,"tool":"…","arguments":{…canonical…},"match":"exact","matched":true}`.
-    pub async fn record(
+    pub(crate) async fn record(
         &self,
         tool: &str,
         canonical_arguments: &str,

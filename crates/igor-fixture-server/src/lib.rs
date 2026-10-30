@@ -7,10 +7,10 @@
 //! The fixture format, matching rules and call log are documented in
 //! `docs/specs/contracts/fixture-format.md`.
 
-pub mod call_log;
-pub mod canonical;
-pub mod fixture;
-pub mod server;
+mod call_log;
+mod canonical;
+mod fixture;
+mod server;
 
 pub use call_log::{CallLog, CallLogError};
 pub use fixture::{Fixture, FixtureError};

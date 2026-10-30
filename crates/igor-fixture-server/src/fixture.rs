@@ -14,7 +14,7 @@ use thiserror::Error;
 use crate::canonical::canonical_object;
 
 /// Literal that marks a per-tool fallback entry in place of an arguments object.
-pub const WILDCARD: &str = "*";
+pub(crate) const WILDCARD: &str = "*";
 
 /// A fixture file failed to load or is inconsistent.
 #[derive(Debug, Error)]
@@ -42,7 +42,7 @@ pub enum FixtureError {
 
 /// How a call was matched against the recorded entries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MatchKind {
+pub(crate) enum MatchKind {
     /// The canonical arguments equal a recorded entry.
     Exact,
     /// No exact entry matched; the tool's `"*"` fallback entry was used.
@@ -72,7 +72,7 @@ impl MatchKind {
 
 /// A recorded response, with its fault already applied.
 #[derive(Debug, Clone)]
-pub struct Recorded {
+pub(crate) struct Recorded {
     /// Result returned to the client.
     pub result: CallToolResult,
     /// Delay before the result is returned (`delay_ms` fault).
@@ -81,7 +81,7 @@ pub struct Recorded {
 
 /// Outcome of looking up a call.
 #[derive(Debug)]
-pub struct Lookup<'a> {
+pub(crate) struct Lookup<'a> {
     /// How the call matched.
     pub kind: MatchKind,
     /// Canonical JSON text of the call's arguments.
@@ -231,7 +231,7 @@ impl Fixture {
     }
 
     /// Finds the recorded response for a call. A missing `arguments` object is treated as `{}`.
-    pub fn lookup(&self, tool: &str, arguments: Option<&Map<String, Value>>) -> Lookup<'_> {
+    pub(crate) fn lookup(&self, tool: &str, arguments: Option<&Map<String, Value>>) -> Lookup<'_> {
         let canonical_arguments = match arguments {
             Some(map) => canonical_object(map),
             None => canonical_object(&Map::new()),
@@ -284,7 +284,7 @@ fn recorded_response(
 }
 
 /// Text of the `isError` result returned for an unrecorded call.
-pub fn unrecorded_message(tool: &str, canonical_arguments: &str) -> String {
+pub(crate) fn unrecorded_message(tool: &str, canonical_arguments: &str) -> String {
     format!("no fixture recorded for tool {tool:?} with arguments {canonical_arguments}")
 }
 

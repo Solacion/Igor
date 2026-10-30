@@ -61,7 +61,7 @@ Unknown fields are rejected, so a typo cannot silently change behaviour. The ser
 
 | Fault | Effect | Status |
 | --- | --- | --- |
-| `"delay_ms": <n>` | Waits `n` milliseconds before returning the result. Combines with `result` or `tool_error`. | Implemented |
+| `"delay_ms": <n>` | Waits `n` milliseconds before returning the result. Combines with `result` or `tool_error`. If the client cancels the request during the wait, the server stops waiting and returns an error. | Implemented |
 | `"tool_error": "<message>"` | Returns `isError: true` with `message` as text, in place of `result`. | Implemented |
 | `hang`, `crash_before_response`, `crash_after_record`, `malformed_response`, `oversized_result` | Protocol-level failures for the core's timeout, disconnect and limit tests. | Planned (#50); rejected as unknown until then |
 

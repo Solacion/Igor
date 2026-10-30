@@ -15,14 +15,14 @@ use serde_json::{Map, Number, Value};
 const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_992.0;
 
 /// Returns the canonical JSON text of `value`.
-pub fn canonical_json(value: &Value) -> String {
+pub(crate) fn canonical_json(value: &Value) -> String {
     let mut out = String::new();
     write_value(&mut out, value);
     out
 }
 
 /// Returns the canonical JSON text of a JSON object, such as tool-call arguments.
-pub fn canonical_object(map: &Map<String, Value>) -> String {
+pub(crate) fn canonical_object(map: &Map<String, Value>) -> String {
     let mut out = String::new();
     write_object(&mut out, map);
     out

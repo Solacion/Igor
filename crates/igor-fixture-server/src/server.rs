@@ -14,7 +14,7 @@ use crate::fixture::{Fixture, MatchKind, unrecorded_message};
 
 /// Newest MCP protocol revision the fixture server negotiates. It is the newest revision that
 /// still has an `initialize` handshake.
-pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::LATEST_WITH_INITIALIZE;
+pub(crate) const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::LATEST_WITH_INITIALIZE;
 
 /// Serves one fixture set over MCP.
 #[derive(Debug)]
