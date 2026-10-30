@@ -209,6 +209,12 @@ mod tests {
     }
 
     #[test]
+    fn server_id_is_validated_when_deserialised() {
+        assert!(serde_json::from_str::<ServerId>(r#""sales""#).is_ok());
+        assert!(serde_json::from_str::<ServerId>(r#""Sales/Tool""#).is_err());
+    }
+
+    #[test]
     fn same_tool_name_on_two_servers_is_distinct() -> Result<(), InvalidServerId> {
         let a = ToolId {
             server: ServerId::new("sales")?,
