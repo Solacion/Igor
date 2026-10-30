@@ -17,5 +17,13 @@ sha2.workspace = true
 thiserror.workspace = true
 tokio-util.workspace = true
 
+[features]
+# Deterministic test support (scripted provider, manual clock). Off by default so the runtime
+# does not ship it; enable from other crates' dev-dependencies.
+testing = []
+
+[dev-dependencies]
+tokio.workspace = true
+
 [lints]
 workspace = true
