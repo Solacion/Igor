@@ -85,8 +85,10 @@ jobs:
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
       REVIEW: ${{ matrix.review }}
       CHECK_NAME: ${{ matrix.check }}
-      REVIEW_DIR: ${{ runner.temp }}/review
     steps:
+      - name: Set review directory
+        run: echo "REVIEW_DIR=$RUNNER_TEMP/review" >> "$GITHUB_ENV"
+
       - name: Create review app token
         id: app
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
