@@ -120,7 +120,8 @@ pub struct ProviderConfig {
     pub kind: ProviderKind,
     /// Model name sent to the provider.
     pub model: String,
-    /// API base URL (`http` or `https`, without credentials).
+    /// API base URL without credentials: `https`, or plain `http` only for `localhost`,
+    /// `127.0.0.1` or `[::1]`.
     pub base_url: String,
     /// API key reference. Required for [`ProviderKind::Anthropic`].
     pub api_key: Option<SecretRef>,
@@ -168,7 +169,7 @@ impl ToolPermissions {
 /// Bounds on agent execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
-    /// Maximum model turns per request.
+    /// Maximum model turns per request; maps to the session's maximum model requests.
     pub max_iterations: u32,
     /// Maximum size of one tool result passed to the model, in bytes.
     pub max_result_bytes: usize,
@@ -177,12 +178,12 @@ pub struct Limits {
 }
 
 impl Limits {
-    /// Default [`Limits::max_iterations`].
-    pub const DEFAULT_MAX_ITERATIONS: u32 = 10;
-    /// Default [`Limits::max_result_bytes`] (32 KiB, matching the `igor-core` result-size default).
-    pub const DEFAULT_MAX_RESULT_BYTES: usize = 32 * 1024;
-    /// Default [`Limits::tool_call_timeout`].
-    pub const DEFAULT_TOOL_CALL_TIMEOUT: Duration = Duration::from_secs(30);
+    /// Default [`Limits::max_iterations`]: the runtime's own default.
+    pub const DEFAULT_MAX_ITERATIONS: u32 = igor_core::session::DEFAULT_MAX_MODEL_REQUESTS;
+    /// Default [`Limits::max_result_bytes`]: the runtime's own default.
+    pub const DEFAULT_MAX_RESULT_BYTES: usize = igor_core::limits::DEFAULT_MAX_RESULT_BYTES;
+    /// Default [`Limits::tool_call_timeout`]: the runtime's own default.
+    pub const DEFAULT_TOOL_CALL_TIMEOUT: Duration = igor_core::session::DEFAULT_TOOL_TIMEOUT;
 }
 
 impl Default for Limits {

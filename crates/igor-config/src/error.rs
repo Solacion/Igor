@@ -98,7 +98,8 @@ pub enum Problem {
     UnknownProviderKind(String),
     /// A provider id is malformed.
     #[error(
-        "invalid provider id {0:?}: use lowercase letters, digits, '-' or '_', starting with a letter, at most 32 characters"
+        "invalid provider id {0:?}: use lowercase letters, digits, '-' or '_', starting with a letter, at most {max} characters",
+        max = crate::validate::MAX_PROVIDER_ID_LEN
     )]
     InvalidProviderId(String),
     /// Two providers share an id.

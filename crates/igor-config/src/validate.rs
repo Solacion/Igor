@@ -44,25 +44,20 @@ pub(crate) fn parse(source: &str, base_dir: &Path, origin: Origin) -> Result<Con
     })
 }
 
-/// Replaces double-quoted values in a parser message, such as the string in
+/// Hides double-quoted values in a parser message, such as the string in
 /// `invalid type: string "...", expected u64`, so a secret typed into the wrong field is not
-/// echoed. Field names, which the parser quotes with backticks, stay visible.
+/// echoed. Everything from the first to the last `"` is replaced as one unit, so escaped quotes
+/// inside a value cannot expose part of it. Field names, which the parser quotes with backticks,
+/// stay visible.
 fn hide_quoted_values(message: &str) -> String {
-    let mut out = String::with_capacity(message.len());
-    let mut parts = message.split('"');
-    if let Some(first) = parts.next() {
-        out.push_str(first);
+    match (message.find('"'), message.rfind('"')) {
+        (Some(first), Some(last)) if first < last => format!(
+            "{}\"[value not shown]\"{}",
+            &message[..first],
+            &message[last + 1..]
+        ),
+        _ => message.to_owned(),
     }
-    let mut inside = true;
-    for part in parts {
-        if inside {
-            out.push_str("\"[value not shown]\"");
-        } else {
-            out.push_str(part);
-        }
-        inside = !inside;
-    }
-    out
 }
 
 fn line_column(source: &str, offset: usize) -> (usize, usize) {
@@ -128,8 +123,17 @@ fn limits(raw: &RawLimits) -> Result<Limits, Invalid> {
     Ok(limits)
 }
 
-fn is_identifier(id: &str) -> bool {
-    ServerId::new(id).is_ok()
+/// Maximum length of a provider id.
+pub(crate) const MAX_PROVIDER_ID_LEN: usize = 32;
+
+/// Provider ids: lowercase ASCII letters, digits, `-` and `_`, starting with a letter, at most
+/// [`MAX_PROVIDER_ID_LEN`] characters.
+fn is_provider_id(id: &str) -> bool {
+    id.len() <= MAX_PROVIDER_ID_LEN
+        && id.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
 fn providers(raw: Vec<RawProvider>) -> Result<Vec<ProviderConfig>, Invalid> {
@@ -138,7 +142,7 @@ fn providers(raw: Vec<RawProvider>) -> Result<Vec<ProviderConfig>, Invalid> {
         .enumerate()
         .map(|(index, raw)| {
             let field = |name: &str| format!("providers[{index}].{name}");
-            if !is_identifier(&raw.id) {
+            if !is_provider_id(&raw.id) {
                 return Err((field("id"), Problem::InvalidProviderId(raw.id)));
             }
             if !seen.insert(raw.id.clone()) {
@@ -179,10 +183,11 @@ fn providers(raw: Vec<RawProvider>) -> Result<Vec<ProviderConfig>, Invalid> {
 }
 
 fn check_base_url(url: &str) -> Result<(), Problem> {
-    let rest = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-        .ok_or(Problem::InvalidUrl("must start with http:// or https://"))?;
+    let (rest, plain_http) = match (url.strip_prefix("https://"), url.strip_prefix("http://")) {
+        (Some(rest), _) => (rest, false),
+        (None, Some(rest)) => (rest, true),
+        (None, None) => return Err(Problem::InvalidUrl("must start with http:// or https://")),
+    };
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
     if authority.is_empty() {
         return Err(Problem::InvalidUrl("missing host"));
@@ -192,7 +197,22 @@ fn check_base_url(url: &str) -> Result<(), Problem> {
             "must not embed credentials; use api_key with an env reference",
         ));
     }
+    // Plain HTTP would send API keys unencrypted, so allow it only for this machine.
+    if plain_http && !is_loopback_host(authority) {
+        return Err(Problem::InvalidUrl(
+            "plain http:// is only allowed for localhost; use https://",
+        ));
+    }
     Ok(())
+}
+
+/// True when `authority` (host with optional port) names this machine.
+fn is_loopback_host(authority: &str) -> bool {
+    let host = match authority.strip_prefix('[') {
+        Some(bracketed) => bracketed.split(']').next().unwrap_or_default(),
+        None => authority.split(':').next().unwrap_or_default(),
+    };
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
 
 fn secret_ref(raw: RawSecret, field: impl FnOnce() -> String) -> Result<SecretRef, Invalid> {
@@ -376,6 +396,14 @@ mod tests {
         assert_eq!(
             hide_quoted_values("missing field `command`"),
             "missing field `command`"
+        );
+    }
+
+    #[test]
+    fn values_with_escaped_quotes_are_hidden_whole() {
+        assert_eq!(
+            hide_quoted_values(r#"invalid type: string "ab\"cd", expected u64"#),
+            r#"invalid type: string "[value not shown]", expected u64"#
         );
     }
 

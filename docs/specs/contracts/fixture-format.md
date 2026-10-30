@@ -1,0 +1,94 @@
+# Fixture file format
+
+Status: implemented by `igor-fixture-server` · issue #49
+
+A fixture server is a real MCP server. It answers `initialize`, `tools/list` and `tools/call` over stdio from one fixture file. It has no clock, randomness or network access in its results: the same fixture file and the same calls always produce the same responses.
+
+## Running
+
+```sh
+cargo run -p igor-fixture-server -- --fixture crates/igor-fixture-server/fixtures/sales.json --call-log /tmp/sales-calls.jsonl
+```
+
+| Flag | Environment variable | Meaning |
+| --- | --- | --- |
+| `--fixture <path>` | `IGOR_FIXTURE_FILE` | Fixture file to serve. Required. |
+| `--call-log <path>` | `IGOR_FIXTURE_CALL_LOG` | JSON Lines call log, created or truncated at start. Optional. |
+
+Flags override environment variables. Stdout carries only MCP messages. An invalid fixture file stops the server at start with a message on stderr and exit status 1.
+
+## File
+
+```json
+{
+  "server": { "name": "igor-fixture-sales", "version": "0.1.0" },
+  "tools": [ { "name": "get_stock_levels", "inputSchema": { "type": "object" } } ],
+  "calls": [
+    {
+      "tool": "get_stock_levels",
+      "arguments": { "supplier_id": "supplier-x", "date": "2026-07-13" },
+      "result": { "content": [ { "type": "text", "text": "…" } ], "structuredContent": { }, "isError": false }
+    },
+    {
+      "tool": "get_stock_levels",
+      "arguments": "*",
+      "result": { "content": [ { "type": "text", "text": "{\"error\":{\"code\":\"no_data\",\"message\":\"…\"}}" } ], "isError": true }
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `server` | Name and version reported in the `initialize` result. |
+| `tools` | Tool definitions returned verbatim by `tools/list`, in MCP shape. |
+| `calls[].tool` | Tool name. Must be listed in `tools`. |
+| `calls[].arguments` | The exact arguments object, or the string `"*"` for the tool's fallback entry. |
+| `calls[].result` | The `tools/call` result returned verbatim, in MCP shape. |
+| `calls[].fault` | Optional fault, see below. |
+
+Unknown fields are rejected, so a typo cannot silently change behaviour. The server also refuses to start when a call names an unlisted tool, two entries for a tool have the same canonical arguments, a tool has more than one `"*"` entry, or an entry has neither or both of `result` and `fault.tool_error`.
+
+## Matching
+
+1. The call's `arguments` (an absent object counts as `{}`) are converted to canonical JSON: object keys sorted, no whitespace, numbers compared by value (`12`, `12.0` and `1.2e1` are equal), as in RFC 8785.
+2. An entry whose canonical `arguments` are equal is used. Schema defaults are not filled in, so extra or missing keys do not match.
+3. Otherwise the tool's `"*"` entry is used, if it has one. Use it only for documented catch-all answers such as a `no_data` error.
+4. Otherwise the call is **unrecorded**. The server returns an `isError: true` result whose text names the tool and canonical arguments. It never invents data.
+5. A tool name that is not in `tools` gets a JSON-RPC error (`-32602`, invalid params), as a live server would return.
+
+## Faults
+
+| Fault | Effect | Status |
+| --- | --- | --- |
+| `"delay_ms": <n>` | Waits `n` milliseconds before returning the result. Combines with `result` or `tool_error`. If the client cancels the request during the wait, the server stops waiting and returns an error. | Implemented |
+| `"tool_error": "<message>"` | Returns `isError: true` with `message` as text, in place of `result`. | Implemented |
+| `hang`, `crash_before_response`, `crash_after_record`, `malformed_response`, `oversized_result` | Protocol-level failures for the core's timeout, disconnect and limit tests. | Planned (#50); rejected as unknown until then |
+
+Example: `"fault": { "delay_ms": 200, "tool_error": "upstream timeout" }`.
+
+## Call log
+
+When a call log is configured, every `tools/call` is appended as one JSON line, written and flushed before the response is sent:
+
+```json
+{"seq":1,"tool":"get_stock_levels","arguments":{"date":"2026-07-13","supplier_id":"supplier-x"},"match":"exact","matched":true}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `seq` | 1-based order in which calls were received. |
+| `tool` | Requested tool name. |
+| `arguments` | Canonical arguments. |
+| `match` | `exact`, `fallback`, `unrecorded` or `unknown_tool`. |
+| `matched` | `true` for `exact` and `fallback`. |
+
+Tests use the log as the server-side record of what was invoked, for example "no call after denial" or "exactly one call for an unknown write outcome". Tests should fail when it contains an unmatched call, so a missing fixture is caught instead of silently degrading an answer.
+
+## Fixture sets
+
+| File | Contract | Covers |
+| --- | --- | --- |
+| `crates/igor-fixture-server/fixtures/sales.json` | [Sales and stock](sales.md) | `supplier-x`: sales 2026-07-06 to 2026-07-12, stock on 2026-07-13; `unknown_supplier` for `supplier-unknown`; `no_data` for anything else; any `create_draft_order` returns `draft-0001` |
+
+The weather fixture set and the contract check follow in #50.

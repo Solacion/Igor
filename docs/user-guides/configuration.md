@@ -14,7 +14,7 @@ Relative paths in the file resolve against the file's directory, made absolute w
 
 ## Sample
 
-[`examples/igor.toml`](https://github.com/Solacion/Igor/blob/main/examples/igor.toml) configures the example scenario. It has two fixture servers, `sales` and `weather`, and needs no credentials to load. A test loads it in CI.
+[`examples/igor.toml`](https://github.com/Solacion/Igor/blob/main/examples/igor.toml) configures the example scenario. It has two fixture servers, `sales` and `weather`, and needs no credentials to load. A test loads it in CI. The weather fixture file is added by [#50](https://github.com/Solacion/Igor/issues/50); until then the `weather` server exits at startup.
 
 ```toml
 [[providers]]
@@ -46,7 +46,7 @@ Each `[[providers]]` entry has the following keys:
 | `id` | yes | Your name for the provider. It must be unique. |
 | `kind` | yes | `anthropic` or `openai_compatible`. LM Studio uses `openai_compatible`. |
 | `model` | yes | Model name sent to the provider. |
-| `base_url` | `openai_compatible` only | An `http` or `https` URL without credentials. For `anthropic`, it defaults to `https://api.anthropic.com`. |
+| `base_url` | `openai_compatible` only | An `https` URL without credentials. Plain `http` is accepted only for `localhost`, `127.0.0.1` or `[::1]`, so keys are never sent unencrypted over a network. For `anthropic`, it defaults to `https://api.anthropic.com`. |
 | `api_key` | `anthropic` only | A secret reference. |
 
 ## Secrets

@@ -43,7 +43,7 @@ jobs:
           # igor-core must not depend on an MCP library, a provider SDK or the desktop UI.
           # Capture the tree first so a cargo failure fails the step instead of passing silently.
           tree=$(cargo tree -p igor-core --edges normal --prefix none --locked)
-          if grep -E '^(rmcp|reqwest|tauri)[ @]' <<< "$tree"; then
+          if grep -E '^(rmcp|reqwest|tauri)([-_][a-z0-9_-]+)?[ @]' <<< "$tree"; then
             echo "::error::igor-core depends on a forbidden crate."
             exit 1
           fi
