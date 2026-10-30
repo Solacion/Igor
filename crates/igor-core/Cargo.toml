@@ -15,6 +15,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
 tokio-util.workspace = true
 
 [features]
@@ -23,7 +24,7 @@ tokio-util.workspace = true
 testing = []
 
 [dev-dependencies]
-tokio.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true
