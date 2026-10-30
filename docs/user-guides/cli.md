@@ -13,7 +13,7 @@ cargo build -p igor-fixture-server -p igor-cli
   "Prepare a draft order for supplier-x for delivery on 2026-07-15."
 ```
 
-The scripted provider replays model turns from [`examples/order-script.json`](../../examples/order-script.json), so the run needs no network or model. It reads stock and sales from the `sales` fixture server and the forecast from the `weather` fixture server, then proposes `create_draft_order`. Answer `y` to approve it. Any other answer, or end of input, denies it and the call is never sent.
+The scripted provider replays model turns from [`examples/order-script.json`](../../examples/order-script.json), so the run needs no network or model. It reads stock and sales from the `sales` fixture server, then proposes `create_draft_order`. Answer `y` to approve it. Any other answer, or end of input, denies it and the call is never sent.
 
 A server that fails to start is reported as unavailable, and the run continues without it.
 

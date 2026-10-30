@@ -95,8 +95,7 @@ Tests use the log as the server-side record of what was invoked, for example "no
 
 | File | Contract | Covers |
 | --- | --- | --- |
-| `crates/igor-fixture-server/fixtures/sales.json` | [Sales and stock](sales.md) | `supplier-x`: sales 2026-07-06 to 2026-07-12, stock on 2026-07-13; `unknown_supplier` for `supplier-unknown`; `no_data` for anything else; any `create_draft_order` returns `draft-0001` |
-| `crates/igor-fixture-server/fixtures/weather.json` | [Weather](weather.md) | `brighton-uk`: a hot week, 2026-07-13 to 2026-07-19, for the periods 13–15, 13–19 and 15–19 July; `hove-uk` 13–15 July with a prompt-injection attempt in a `summary`; `unknown_location` for `location-unknown`; `invalid_period` for brighton-uk 15 to 13 July; `no_forecast` for anything else |
+| `crates/igor-fixture-server/fixtures/sales.json` | [Sales and stock](sales.md) | `supplier-x`: sales 2026-07-06 to 2026-07-12, stock on 2026-07-13; `supplier-z`: stock on 2026-07-13 with a prompt-injection attempt in a product `name`; `unknown_supplier` for `supplier-unknown`; `no_data` for anything else; any `create_draft_order` returns `draft-0001` |
 
 Arguments match exactly, so a period not listed gets the missing-data error even inside the covered range.
 

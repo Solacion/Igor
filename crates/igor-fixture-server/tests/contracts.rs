@@ -189,7 +189,7 @@ fn every_fixture_matches_its_contract() -> TestResult {
         .iter()
         .filter_map(|(path, _)| path.file_name()?.to_str())
         .collect();
-    assert_eq!(names, ["sales.json", "weather.json"]);
+    assert_eq!(names, ["sales.json"]);
     for (fixture_path, contract_path) in pairs {
         let fixture: Value = serde_json::from_str(&std::fs::read_to_string(&fixture_path)?)?;
         let contract = parse_contract(&std::fs::read_to_string(&contract_path)?)?;
@@ -208,48 +208,29 @@ fn every_fixture_matches_its_contract() -> TestResult {
 #[test]
 fn check_reports_contract_violations() -> TestResult {
     let contract = parse_contract(&std::fs::read_to_string(
-        workspace_root().join("docs/specs/contracts/weather.md"),
+        workspace_root().join("docs/specs/contracts/sales.md"),
     )?)?;
     let fixture: Value = serde_json::from_str(&std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/weather.json"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/sales.json"),
     )?)?;
+    assert_eq!(fixture["calls"][2]["result"]["isError"], true);
     let mut broken = fixture.clone();
     broken["tools"][0]["description"] = "changed".into();
-    broken["calls"][0]["arguments"]["location"] = "Not A Slug".into();
-    broken["calls"][0]["result"]["structuredContent"]["units"]["temperature"] = "kelvin".into();
-    broken["calls"][4]["result"]["content"][0]["text"] =
+    broken["calls"][0]["arguments"]["supplier_id"] = "Not A Slug".into();
+    broken["calls"][0]["result"]["structuredContent"]["products"][0]["on_hand"] = "many".into();
+    broken["calls"][2]["result"]["content"][0]["text"] =
         r#"{"error":{"code":"made_up","message":"x"}}"#.into();
     let problems = check_fixture(&broken, &contract);
     for expected in [
         "definition differs",
-        "calls[0] (get_forecast): arguments",
-        "calls[0] (get_forecast): structuredContent",
+        "calls[0] (get_stock_levels): arguments",
+        "calls[0] (get_stock_levels): structuredContent",
         "\"made_up\" is not in the contract",
     ] {
         assert!(
             problems.iter().any(|p| p.contains(expected)),
             "missing {expected:?} in {problems:#?}"
         );
-    }
-    Ok(())
-}
-
-#[test]
-fn weather_forecasts_list_every_day_of_their_period() -> TestResult {
-    let fixture: Value = serde_json::from_str(&std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/weather.json"),
-    )?)?;
-    for call in fixture["calls"].as_array().ok_or("no calls")? {
-        let forecast = &call["result"]["structuredContent"];
-        let Some(days) = forecast["days"].as_array() else {
-            continue;
-        };
-        let dates: Vec<_> = days.iter().filter_map(|d| d["date"].as_str()).collect();
-        assert_eq!(dates.first().copied(), forecast["from"].as_str(), "{call}");
-        assert_eq!(dates.last().copied(), forecast["to"].as_str(), "{call}");
-        assert_eq!(forecast["from"], call["arguments"]["from"], "{call}");
-        assert_eq!(forecast["to"], call["arguments"]["to"], "{call}");
-        assert!(dates.windows(2).all(|w| w[0] < w[1]), "{call}");
     }
     Ok(())
 }

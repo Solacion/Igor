@@ -28,9 +28,9 @@ The demo shows the generic runtime: a selectable model provider, tools from at l
 
 One illustrative scenario exercises the runtime. It is an example of how IGOR could be embedded in an application, not a product requirement, and the runtime contains no knowledge of it.
 
-An operator asks, for example, "Create an order for supplier X". IGOR reads sales and stock data from one MCP server and the weather forecast from another, reasons about likely demand (such as more cold drinks selling in hot weather), explains its recommendation, and prepares a draft order preview for review.
+An operator asks, for example, "Create an order for supplier X". IGOR reads sales and stock data from an MCP server, reasons about likely demand, explains its recommendation, and prepares a draft order preview for review.
 
-Both example servers are fixture-backed MCP servers with realistic sample data. No live retail or weather service is required.
+The example server is a fixture-backed MCP server with realistic sample data, standing in for a point-of-sale server. No live retail service is required.
 
 ### Functional requirements
 
