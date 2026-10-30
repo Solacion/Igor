@@ -12,14 +12,14 @@
 id = "lm_studio"
 kind = "openai_compatible"
 base_url = "http://127.0.0.1:1234/v1"
-model = "local-model" # Replace with a loaded model that supports native tool calling.
+model = "qwen/qwen3-vl-8b" # Demo default: 8B, native tool calling. Load it in LM Studio first.
 
 # Anthropic Claude. The key is read from the environment when the provider is used;
 # it is never written in this file.
 [[providers]]
 id = "claude"
 kind = "anthropic"
-model = "claude-model" # Replace with the demo model (open question in docs/specs/decisions.md).
+model = "claude-haiku-5-5" # Demo default: the cheapest Claude model.
 api_key = { env = "ANTHROPIC_API_KEY" }
 
 [[servers]]

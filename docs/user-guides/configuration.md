@@ -20,7 +20,7 @@ Relative paths in the file resolve against the file's directory, made absolute w
 [[providers]]
 id = "claude"
 kind = "anthropic"            # or "openai_compatible" (LM Studio)
-model = "claude-model"
+model = "claude-haiku-5-5"
 api_key = { env = "ANTHROPIC_API_KEY" }
 
 [[servers]]

@@ -20,6 +20,7 @@
 | Unclassified tools | Denied by default. Host configuration is the only source of permission classification; MCP tool annotations are untrusted hints that can only tighten it. |
 | Clarification | When required information is missing or uncertain (for example the order date or period, supplier or quantities), the agent asks the operator instead of assuming. Dates are operator input, not fixed in fixtures. |
 | Model providers | Anthropic Claude (remote) and LM Studio (local), both behind the provider abstraction. |
+| Demo default models | Claude: `claude-haiku-5-5` (cheapest). LM Studio: `qwen/qwen3-vl-8b` (8B, fast, native tool calling). |
 | MCP transport and library | stdio only for the demo. [`rmcp`](https://crates.io/crates/rmcp), the official Rust MCP SDK (Apache-2.0, compatible with GPL-3.0-only). |
 | Credentials | Environment-variable secret references only for now. macOS Keychain is deferred. |
 | Session persistence | In memory only, plus a redacted activity export. |
@@ -48,6 +49,4 @@ Items 2 to 4 are already outside the accepted demo scope; they are listed so the
 
 ## Open questions
 
-1. Which Claude model and which LM Studio model are the demo defaults? The LM Studio model must support native tool calling.
-
-Record accepted answers here and update affected specifications and issues.
+None at present. Record accepted answers here and update affected specifications and issues.
