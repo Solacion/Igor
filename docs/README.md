@@ -13,6 +13,7 @@
 ## Development
 
 - [Pull request review standards](development/review-standards.md): gated agent code and security reviews.
+- [Workspace](development/workspace.md): crates, dependency rules and local checks.
 
 ## User guides
 
