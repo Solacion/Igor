@@ -1,6 +1,12 @@
 # Pull request review standards
 
-Every pull request into `main` must pass two automated agent reviews before it can merge: a code review and a security review. Both run in [`.github/workflows/agent-review.yml`](../../.github/workflows/agent-review.yml) and read this file from `main`, so a pull request cannot weaken the standards it is reviewed against.
+Every pull request into `main` must pass two automated agent reviews before it can merge: a code review and a security review.
+
+## How the gate works
+
+1. [`agent-review-trigger.yml`](../../.github/workflows/agent-review-trigger.yml) runs on the pull request. It holds no secrets and only records the pull request number.
+2. [`agent-review.yml`](../../.github/workflows/agent-review.yml) runs through `workflow_run`, which always uses the copy on `main`. It verifies the recorded number against the triggering commit, reads these standards from `main`, and reviews the pull request as data: no pull request code, hooks, Claude settings or MCP servers run.
+3. Results are posted as the `Agent code review` and `Agent security review` check runs by the review GitHub App. The `main` ruleset accepts these checks only from that app, so a pull request that edits any workflow cannot produce a passing check.
 
 ## Severity and gating
 
@@ -67,4 +73,8 @@ A review that fails to run, or returns no result, blocks the merge.
 
 ## Review process limits
 
-The agent reviews reduce risk but do not replace human judgement. Treat a pass as necessary, not sufficient. Changes to `.github/` or to this file need a careful human read before merging.
+The agent reviews reduce risk but do not replace human judgement. Treat a pass as necessary, not sufficient.
+
+- Changes to `.github/` or to this file only take effect after they merge, but still need a careful human read before merging.
+- Workflows in pull requests from branches in this repository receive repository secrets. Only grant write access to people you trust; fork pull requests get no secrets and need maintainer approval to run workflows.
+- A new or changed gate is reviewed by the gate already on `main`. The first gate had to be bootstrapped manually.
