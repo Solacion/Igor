@@ -14,6 +14,8 @@ IGOR is a Cargo workspace. The toolchain is pinned in `rust-toolchain.toml`; doc
 
 Crates other than `igor-core` are added by the issues that introduce them.
 
+`igor-core` has a non-default `testing` feature with a scripted model provider and a manual clock for deterministic tests. Enable it only from `[dev-dependencies]` so the runtime does not ship it.
+
 ## Checks
 
 Run before every pull request; CI runs the same on macOS.
