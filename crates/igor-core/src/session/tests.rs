@@ -379,12 +379,13 @@ async fn tool_call_limit_ends_the_turn_without_dispatching_more() -> TestResult 
         vec![tool_uses(vec![
             tool_use("u1", "sales__lookup", json!({})),
             tool_use("u2", "weather__lookup", json!({})),
+            tool_use("u3", "weather__lookup", json!({})),
         ])],
         config,
         Vec::new(),
         Vec::new(),
     )?;
-    let (outcome, _) = run(&mut h, "two calls", Operator::default()).await;
+    let (outcome, _) = run(&mut h, "three calls", Operator::default()).await;
     assert_eq!(
         outcome,
         TurnOutcome::LimitReached {
@@ -394,7 +395,7 @@ async fn tool_call_limit_ends_the_turn_without_dispatching_more() -> TestResult 
     h.provider.verify()?;
     assert_eq!(h.sales.calls().len(), 1);
     assert_eq!(h.weather.calls().len(), 0);
-    let results: Vec<bool> = h
+    let results: Vec<(bool, String)> = h
         .session
         .messages()
         .last()
@@ -402,13 +403,22 @@ async fn tool_call_limit_ends_the_turn_without_dispatching_more() -> TestResult 
             m.content
                 .iter()
                 .filter_map(|b| match b {
-                    ContentBlock::ToolResult { is_error, .. } => Some(*is_error),
+                    ContentBlock::ToolResult {
+                        is_error, content, ..
+                    } => Some((*is_error, content.clone())),
                     _ => None,
                 })
                 .collect()
         })
         .unwrap_or_default();
-    assert_eq!(results, [false, true], "every tool use gets a result");
+    let flags: Vec<bool> = results.iter().map(|(is_error, _)| *is_error).collect();
+    assert_eq!(flags, [false, true, true], "every tool use gets a result");
+    assert!(
+        results[1..]
+            .iter()
+            .all(|(_, content)| content == TOOL_LIMIT_NOT_EXECUTED),
+        "calls after the limit give the limit as the reason: {results:?}"
+    );
     Ok(())
 }
 

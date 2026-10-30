@@ -390,8 +390,8 @@ impl Session {
                 child.cancel();
                 Err(TurnOutcome::Failed {
                     message: format!(
-                        "model request timed out after {} s",
-                        self.config.model_timeout.as_secs()
+                        "model request timed out after {} ms",
+                        self.config.model_timeout.as_millis()
                     ),
                 })
             }
@@ -409,7 +409,10 @@ impl Session {
         let mut results = Vec::with_capacity(uses.len());
         let mut end = None;
         for (tool_use_id, name, input) in uses {
-            let result = if end.is_some() || cancel.is_cancelled() {
+            let result = if let Some(TurnOutcome::LimitReached { .. }) = end {
+                // Report the real reason: later calls in the response hit the same limit.
+                CallResult::error(TOOL_LIMIT_NOT_EXECUTED)
+            } else if end.is_some() || cancel.is_cancelled() {
                 end.get_or_insert(TurnOutcome::Cancelled);
                 CallResult::cancelled(CANCELLED_NOT_EXECUTED)
             } else if *tool_calls >= self.config.max_tool_calls {
