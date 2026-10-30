@@ -14,7 +14,7 @@ These are planning milestones, not created GitHub Issues. No code work has start
 
 Create GitHub Issues manually from the agreed milestones. Each issue should state the user-visible result, scope, acceptance criteria, dependencies and relevant specification links. Keep tasks small enough for focused implementation and review.
 
-Use Claude Code to implement approved tasks. Review resulting changes, run relevant checks, record findings and address material defects before considering a task complete. Automation through Oddyseus/n8n is not required.
+Use Claude Code to implement approved tasks. Every pull request into `main` must pass the gated agent code and security reviews described in the [review standards](../development/review-standards.md). Review resulting changes, run relevant checks, record findings and address material defects before considering a task complete. Automation through Oddyseus/n8n is not required.
 
 ## Planned verification
 

@@ -20,6 +20,7 @@ export default defineConfig({
         ]
       },
       { text: 'Delivery plan', link: '/planning/delivery-plan' },
+      { text: 'Review standards', link: '/development/review-standards' },
       { text: 'User guide', link: '/user-guides/' }
     ],
     search: { provider: 'local' }
