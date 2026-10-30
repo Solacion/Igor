@@ -35,3 +35,8 @@ pnpm run docs:build
 ```
 
 Library code must not use `unwrap`, `expect` or `panic!` (denied by workspace lints), and public items must be documented. Tests may use `?` with a `Result` return type instead.
+
+## Dependency policy
+
+The separate [Rust dependency check](dependencies.md) runs licence and advisory
+checks without model calls. It is intentionally outside offline deterministic verification.
