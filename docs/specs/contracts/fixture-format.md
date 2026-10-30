@@ -47,7 +47,7 @@ Flags override environment variables. Stdout carries only MCP messages. An inval
 | `calls[].result` | The `tools/call` result returned verbatim, in MCP shape. |
 | `calls[].fault` | Optional fault, see below. |
 
-Unknown fields are rejected, so a typo cannot silently change behaviour. The server also refuses to start when a call names an unlisted tool, two entries for a tool have the same canonical arguments, a tool has more than one `"*"` entry, or an entry has neither or both of `result` and `fault.tool_error`.
+Unknown fields are rejected, so a typo cannot silently change behaviour. The server also refuses to start when a call names an unlisted tool, two entries for a tool have the same canonical arguments, a tool has more than one `"*"` entry, or an entry does not have exactly one of `result`, `fault.tool_error`, `fault.oversized_result`, `fault.hang`, `fault.crash_before_response`, `fault.crash_after_record` and `fault.malformed_response`.
 
 ## Matching
 
@@ -63,7 +63,13 @@ Unknown fields are rejected, so a typo cannot silently change behaviour. The ser
 | --- | --- | --- |
 | `"delay_ms": <n>` | Waits `n` milliseconds before returning the result. Combines with `result` or `tool_error`. If the client cancels the request during the wait, the server stops waiting and returns an error. | Implemented |
 | `"tool_error": "<message>"` | Returns `isError: true` with `message` as text, in place of `result`. | Implemented |
-| `hang`, `crash_before_response`, `crash_after_record`, `malformed_response`, `oversized_result` | Protocol-level failures for the core's timeout, disconnect and limit tests. | Planned (#50); rejected as unknown until then |
+| `"oversized_result": <bytes>` | Returns a successful result with one text block of `bytes` characters, in place of `result`. At most 64 MiB. | Implemented |
+| `"hang": true` | Logs the call, then never responds. | Implemented |
+| `"crash_before_response": true` | Exits with status 3 before the call is logged or answered. | Implemented |
+| `"crash_after_record": true` | Logs the call, then exits with status 3 without responding. | Implemented |
+| `"malformed_response": true` | Logs the call, writes a line that is not JSON-RPC to stdout, then never responds. | Implemented |
+
+`delay_ms` combines with any other fault except `crash_before_response`. The protocol-level faults replace `result`.
 
 Example: `"fault": { "delay_ms": 200, "tool_error": "upstream timeout" }`.
 
