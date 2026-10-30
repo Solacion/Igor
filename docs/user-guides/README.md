@@ -11,13 +11,13 @@ IGOR is currently in planning. There is no installable application or verified s
 5. Inspect tool activity, evidence, assumptions and the proposed action with its exact arguments.
 6. Approve or deny the action. Write-classified tools run only after explicit approval.
 
-In the demo, the approved action is `create_draft_order`, which creates a draft only and changes no external system. The same flow can be run headlessly with `igor-cli`.
+In the demo, the approved action is `create_draft_order`, which creates a draft only and changes no external system. The same flow can be run headlessly with [`igor-cli`](cli.md).
 
 ## Guides to add with the implementation
 
 - Installation and supported platforms.
 - MCP-server startup. See [Configuration](configuration.md) for providers, servers, credentials, permissions and limits.
-- Running the reproducible sample demo.
+- Running the reproducible sample demo with the desktop. The headless version is in [Command-line harness](cli.md).
 - Understanding permissions, approvals and local data storage.
 - Troubleshooting unavailable providers, servers and incomplete results.
 

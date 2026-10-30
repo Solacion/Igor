@@ -1,0 +1,25 @@
+[package]
+name = "igor-cli"
+description = "Headless IGOR harness over the core session API; the fallback demo."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# `testing` provides the scripted provider used for offline runs (`--provider scripted`). The
+# CLI is a harness, not the runtime; igor-core itself does not ship the feature.
+igor-core = { path = "../igor-core", features = ["testing"] }
+igor-config = { path = "../igor-config" }
+igor-mcp = { path = "../igor-mcp" }
+igor-provider-anthropic = { path = "../igor-provider-anthropic" }
+igor-provider-openai = { path = "../igor-provider-openai" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-std", "io-util", "signal", "sync"] }
+
+[lints]
+workspace = true

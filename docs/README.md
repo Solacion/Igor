@@ -25,5 +25,6 @@
 ## User guides
 
 - [User guide status and intended workflow](user-guides/README.md).
+- [Command-line harness](user-guides/cli.md): run a request headlessly, including the offline scripted demo.
 
 Specifications describe intended behaviour, not existing capabilities. Update the relevant specification when an approved decision changes scope. Add operational instructions only once they can be verified against a working implementation.
