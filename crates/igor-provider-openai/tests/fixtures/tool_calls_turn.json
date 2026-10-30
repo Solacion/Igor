@@ -1,0 +1,39 @@
+{
+  "id": "chatcmpl-fixture",
+  "object": "chat.completion",
+  "created": 0,
+  "model": "fixture-model",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_fixture_1",
+            "type": "function",
+            "function": {
+              "name": "sales__get_sales_history",
+              "arguments": "{\"supplier\": \"X\", \"from\": \"2026-10-01\", \"to\": \"2026-10-31\"}"
+            }
+          },
+          {
+            "id": "call_fixture_2",
+            "type": "function",
+            "function": {
+              "name": "weather__get_forecast",
+              "arguments": "{\"location\": \"Cape Town\", \"date\": \"2026-11-03\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 100,
+    "completion_tokens": 20,
+    "total_tokens": 120
+  }
+}
