@@ -123,8 +123,17 @@ fn limits(raw: &RawLimits) -> Result<Limits, Invalid> {
     Ok(limits)
 }
 
-fn is_identifier(id: &str) -> bool {
-    ServerId::new(id).is_ok()
+/// Maximum length of a provider id.
+pub(crate) const MAX_PROVIDER_ID_LEN: usize = 32;
+
+/// Provider ids: lowercase ASCII letters, digits, `-` and `_`, starting with a letter, at most
+/// [`MAX_PROVIDER_ID_LEN`] characters.
+fn is_provider_id(id: &str) -> bool {
+    id.len() <= MAX_PROVIDER_ID_LEN
+        && id.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
 fn providers(raw: Vec<RawProvider>) -> Result<Vec<ProviderConfig>, Invalid> {
@@ -133,7 +142,7 @@ fn providers(raw: Vec<RawProvider>) -> Result<Vec<ProviderConfig>, Invalid> {
         .enumerate()
         .map(|(index, raw)| {
             let field = |name: &str| format!("providers[{index}].{name}");
-            if !is_identifier(&raw.id) {
+            if !is_provider_id(&raw.id) {
                 return Err((field("id"), Problem::InvalidProviderId(raw.id)));
             }
             if !seen.insert(raw.id.clone()) {
