@@ -1,4 +1,5 @@
-//! Deterministic test support: a scripted model provider and a manual clock.
+//! Deterministic test support: a scripted model provider, a recording tool backend and a manual
+//! clock.
 //!
 //! Available to other crates through the non-default `testing` feature, so the runtime does not
 //! ship it:
@@ -8,13 +9,13 @@
 //! igor-core = { path = "../igor-core", features = ["testing"] }
 //! ```
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::SystemTime;
 
 use async_trait::async_trait;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::CancellationToken;
@@ -23,6 +24,7 @@ use crate::provider::{
     ContentBlock, ModelRequest, ModelResponse, Provider, ProviderError, ProviderErrorKind,
     StopReason,
 };
+use crate::tools::{BackendError, ServerId, ToolBackend, ToolContent, ToolDescriptor, ToolOutput};
 
 /// Check run against the request a scripted turn receives. Returns a message on failure.
 type RequestCheck = Box<dyn Fn(&ModelRequest) -> Result<(), String> + Send + Sync>;
@@ -269,6 +271,117 @@ impl Clock for ManualClock {
     }
 }
 
+/// How a [`RecordingBackend`] answers calls to one tool.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FakeReply {
+    /// Return this output.
+    Output(ToolOutput),
+    /// Fail with this error.
+    Error(BackendError),
+    /// Wait until cancelled, then fail with [`BackendError::OutcomeUnknown`], like a request
+    /// that reached a server which never answered.
+    Hang,
+}
+
+/// One call received by a [`RecordingBackend`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordedCall {
+    /// Server-local tool name.
+    pub name: String,
+    /// Arguments exactly as received.
+    pub arguments: Map<String, Value>,
+}
+
+/// An in-memory [`ToolBackend`] that records every call it receives, standing in for a server's
+/// call log in core tests.
+///
+/// Unless configured with [`Self::with_reply`], a call returns the text `ok: <tool name>`.
+#[derive(Debug)]
+pub struct RecordingBackend {
+    server: ServerId,
+    tools: Vec<ToolDescriptor>,
+    replies: HashMap<String, FakeReply>,
+    calls: Mutex<Vec<RecordedCall>>,
+}
+
+impl RecordingBackend {
+    /// Creates a backend for `server` that lists no tools.
+    pub fn new(server: ServerId) -> Self {
+        Self {
+            server,
+            tools: Vec::new(),
+            replies: HashMap::new(),
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Sets the tools returned by [`ToolBackend::list_tools`].
+    pub fn with_tools(mut self, tools: Vec<ToolDescriptor>) -> Self {
+        self.tools = tools;
+        self
+    }
+
+    /// Sets how calls to `name` are answered.
+    pub fn with_reply(mut self, name: impl Into<String>, reply: FakeReply) -> Self {
+        self.replies.insert(name.into(), reply);
+        self
+    }
+
+    /// Every call received so far, in order.
+    pub fn calls(&self) -> Vec<RecordedCall> {
+        self.calls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+#[async_trait]
+impl ToolBackend for RecordingBackend {
+    fn server_id(&self) -> &ServerId {
+        &self.server
+    }
+
+    async fn list_tools(&self) -> Result<Vec<ToolDescriptor>, BackendError> {
+        Ok(self.tools.clone())
+    }
+
+    async fn call_tool(
+        &self,
+        name: &str,
+        arguments: Map<String, Value>,
+        cancel: CancellationToken,
+    ) -> Result<ToolOutput, BackendError> {
+        if cancel.is_cancelled() {
+            return Err(BackendError::CancelledBeforeSend);
+        }
+        self.calls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(RecordedCall {
+                name: name.to_owned(),
+                arguments,
+            });
+        match self.replies.get(name) {
+            Some(FakeReply::Output(output)) => Ok(output.clone()),
+            Some(FakeReply::Error(error)) => Err(error.clone()),
+            Some(FakeReply::Hang) => {
+                cancel.cancelled().await;
+                Err(BackendError::OutcomeUnknown(
+                    "cancelled after sending".to_owned(),
+                ))
+            }
+            None => Ok(ToolOutput {
+                content: vec![ToolContent::Text {
+                    text: format!("ok: {name}"),
+                }],
+                structured: None,
+                is_error: false,
+            }),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, UNIX_EPOCH};
@@ -277,6 +390,7 @@ mod tests {
 
     use super::*;
     use crate::provider::{Message, Role};
+    use crate::tools::InvalidServerId;
 
     fn request(text: &str) -> ModelRequest {
         ModelRequest {
@@ -417,6 +531,52 @@ mod tests {
         ));
         assert_eq!(provider.requests().len(), 1);
         assert!(provider.verify().is_err());
+    }
+
+    #[tokio::test]
+    async fn recording_backend_records_calls_and_replies() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let backend = RecordingBackend::new(ServerId::new("sales")?).with_reply(
+            "broken",
+            FakeReply::Error(BackendError::Protocol("unknown tool".to_owned())),
+        );
+        let arguments = json!({ "sku": "A1" })
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        let output = backend
+            .call_tool("lookup", arguments.clone(), CancellationToken::new())
+            .await?;
+        assert_eq!(
+            output.content,
+            [ToolContent::Text {
+                text: "ok: lookup".to_owned()
+            }]
+        );
+        let failed = backend
+            .call_tool("broken", Map::new(), CancellationToken::new())
+            .await;
+        assert!(failed.is_err());
+        let calls = backend.calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].arguments, arguments);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn recording_backend_hang_reports_unknown_outcome() -> Result<(), InvalidServerId> {
+        let backend =
+            RecordingBackend::new(ServerId::new("sales")?).with_reply("slow", FakeReply::Hang);
+        let cancel = CancellationToken::new();
+        let (result, ()) = tokio::join!(
+            backend.call_tool("slow", Map::new(), cancel.clone()),
+            async {
+                cancel.cancel();
+            }
+        );
+        assert!(matches!(result, Err(BackendError::OutcomeUnknown(_))));
+        assert_eq!(backend.calls().len(), 1);
+        Ok(())
     }
 
     #[test]
