@@ -455,8 +455,16 @@ impl Session {
             Err(rejection) => return self.reject(call_id, name, &rejection),
         };
         let permit = match self.gate.admit(call, call_id.clone()) {
-            Admission::Ready(permit) => permit,
-            Admission::ApprovalRequired(request) => {
+            Ok(Admission::Ready(permit)) => permit,
+            Err(error) => {
+                return self.call_failed(
+                    call_id,
+                    CallFailure::NotExecuted,
+                    error.to_string(),
+                    cancel,
+                );
+            }
+            Ok(Admission::ApprovalRequired(request)) => {
                 match self.await_approval(request, cancel).await {
                     Ok(permit) => permit,
                     Err(result) => return result,
