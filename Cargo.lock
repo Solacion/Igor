@@ -266,6 +266,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "igor-mcp"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "igor-core",
+ "rmcp",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
