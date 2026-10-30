@@ -12,10 +12,13 @@ use std::time::Duration;
 use igor_config::Secret;
 use igor_core::CancellationToken;
 use igor_core::provider::{
-    ContentBlock, Message, ModelRequest, ModelResponse, Provider, ProviderError, ProviderErrorKind,
-    Role, StopReason, ToolSpec,
+    ContentBlock, ModelRequest, ModelResponse, Provider, ProviderError, ProviderErrorKind,
+    StopReason,
 };
-use igor_provider_http::stub::{Reply, Stub, ok, status};
+use igor_provider_http::stub::{
+    Reply, Stub, check_cancellation_aborts_an_in_flight_request, check_hanging_server_times_out,
+    ok, sample_request, status,
+};
 use igor_provider_openai::{OpenAiCompatibleProvider, OpenAiSettings};
 use serde_json::{Value, json};
 
@@ -37,21 +40,14 @@ fn provider(
 }
 
 fn request() -> ModelRequest {
-    ModelRequest {
-        system: "Ask before assuming dates.".into(),
-        messages: vec![Message {
-            role: Role::User,
-            content: vec![ContentBlock::Text {
-                text: "Create an order for supplier X".into(),
-            }],
-        }],
-        tools: vec![ToolSpec {
-            name: "sales__get_stock_levels".into(),
-            description: "Stock levels".into(),
-            input_schema: json!({ "type": "object" }),
-        }],
-        max_tokens: 2048,
-    }
+    sample_request()
+}
+
+fn provider_for(
+    base_url: &str,
+    timeout: Duration,
+) -> Result<OpenAiCompatibleProvider, Box<dyn Error>> {
+    provider(base_url, timeout, None)
 }
 
 async fn complete_once(
@@ -99,7 +95,7 @@ async fn text_turn_round_trip_without_a_key() -> TestResult {
     assert_eq!(sent.body["messages"][0]["role"], "system");
     assert_eq!(
         sent.body["tools"][0]["function"]["name"],
-        "sales__get_stock_levels"
+        "sales__get_sales_history"
     );
     Ok(())
 }
@@ -267,42 +263,12 @@ async fn http_and_transport_errors_map_to_core_errors() -> TestResult {
 
 #[tokio::test]
 async fn hanging_server_times_out() -> TestResult {
-    let stub = Stub::start(vec![Reply::Hang]).await?;
-    let provider = provider(&stub.base_url, Duration::from_millis(200), None)?;
-    let err = provider
-        .complete(request(), CancellationToken::new())
-        .await
-        .err()
-        .ok_or("expected a timeout")?;
-    stub.abort();
-    assert_eq!(
-        (err.kind, err.retryable),
-        (ProviderErrorKind::Timeout, true)
-    );
-    Ok(())
+    check_hanging_server_times_out(&provider_for).await
 }
 
 #[tokio::test]
 async fn cancellation_aborts_an_in_flight_request() -> TestResult {
-    let stub = Stub::start(vec![Reply::Hang]).await?;
-    let provider = provider(&stub.base_url, Duration::from_secs(30), None)?;
-    let cancel = CancellationToken::new();
-    let trigger = cancel.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        trigger.cancel();
-    });
-    let err = provider
-        .complete(request(), cancel)
-        .await
-        .err()
-        .ok_or("expected cancellation")?;
-    stub.abort();
-    assert_eq!(
-        (err.kind, err.retryable),
-        (ProviderErrorKind::Cancelled, false)
-    );
-    Ok(())
+    check_cancellation_aborts_an_in_flight_request(&provider_for).await
 }
 
 #[tokio::test]

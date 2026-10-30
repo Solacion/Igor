@@ -65,13 +65,16 @@ pub async fn send_json(
         };
     }
     let retry_after = retry_after(&response);
-    let (bytes, truncated) = read_capped(response, MAX_ERROR_BODY_BYTES, secret).await?;
-    // A truncated body is not valid JSON; describe the error by its status alone.
-    let detail: &[u8] = if truncated { &[] } else { &bytes };
+    // The status decides kind and retryability. A truncated body is not valid JSON, and a body
+    // that fails to arrive adds nothing: describe either by the status alone.
+    let bytes = match read_capped(response, MAX_ERROR_BODY_BYTES, secret).await {
+        Ok((bytes, false)) => bytes,
+        Ok((_, true)) | Err(_) => Vec::new(),
+    };
     Err(errors::status_error(
         status.as_u16(),
         retry_after.as_deref(),
-        detail,
+        &bytes,
         secret,
     ))
 }

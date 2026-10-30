@@ -16,7 +16,6 @@ igor-provider-http = { path = "../igor-provider-http" }
 reqwest.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
 
 [dev-dependencies]
 igor-provider-http = { path = "../igor-provider-http", features = ["test-stub"] }

@@ -3,10 +3,16 @@
 //! Serves one scripted reply per accepted connection and records each request, so adapter tests
 //! never reach the network.
 
+use std::error::Error;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
-use serde_json::Value;
+use igor_core::CancellationToken;
+use igor_core::provider::{
+    ContentBlock, Message, ModelRequest, Provider, ProviderError, ProviderErrorKind, Role, ToolSpec,
+};
+use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
@@ -20,6 +26,14 @@ pub enum Reply {
         /// Extra response headers.
         headers: Vec<(&'static str, &'static str)>,
         /// Response body.
+        body: String,
+    },
+    /// Read the request, send this status and part of a body whose declared length is longer,
+    /// then close the connection, so reading the body fails.
+    Truncated {
+        /// Status code.
+        status: u16,
+        /// The part of the body that is sent.
         body: String,
     },
     /// Read the request, then close the connection without answering.
@@ -87,6 +101,14 @@ impl Stub {
                         }
                         response.push_str("\r\n");
                         response.push_str(&body);
+                        let _ = stream.write_all(response.as_bytes()).await;
+                        let _ = stream.shutdown().await;
+                    }
+                    Reply::Truncated { status, body } => {
+                        let response = format!(
+                            "HTTP/1.1 {status} STUB\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+                            body.len() + 1024
+                        );
                         let _ = stream.write_all(response.as_bytes()).await;
                         let _ = stream.shutdown().await;
                     }
@@ -170,5 +192,77 @@ pub fn status(status: u16, manifest_dir: &str, name: &str) -> Reply {
         status,
         headers: Vec::new(),
         body: fixture(manifest_dir, name),
+    }
+}
+
+/// A one-message request offering one read tool, as the example scenario sends.
+pub fn sample_request() -> ModelRequest {
+    ModelRequest {
+        system: "Ask before assuming dates.".into(),
+        messages: vec![Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: "Create an order for supplier X".into(),
+            }],
+        }],
+        tools: vec![ToolSpec {
+            name: "sales__get_sales_history".into(),
+            description: "Sales history".into(),
+            input_schema: json!({ "type": "object" }),
+        }],
+        max_tokens: 2048,
+    }
+}
+
+/// Builds the adapter under test for a stub base URL and request timeout.
+pub type MakeProvider<'a, P> = &'a dyn Fn(&str, Duration) -> Result<P, Box<dyn Error>>;
+
+/// A server that never answers ends the request with a retryable timeout.
+pub async fn check_hanging_server_times_out<P: Provider>(
+    make: MakeProvider<'_, P>,
+) -> Result<(), Box<dyn Error>> {
+    let stub = Stub::start(vec![Reply::Hang]).await?;
+    let provider = make(&stub.base_url, Duration::from_millis(200))?;
+    let result = provider
+        .complete(sample_request(), CancellationToken::new())
+        .await;
+    stub.abort();
+    expect_error(result.err(), ProviderErrorKind::Timeout, true)
+}
+
+/// Cancelling after the request has reached the server ends it with a non-retryable
+/// cancellation.
+pub async fn check_cancellation_aborts_an_in_flight_request<P: Provider>(
+    make: MakeProvider<'_, P>,
+) -> Result<(), Box<dyn Error>> {
+    let stub = Stub::start(vec![Reply::Hang]).await?;
+    let provider = make(&stub.base_url, Duration::from_secs(30))?;
+    let cancel = CancellationToken::new();
+    let trigger = cancel.clone();
+    let accepted = Arc::clone(&stub.accepted);
+    // Cancel only once the server holds the request, so the abort is truly in flight.
+    tokio::spawn(async move {
+        while accepted.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+        trigger.cancel();
+    });
+    let result = provider.complete(sample_request(), cancel).await;
+    let reached_server = stub.accepted() == 1;
+    stub.abort();
+    if !reached_server {
+        return Err("the request never reached the server".into());
+    }
+    expect_error(result.err(), ProviderErrorKind::Cancelled, false)
+}
+
+fn expect_error(
+    error: Option<ProviderError>,
+    kind: ProviderErrorKind,
+    retryable: bool,
+) -> Result<(), Box<dyn Error>> {
+    match error {
+        Some(error) if error.kind == kind && error.retryable == retryable => Ok(()),
+        other => Err(format!("expected {kind:?} (retryable: {retryable}), got {other:?}").into()),
     }
 }

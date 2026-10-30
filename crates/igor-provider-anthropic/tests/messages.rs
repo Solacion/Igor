@@ -10,12 +10,15 @@ use igor_config::Secret;
 use igor_core::CancellationToken;
 use igor_core::provider::{
     ContentBlock, Message, ModelRequest, Provider, ProviderError, ProviderErrorKind, Role,
-    StopReason, ToolSpec,
+    StopReason,
 };
 use igor_provider_anthropic::{
     API_VERSION, AnthropicProvider, AnthropicSettings, MAX_RESPONSE_BYTES,
 };
-use igor_provider_http::stub::{Reply, Stub, fixture, ok, status};
+use igor_provider_http::stub::{
+    Reply, Stub, check_cancellation_aborts_an_in_flight_request, check_hanging_server_times_out,
+    fixture, ok, sample_request, status,
+};
 use serde_json::{Value, json};
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -31,21 +34,11 @@ fn provider(base_url: &str, timeout: Duration) -> Result<AnthropicProvider, Box<
 }
 
 fn request() -> ModelRequest {
-    ModelRequest {
-        system: "Ask before assuming dates.".into(),
-        messages: vec![Message {
-            role: Role::User,
-            content: vec![ContentBlock::Text {
-                text: "Create an order for supplier X".into(),
-            }],
-        }],
-        tools: vec![ToolSpec {
-            name: "sales__get_sales_history".into(),
-            description: "Sales history".into(),
-            input_schema: json!({ "type": "object" }),
-        }],
-        max_tokens: 2048,
-    }
+    sample_request()
+}
+
+fn provider_for(base_url: &str, timeout: Duration) -> Result<AnthropicProvider, Box<dyn Error>> {
+    provider(base_url, timeout)
 }
 
 async fn complete_once(reply: Reply) -> Result<Result<StopReason, ProviderError>, Box<dyn Error>> {
@@ -162,6 +155,21 @@ async fn several_tool_calls_in_one_turn_drop_thinking_blocks() -> TestResult {
 }
 
 #[tokio::test]
+async fn cut_off_error_body_keeps_its_status() -> TestResult {
+    let result = complete_once(Reply::Truncated {
+        status: 401,
+        body: r#"{"type":"error","error":{"#.into(),
+    })
+    .await?;
+    let err = result.err().ok_or("expected an error")?;
+    assert_eq!(
+        (err.kind, err.retryable),
+        (ProviderErrorKind::Authentication, false)
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn oversized_error_body_keeps_its_status() -> TestResult {
     let result = complete_once(Reply::Http {
         status: 429,
@@ -236,42 +244,12 @@ async fn http_errors_map_to_core_errors() -> TestResult {
 
 #[tokio::test]
 async fn hanging_server_times_out() -> TestResult {
-    let stub = Stub::start(vec![Reply::Hang]).await?;
-    let provider = provider(&stub.base_url, Duration::from_millis(200))?;
-    let err = provider
-        .complete(request(), CancellationToken::new())
-        .await
-        .err()
-        .ok_or("expected a timeout")?;
-    stub.abort();
-    assert_eq!(
-        (err.kind, err.retryable),
-        (ProviderErrorKind::Timeout, true)
-    );
-    Ok(())
+    check_hanging_server_times_out(&provider_for).await
 }
 
 #[tokio::test]
 async fn cancellation_aborts_an_in_flight_request() -> TestResult {
-    let stub = Stub::start(vec![Reply::Hang]).await?;
-    let provider = provider(&stub.base_url, Duration::from_secs(30))?;
-    let cancel = CancellationToken::new();
-    let trigger = cancel.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        trigger.cancel();
-    });
-    let err = provider
-        .complete(request(), cancel)
-        .await
-        .err()
-        .ok_or("expected cancellation")?;
-    stub.abort();
-    assert_eq!(
-        (err.kind, err.retryable),
-        (ProviderErrorKind::Cancelled, false)
-    );
-    Ok(())
+    check_cancellation_aborts_an_in_flight_request(&provider_for).await
 }
 
 #[tokio::test]
