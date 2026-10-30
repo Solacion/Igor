@@ -10,7 +10,8 @@ use std::time::Duration;
 
 use igor_core::CancellationToken;
 use igor_core::provider::{
-    ContentBlock, Message, ModelRequest, Provider, ProviderError, ProviderErrorKind, Role, ToolSpec,
+    ContentBlock, Message, ModelRequest, ModelResponse, Provider, ProviderError, ProviderErrorKind,
+    Role, ToolSpec,
 };
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -265,4 +266,21 @@ fn expect_error(
         Some(error) if error.kind == kind && error.retryable == retryable => Ok(()),
         other => Err(format!("expected {kind:?} (retryable: {retryable}), got {other:?}").into()),
     }
+}
+
+/// API key used by adapter tests; assertions check it never appears where it must not.
+pub const SENTINEL_KEY: &str = "IGOR-TEST-SECRET-7f3a";
+
+/// Sends [`sample_request`] to a stub serving one `reply` and returns the adapter's result.
+pub async fn complete_once<P: Provider>(
+    make: MakeProvider<'_, P>,
+    reply: Reply,
+) -> Result<Result<ModelResponse, ProviderError>, Box<dyn Error>> {
+    let stub = Stub::start(vec![reply]).await?;
+    let provider = make(&stub.base_url, Duration::from_secs(5))?;
+    let result = provider
+        .complete(sample_request(), CancellationToken::new())
+        .await;
+    stub.abort();
+    Ok(result)
 }

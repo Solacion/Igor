@@ -19,7 +19,8 @@ use igor_config::{ProviderConfig, ProviderKind, Secret};
 use igor_core::CancellationToken;
 use igor_core::provider::{ModelRequest, ModelResponse, Provider, ProviderError};
 use igor_provider_http::{cancellable, errors, send_json};
-use thiserror::Error;
+
+pub use igor_provider_http::BuildError;
 
 pub use igor_provider_http::{DEFAULT_REQUEST_TIMEOUT, MAX_RESPONSE_BYTES};
 
@@ -55,24 +56,11 @@ impl AnthropicSettings {
         if config.kind != ProviderKind::Anthropic {
             return Err(BuildError::WrongKind {
                 id: config.id.clone(),
+                expected: "anthropic",
             });
         }
         Ok(Self::new(&config.base_url, &config.model, api_key))
     }
-}
-
-/// The provider could not be created.
-#[derive(Debug, Error)]
-pub enum BuildError {
-    /// The configuration entry is not an `anthropic` provider.
-    #[error("provider {id:?} is not of kind `anthropic`")]
-    WrongKind {
-        /// Provider id.
-        id: String,
-    },
-    /// The HTTP client could not be built.
-    #[error("cannot build HTTP client: {0}")]
-    Client(#[from] reqwest::Error),
 }
 
 /// Anthropic Messages API provider.
@@ -105,8 +93,7 @@ impl AnthropicProvider {
             .header("x-api-key", secret)
             .header("anthropic-version", API_VERSION);
         let bytes = send_json(http, body.to_string(), secret).await?;
-        wire::parse_response(&bytes)
-            .map_err(|err| errors::error(err.kind, err.retryable, &err.message, secret))
+        wire::parse_response(&bytes).map_err(|err| errors::scrub(err, secret))
     }
 }
 

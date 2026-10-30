@@ -11,24 +11,19 @@ use std::time::Duration;
 
 use igor_config::Secret;
 use igor_core::CancellationToken;
-use igor_core::provider::{
-    ContentBlock, ModelRequest, ModelResponse, Provider, ProviderError, ProviderErrorKind,
-    StopReason,
-};
+use igor_core::provider::{ContentBlock, Provider, ProviderError, ProviderErrorKind, StopReason};
 use igor_provider_http::stub::{
-    Reply, Stub, check_cancellation_aborts_an_in_flight_request, check_hanging_server_times_out,
-    ok, sample_request, status,
+    Reply, SENTINEL_KEY, Stub, check_cancellation_aborts_an_in_flight_request,
+    check_hanging_server_times_out, complete_once, ok, sample_request, status,
 };
 use igor_provider_openai::{OpenAiCompatibleProvider, OpenAiSettings};
 use serde_json::{Value, json};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
-const SENTINEL_KEY: &str = "IGOR-TEST-SECRET-7f3a";
-
 const DIR: &str = env!("CARGO_MANIFEST_DIR");
 
-fn provider(
+fn provider_with_key(
     base_url: &str,
     timeout: Duration,
     api_key: Option<&str>,
@@ -39,29 +34,12 @@ fn provider(
     Ok(OpenAiCompatibleProvider::new(settings)?)
 }
 
-fn request() -> ModelRequest {
-    sample_request()
-}
-
-fn provider_for(
-    base_url: &str,
-    timeout: Duration,
-) -> Result<OpenAiCompatibleProvider, Box<dyn Error>> {
-    provider(base_url, timeout, None)
-}
-
-async fn complete_once(
-    reply: Reply,
-) -> Result<Result<ModelResponse, ProviderError>, Box<dyn Error>> {
-    let stub = Stub::start(vec![reply]).await?;
-    let provider = provider(&stub.base_url, Duration::from_secs(5), None)?;
-    let result = provider.complete(request(), CancellationToken::new()).await;
-    stub.abort();
-    Ok(result)
+fn provider(base_url: &str, timeout: Duration) -> Result<OpenAiCompatibleProvider, Box<dyn Error>> {
+    provider_with_key(base_url, timeout, None)
 }
 
 async fn malformed(name: &str) -> Result<ProviderError, Box<dyn Error>> {
-    let err = complete_once(ok(DIR, name))
+    let err = complete_once(&provider, ok(DIR, name))
         .await?
         .err()
         .ok_or("expected an error")?;
@@ -76,9 +54,9 @@ async fn malformed(name: &str) -> Result<ProviderError, Box<dyn Error>> {
 #[tokio::test]
 async fn text_turn_round_trip_without_a_key() -> TestResult {
     let stub = Stub::start(vec![ok(DIR, "text_turn.json")]).await?;
-    let provider = provider(&stub.base_url, Duration::from_secs(5), None)?;
+    let provider = provider(&stub.base_url, Duration::from_secs(5))?;
     let response = provider
-        .complete(request(), CancellationToken::new())
+        .complete(sample_request(), CancellationToken::new())
         .await?;
     assert_eq!(response.stop_reason, StopReason::EndTurn);
     assert_eq!(
@@ -103,9 +81,9 @@ async fn text_turn_round_trip_without_a_key() -> TestResult {
 #[tokio::test]
 async fn optional_key_is_sent_as_bearer_token() -> TestResult {
     let stub = Stub::start(vec![ok(DIR, "text_turn.json")]).await?;
-    let provider = provider(&stub.base_url, Duration::from_secs(5), Some(SENTINEL_KEY))?;
+    let provider = provider_with_key(&stub.base_url, Duration::from_secs(5), Some(SENTINEL_KEY))?;
     provider
-        .complete(request(), CancellationToken::new())
+        .complete(sample_request(), CancellationToken::new())
         .await?;
     let received = stub.received().await?;
     let expected = format!("Bearer {SENTINEL_KEY}");
@@ -118,7 +96,7 @@ async fn optional_key_is_sent_as_bearer_token() -> TestResult {
 
 #[tokio::test]
 async fn several_native_tool_calls_in_one_turn() -> TestResult {
-    let response = complete_once(ok(DIR, "tool_calls_turn.json")).await??;
+    let response = complete_once(&provider, ok(DIR, "tool_calls_turn.json")).await??;
     assert_eq!(response.stop_reason, StopReason::ToolUse);
     let calls: Vec<(&str, &str, &Value)> = response
         .content
@@ -171,7 +149,7 @@ async fn tool_call_without_id_is_malformed() -> TestResult {
 /// Review case 4: a tool call written in the message text is not a tool call.
 #[tokio::test]
 async fn tool_call_written_in_text_stays_text() -> TestResult {
-    let response = complete_once(ok(DIR, "tool_call_in_text.json")).await??;
+    let response = complete_once(&provider, ok(DIR, "tool_call_in_text.json")).await??;
     assert_eq!(response.stop_reason, StopReason::EndTurn);
     assert!(
         response
@@ -203,7 +181,7 @@ async fn truncated_tool_call_is_malformed() -> TestResult {
 /// repairs nor drops them, and approval stays the gate's job.
 #[tokio::test]
 async fn unvalidated_calls_pass_through_unchanged() -> TestResult {
-    let response = complete_once(ok(DIR, "unvalidated_call.json")).await??;
+    let response = complete_once(&provider, ok(DIR, "unvalidated_call.json")).await??;
     let calls: Vec<(&str, &Value)> = response
         .content
         .iter()
@@ -251,7 +229,7 @@ async fn http_and_transport_errors_map_to_core_errors() -> TestResult {
         ),
     ];
     for (reply, kind, retryable, text) in cases {
-        let err = complete_once(reply)
+        let err = complete_once(&provider, reply)
             .await?
             .err()
             .ok_or("expected an error")?;
@@ -263,12 +241,12 @@ async fn http_and_transport_errors_map_to_core_errors() -> TestResult {
 
 #[tokio::test]
 async fn hanging_server_times_out() -> TestResult {
-    check_hanging_server_times_out(&provider_for).await
+    check_hanging_server_times_out(&provider).await
 }
 
 #[tokio::test]
 async fn cancellation_aborts_an_in_flight_request() -> TestResult {
-    check_cancellation_aborts_an_in_flight_request(&provider_for).await
+    check_cancellation_aborts_an_in_flight_request(&provider).await
 }
 
 #[tokio::test]
@@ -279,9 +257,9 @@ async fn api_key_never_appears_in_errors() -> TestResult {
         body: format!(r#"{{"error":{{"message":"bad key {SENTINEL_KEY}"}}}}"#),
     }])
     .await?;
-    let provider = provider(&stub.base_url, Duration::from_secs(5), Some(SENTINEL_KEY))?;
+    let provider = provider_with_key(&stub.base_url, Duration::from_secs(5), Some(SENTINEL_KEY))?;
     let err = provider
-        .complete(request(), CancellationToken::new())
+        .complete(sample_request(), CancellationToken::new())
         .await
         .err()
         .ok_or("expected an error")?;

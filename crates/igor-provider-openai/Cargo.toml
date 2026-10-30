@@ -15,7 +15,6 @@ igor-core = { path = "../igor-core" }
 igor-provider-http = { path = "../igor-provider-http" }
 reqwest.workspace = true
 serde_json.workspace = true
-thiserror.workspace = true
 
 [dev-dependencies]
 igor-provider-http = { path = "../igor-provider-http", features = ["test-stub"] }

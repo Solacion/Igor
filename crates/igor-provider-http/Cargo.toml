@@ -17,6 +17,7 @@ igor-config = { path = "../igor-config" }
 igor-core = { path = "../igor-core" }
 reqwest.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 
 [lints]
