@@ -50,5 +50,5 @@ get_weather_forecast = "read"
 
 [limits]
 max_iterations = 10
-max_result_bytes = 65536
+max_result_bytes = 32768
 tool_call_timeout_ms = 30000

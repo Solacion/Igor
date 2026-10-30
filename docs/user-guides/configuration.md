@@ -89,7 +89,7 @@ A tool that is not listed is unclassified. IGOR hides it from the model and refu
 | Key | Default | Range |
 | --- | --- | --- |
 | `max_iterations` | 10 | 1 to 100 model turns per request |
-| `max_result_bytes` | 65536 | 1024 to 16777216 bytes per tool result |
+| `max_result_bytes` | 32768 | 1024 to 16777216 bytes per tool result |
 | `tool_call_timeout_ms` | 30000 | 100 to 600000 |
 
 ## Errors
