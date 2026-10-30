@@ -15,7 +15,7 @@ use igor_core::provider::{
     ContentBlock, Message, ModelRequest, ModelResponse, Provider, ProviderError, ProviderErrorKind,
     Role, StopReason, ToolSpec,
 };
-use igor_provider_http::stub::{Reply, Stub};
+use igor_provider_http::stub::{Reply, Stub, ok, status};
 use igor_provider_openai::{OpenAiCompatibleProvider, OpenAiSettings};
 use serde_json::{Value, json};
 
@@ -23,28 +23,7 @@ type TestResult = Result<(), Box<dyn Error>>;
 
 const SENTINEL_KEY: &str = "IGOR-TEST-SECRET-7f3a";
 
-// A missing fixture is a broken test setup: fail loudly with its path.
-#[allow(clippy::panic)]
-fn fixture(name: &str) -> String {
-    let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
-    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("cannot read fixture {path}: {err}"))
-}
-
-fn ok(name: &str) -> Reply {
-    Reply::Http {
-        status: 200,
-        headers: Vec::new(),
-        body: fixture(name),
-    }
-}
-
-fn status(status: u16, name: &str) -> Reply {
-    Reply::Http {
-        status,
-        headers: Vec::new(),
-        body: fixture(name),
-    }
-}
+const DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 fn provider(
     base_url: &str,
@@ -86,7 +65,7 @@ async fn complete_once(
 }
 
 async fn malformed(name: &str) -> Result<ProviderError, Box<dyn Error>> {
-    let err = complete_once(ok(name))
+    let err = complete_once(ok(DIR, name))
         .await?
         .err()
         .ok_or("expected an error")?;
@@ -100,7 +79,7 @@ async fn malformed(name: &str) -> Result<ProviderError, Box<dyn Error>> {
 
 #[tokio::test]
 async fn text_turn_round_trip_without_a_key() -> TestResult {
-    let stub = Stub::start(vec![ok("text_turn.json")]).await?;
+    let stub = Stub::start(vec![ok(DIR, "text_turn.json")]).await?;
     let provider = provider(&stub.base_url, Duration::from_secs(5), None)?;
     let response = provider
         .complete(request(), CancellationToken::new())
@@ -127,7 +106,7 @@ async fn text_turn_round_trip_without_a_key() -> TestResult {
 
 #[tokio::test]
 async fn optional_key_is_sent_as_bearer_token() -> TestResult {
-    let stub = Stub::start(vec![ok("text_turn.json")]).await?;
+    let stub = Stub::start(vec![ok(DIR, "text_turn.json")]).await?;
     let provider = provider(&stub.base_url, Duration::from_secs(5), Some(SENTINEL_KEY))?;
     provider
         .complete(request(), CancellationToken::new())
@@ -143,7 +122,7 @@ async fn optional_key_is_sent_as_bearer_token() -> TestResult {
 
 #[tokio::test]
 async fn several_native_tool_calls_in_one_turn() -> TestResult {
-    let response = complete_once(ok("tool_calls_turn.json")).await??;
+    let response = complete_once(ok(DIR, "tool_calls_turn.json")).await??;
     assert_eq!(response.stop_reason, StopReason::ToolUse);
     let calls: Vec<(&str, &str, &Value)> = response
         .content
@@ -196,7 +175,7 @@ async fn tool_call_without_id_is_malformed() -> TestResult {
 /// Review case 4: a tool call written in the message text is not a tool call.
 #[tokio::test]
 async fn tool_call_written_in_text_stays_text() -> TestResult {
-    let response = complete_once(ok("tool_call_in_text.json")).await??;
+    let response = complete_once(ok(DIR, "tool_call_in_text.json")).await??;
     assert_eq!(response.stop_reason, StopReason::EndTurn);
     assert!(
         response
@@ -228,7 +207,7 @@ async fn truncated_tool_call_is_malformed() -> TestResult {
 /// repairs nor drops them, and approval stays the gate's job.
 #[tokio::test]
 async fn unvalidated_calls_pass_through_unchanged() -> TestResult {
-    let response = complete_once(ok("unvalidated_call.json")).await??;
+    let response = complete_once(ok(DIR, "unvalidated_call.json")).await??;
     let calls: Vec<(&str, &Value)> = response
         .content
         .iter()
@@ -251,19 +230,19 @@ async fn unvalidated_calls_pass_through_unchanged() -> TestResult {
 async fn http_and_transport_errors_map_to_core_errors() -> TestResult {
     let cases = [
         (
-            status(400, "error_400_string.json"),
+            status(400, DIR, "error_400_string.json"),
             ProviderErrorKind::InvalidRequest,
             false,
             "Model not loaded",
         ),
         (
-            status(401, "error_401.json"),
+            status(401, DIR, "error_401.json"),
             ProviderErrorKind::Authentication,
             false,
             "Invalid API key",
         ),
         (
-            status(500, "error_500.json"),
+            status(500, DIR, "error_500.json"),
             ProviderErrorKind::Unavailable,
             true,
             "server_error",

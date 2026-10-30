@@ -87,6 +87,15 @@ pub fn transport_error(err: &reqwest::Error, secret: &str) -> ProviderError {
     }
 }
 
+/// A successful response the adapter cannot understand. Not retryable.
+pub fn malformed(message: String) -> ProviderError {
+    ProviderError {
+        kind: ProviderErrorKind::MalformedResponse,
+        message,
+        retryable: false,
+    }
+}
+
 /// The request was cancelled through its cancellation token.
 pub fn cancelled() -> ProviderError {
     error(ProviderErrorKind::Cancelled, false, "request cancelled", "")

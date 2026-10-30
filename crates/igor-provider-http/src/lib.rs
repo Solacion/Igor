@@ -22,6 +22,16 @@ pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
 /// Largest successful response body accepted, in bytes.
 pub const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
+/// Builds the HTTP client an adapter uses. Redirects are never followed: an adapter's custom
+/// key header (such as `x-api-key`) would otherwise be forwarded to whatever host a base URL
+/// redirects to.
+pub fn client(request_timeout: Duration) -> Result<reqwest::Client, reqwest::Error> {
+    reqwest::Client::builder()
+        .timeout(request_timeout)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+}
+
 /// How much of an error response body is read to describe the error, in bytes.
 const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
 

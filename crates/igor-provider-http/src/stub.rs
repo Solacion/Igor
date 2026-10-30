@@ -3,6 +3,9 @@
 //! Serves one scripted reply per accepted connection and records each request, so adapter tests
 //! never reach the network.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -48,6 +51,7 @@ impl Received {
 pub struct Stub {
     /// `http://127.0.0.1:<port>`.
     pub base_url: String,
+    accepted: Arc<AtomicUsize>,
     task: JoinHandle<Vec<Received>>,
 }
 
@@ -56,12 +60,15 @@ impl Stub {
     pub async fn start(replies: Vec<Reply>) -> std::io::Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let base_url = format!("http://{}", listener.local_addr()?);
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&accepted);
         let task = tokio::spawn(async move {
             let mut received = Vec::new();
             for reply in replies {
                 let Ok((mut stream, _)) = listener.accept().await else {
                     break;
                 };
+                counter.fetch_add(1, Ordering::SeqCst);
                 if let Some(request) = read_request(&mut stream).await {
                     received.push(request);
                 }
@@ -91,7 +98,16 @@ impl Stub {
             }
             received
         });
-        Ok(Self { base_url, task })
+        Ok(Self {
+            base_url,
+            accepted,
+            task,
+        })
+    }
+
+    /// Number of connections accepted so far, without waiting.
+    pub fn accepted(&self) -> usize {
+        self.accepted.load(Ordering::SeqCst)
     }
 
     /// Waits for every reply to be served and returns the requests received.
@@ -132,5 +148,27 @@ async fn read_request(stream: &mut TcpStream) -> Option<Received> {
             let body = serde_json::from_slice(data.get(body_start..body_start + length)?).ok()?;
             return Some(Received { head, body });
         }
+    }
+}
+
+/// Reads `tests/fixtures/<name>` under a crate's manifest directory.
+// A missing fixture is a broken test setup: fail loudly with its path. Test-only code.
+#[allow(clippy::panic)]
+pub fn fixture(manifest_dir: &str, name: &str) -> String {
+    let path = format!("{manifest_dir}/tests/fixtures/{name}");
+    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("cannot read fixture {path}: {err}"))
+}
+
+/// A `200 OK` reply with a fixture body.
+pub fn ok(manifest_dir: &str, name: &str) -> Reply {
+    status(200, manifest_dir, name)
+}
+
+/// A reply with `status` and a fixture body.
+pub fn status(status: u16, manifest_dir: &str, name: &str) -> Reply {
+    Reply::Http {
+        status,
+        headers: Vec::new(),
+        body: fixture(manifest_dir, name),
     }
 }

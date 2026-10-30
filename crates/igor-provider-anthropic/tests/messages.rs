@@ -15,35 +15,14 @@ use igor_core::provider::{
 use igor_provider_anthropic::{
     API_VERSION, AnthropicProvider, AnthropicSettings, MAX_RESPONSE_BYTES,
 };
-use igor_provider_http::stub::{Reply, Stub};
+use igor_provider_http::stub::{Reply, Stub, fixture, ok, status};
 use serde_json::{Value, json};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
 const SENTINEL_KEY: &str = "IGOR-TEST-SECRET-7f3a";
 
-// A missing fixture is a broken test setup: fail loudly with its path.
-#[allow(clippy::panic)]
-fn fixture(name: &str) -> String {
-    let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
-    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("cannot read fixture {path}: {err}"))
-}
-
-fn ok(name: &str) -> Reply {
-    Reply::Http {
-        status: 200,
-        headers: Vec::new(),
-        body: fixture(name),
-    }
-}
-
-fn status(status: u16, name: &str) -> Reply {
-    Reply::Http {
-        status,
-        headers: Vec::new(),
-        body: fixture(name),
-    }
-}
+const DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 fn provider(base_url: &str, timeout: Duration) -> Result<AnthropicProvider, Box<dyn Error>> {
     let mut settings = AnthropicSettings::new(base_url, "fixture-model", Secret::new(SENTINEL_KEY));
@@ -82,7 +61,7 @@ async fn complete_once(reply: Reply) -> Result<Result<StopReason, ProviderError>
 
 #[tokio::test]
 async fn text_turn_round_trip_sends_headers_and_body() -> TestResult {
-    let stub = Stub::start(vec![ok("text_turn.json")]).await?;
+    let stub = Stub::start(vec![ok(DIR, "text_turn.json")]).await?;
     let provider = provider(&stub.base_url, Duration::from_secs(5))?;
     let response = provider
         .complete(request(), CancellationToken::new())
@@ -109,7 +88,11 @@ async fn text_turn_round_trip_sends_headers_and_body() -> TestResult {
 
 #[tokio::test]
 async fn several_tool_calls_in_one_turn_drop_thinking_blocks() -> TestResult {
-    let stub = Stub::start(vec![ok("tool_use_turn.json"), ok("text_turn.json")]).await?;
+    let stub = Stub::start(vec![
+        ok(DIR, "tool_use_turn.json"),
+        ok(DIR, "text_turn.json"),
+    ])
+    .await?;
     let provider = provider(&stub.base_url, Duration::from_secs(5))?;
 
     let first = provider
@@ -200,7 +183,7 @@ async fn oversized_error_body_keeps_its_status() -> TestResult {
 async fn http_errors_map_to_core_errors() -> TestResult {
     let cases = [
         (
-            status(401, "error_401.json"),
+            status(401, DIR, "error_401.json"),
             ProviderErrorKind::Authentication,
             false,
             "authentication_error",
@@ -209,26 +192,26 @@ async fn http_errors_map_to_core_errors() -> TestResult {
             Reply::Http {
                 status: 429,
                 headers: vec![("retry-after", "17")],
-                body: fixture("error_429.json"),
+                body: fixture(DIR, "error_429.json"),
             },
             ProviderErrorKind::RateLimited,
             true,
             "retry after 17s",
         ),
         (
-            status(529, "error_529.json"),
+            status(529, DIR, "error_529.json"),
             ProviderErrorKind::Unavailable,
             true,
             "overloaded_error",
         ),
         (
-            status(500, "error_500.json"),
+            status(500, DIR, "error_500.json"),
             ProviderErrorKind::Unavailable,
             true,
             "api_error",
         ),
         (
-            ok("malformed_tool_input.json"),
+            ok(DIR, "malformed_tool_input.json"),
             ProviderErrorKind::MalformedResponse,
             false,
             "not a JSON object",
@@ -293,13 +276,30 @@ async fn cancellation_aborts_an_in_flight_request() -> TestResult {
 
 #[tokio::test]
 async fn already_cancelled_request_is_not_sent() -> TestResult {
-    let stub = Stub::start(vec![ok("text_turn.json")]).await?;
+    let stub = Stub::start(vec![ok(DIR, "text_turn.json")]).await?;
     let provider = provider(&stub.base_url, Duration::from_secs(5))?;
     let cancel = CancellationToken::new();
     cancel.cancel();
     let err = provider.complete(request(), cancel).await.err();
     assert_eq!(err.map(|e| e.kind), Some(ProviderErrorKind::Cancelled));
+    assert_eq!(stub.accepted(), 0, "nothing was sent");
     stub.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn redirects_are_not_followed() -> TestResult {
+    // If the redirect were followed, the key would go to the redirect target (nothing listens
+    // there, so the error would be a transport failure instead of the 307).
+    let result = complete_once(Reply::Http {
+        status: 307,
+        headers: vec![("location", "http://127.0.0.1:9/v1/messages")],
+        body: "{}".into(),
+    })
+    .await?;
+    let err = result.err().ok_or("expected an error")?;
+    assert_eq!(err.kind, ProviderErrorKind::InvalidRequest);
+    assert!(err.message.starts_with("HTTP 307"), "{}", err.message);
     Ok(())
 }
 

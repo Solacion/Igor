@@ -87,9 +87,7 @@ pub struct AnthropicProvider {
 impl AnthropicProvider {
     /// Creates a provider. No request is sent until [`Provider::complete`].
     pub fn new(settings: AnthropicSettings) -> Result<Self, BuildError> {
-        let client = reqwest::Client::builder()
-            .timeout(settings.request_timeout)
-            .build()?;
+        let client = igor_provider_http::client(settings.request_timeout)?;
         Ok(Self {
             client,
             endpoint: format!("{}/v1/messages", settings.base_url.trim_end_matches('/')),

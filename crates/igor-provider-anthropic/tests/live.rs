@@ -11,7 +11,7 @@
 //!   a few cents.
 //! - **Expected result:** the first turn calls the `weather__get_forecast` tool with an
 //!   object input and stops with `tool_use`. After the tool result is sent back, the second turn
-//!   ends with text. This also proves that thinking blocks are sent back as the API requires.
+//!   ends with text. Extended thinking is not requested; any thinking blocks are dropped.
 //!
 //! Run:
 //!

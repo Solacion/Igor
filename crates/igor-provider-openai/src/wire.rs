@@ -3,10 +3,11 @@
 //! Tool calls are read only from native `tool_calls`. Text that looks like a tool call stays
 //! text: the adapter never parses calls out of message content.
 
+use igor_provider_http::errors::malformed;
 use serde_json::{Map, Value, json};
 
 use igor_core::provider::{
-    ContentBlock, ModelRequest, ModelResponse, ProviderError, ProviderErrorKind, Role, StopReason,
+    ContentBlock, ModelRequest, ModelResponse, ProviderError, Role, StopReason,
 };
 
 /// Prefix added to a failed tool result, because chat completions tool messages have no error
@@ -204,16 +205,9 @@ fn stop_reason_from(value: &str) -> StopReason {
     }
 }
 
-fn malformed(message: String) -> ProviderError {
-    ProviderError {
-        kind: ProviderErrorKind::MalformedResponse,
-        message,
-        retryable: false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use igor_core::provider::ProviderErrorKind;
     use igor_core::provider::{Message, ToolSpec};
 
     use super::*;

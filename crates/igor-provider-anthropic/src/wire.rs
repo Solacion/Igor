@@ -1,9 +1,10 @@
 //! Translation between provider-neutral types and the Messages API wire format.
 
+use igor_provider_http::errors::malformed;
 use serde_json::{Map, Value, json};
 
 use igor_core::provider::{
-    ContentBlock, ModelRequest, ModelResponse, ProviderError, ProviderErrorKind, Role, StopReason,
+    ContentBlock, ModelRequest, ModelResponse, ProviderError, Role, StopReason,
 };
 
 /// Builds the Messages API request body.
@@ -135,16 +136,9 @@ fn stop_reason_from(value: &str) -> StopReason {
     }
 }
 
-fn malformed(message: String) -> ProviderError {
-    ProviderError {
-        kind: ProviderErrorKind::MalformedResponse,
-        message,
-        retryable: false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use igor_core::provider::ProviderErrorKind;
     use igor_core::provider::{Message, ToolSpec};
 
     use super::*;
