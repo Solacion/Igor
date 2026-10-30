@@ -8,6 +8,7 @@
 //! - [`events`]: the runtime event stream shared by every client (CLI, desktop, future HTTP API).
 //! - [`registry`]: host tool aliases, permission gating and argument validation before dispatch.
 //! - [`approval`]: approval of write calls and the dispatch permit, the only path to a server.
+//! - [`session`]: the session loop and embedding API: turns, limits, approvals and events.
 //! - [`limits`]: bounds on tool results passed to the model.
 //! - [`clock`] and [`ids`]: injected time and identifiers, for deterministic tests.
 //! - `testing` (feature `testing`): a scripted provider, a recording tool backend and a manual clock for
@@ -25,6 +26,7 @@ pub mod limits;
 pub mod policy;
 pub mod provider;
 pub mod registry;
+pub mod session;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod tools;
