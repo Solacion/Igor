@@ -28,12 +28,16 @@ use crate::events::{
 };
 use crate::ids::IdGenerator;
 use crate::limits::ResultSizeLimit;
+use crate::limits::{TRUNCATION_MARKER, truncate_with_marker};
 use crate::provider::{
     ContentBlock, Message, ModelRequest, ModelResponse, Provider, ProviderErrorKind, Role,
     StopReason, ToolSpec,
 };
 use crate::registry::{CallRejection, ToolRegistry};
 use crate::tools::{ServerId, ToolBackend, ToolContent, ToolOutput};
+
+/// Maximum size of a tool failure message passed to the model and in events, in bytes.
+pub const MAX_FAILURE_MESSAGE_BYTES: usize = 1024;
 
 /// Name of the host tool through which the model asks the operator a question. It is not an MCP
 /// tool, and cannot collide with a registry alias, which always contains `__`.
@@ -641,9 +645,12 @@ impl Session {
         &mut self,
         call_id: String,
         outcome: CallFailure,
-        message: String,
+        mut message: String,
         cancel: &CancellationToken,
     ) -> CallResult {
+        // Failure text can come from the server (e.g. a JSON-RPC error message): bound it like
+        // any other untrusted output before it reaches the model or the event stream.
+        truncate_with_marker(&mut message, MAX_FAILURE_MESSAGE_BYTES, TRUNCATION_MARKER);
         let content = match outcome {
             CallFailure::NotExecuted => format!("Not executed: {message}."),
             CallFailure::Unknown => format!("{OUTCOME_UNKNOWN} ({message})"),

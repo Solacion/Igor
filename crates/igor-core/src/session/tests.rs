@@ -616,6 +616,37 @@ async fn tool_timeout_reports_unknown_outcome() -> TestResult {
 }
 
 #[tokio::test]
+async fn oversized_server_error_text_is_bounded() -> TestResult {
+    let mut h = harness_with(
+        vec![
+            ScriptedTurn::tool_call("u1", "sales__lookup", json!({})),
+            ScriptedTurn::text("The lookup failed.").expecting(|request| {
+                match last_results(request).as_slice() {
+                    // Fixed outcome wording plus the bounded server text.
+                    [(content, true)] if content.len() <= MAX_FAILURE_MESSAGE_BYTES + 256 => Ok(()),
+                    other => Err(format!("unexpected results {other:?}")),
+                }
+            }),
+        ],
+        SessionConfig::default(),
+        vec![(
+            "lookup",
+            FakeReply::Error(BackendError::Protocol("x".repeat(100_000))),
+        )],
+        Vec::new(),
+    )?;
+    let (outcome, events) = run(&mut h, "lookup", Operator::default()).await;
+    assert_eq!(outcome, TurnOutcome::Completed);
+    h.provider.verify()?;
+    assert!(events.iter().any(|e| matches!(
+        &e.event,
+        RuntimeEvent::ToolCallFailed { message, .. }
+            if message.len() <= MAX_FAILURE_MESSAGE_BYTES && message.ends_with(crate::limits::TRUNCATION_MARKER)
+    )));
+    Ok(())
+}
+
+#[tokio::test]
 async fn write_with_unknown_outcome_is_not_retried_without_new_approval() -> TestResult {
     let order = json!({ "supplier": "X" });
     let mut h = harness_with(
