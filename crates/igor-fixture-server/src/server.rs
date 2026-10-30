@@ -55,7 +55,7 @@ impl ServerHandler for FixtureServer {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let lookup = self
             .fixture
@@ -72,7 +72,13 @@ impl ServerHandler for FixtureServer {
             )),
             (_, Some(recorded)) => {
                 if let Some(delay) = recorded.delay {
-                    tokio::time::sleep(delay).await;
+                    // Behave like a live server: stop waiting once the client cancels the request.
+                    tokio::select! {
+                        () = tokio::time::sleep(delay) => {}
+                        () = context.ct.cancelled() => {
+                            return Err(ErrorData::internal_error("request cancelled", None));
+                        }
+                    }
                 }
                 Ok(recorded.result.clone().into())
             }
