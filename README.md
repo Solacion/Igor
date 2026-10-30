@@ -34,6 +34,12 @@ Press Ctrl+C to stop. The private development journal is outside the docs site.
 Use `pnpm run docs:build` to generate static HTML in `docs/.vitepress/dist`,
 and `pnpm run docs:preview` to preview that build.
 
+## Verify the checkout
+
+Follow the [preparation guide](docs/user-guides/verification.md), then run
+`pnpm run verify` for formatting, linting, deterministic tests, dependency-boundary
+checks and the docs build. No model API key is needed.
+
 ## Licence
 
 IGOR is licensed under the GNU General Public License version 3 only

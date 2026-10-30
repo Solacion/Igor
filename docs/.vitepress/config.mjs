@@ -31,7 +31,9 @@ export default defineConfig({
         text: 'User guide',
         items: [
           { text: 'Overview', link: '/user-guides/' },
-          { text: 'Configuration', link: '/user-guides/configuration' }
+          { text: 'Configuration', link: '/user-guides/configuration' },
+          { text: 'Verify a checkout', link: '/user-guides/verification' },
+          { text: 'Evidence template', link: '/verification/run-template' }
         ]
       }
     ],

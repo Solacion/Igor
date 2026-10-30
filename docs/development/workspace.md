@@ -18,7 +18,10 @@ Crates other than `igor-core` are added by the issues that introduce them.
 
 ## Checks
 
-Run before every pull request; CI runs the same on macOS.
+Run before every pull request; CI runs the same categories of checks on macOS.
+After the [dependency preparation](../user-guides/verification.md), run
+`pnpm run verify` to execute them together with Cargo offline. The individual
+commands are shown below; the verification script also checks the core dependency boundary.
 
 ```sh
 cargo fmt --all --check
