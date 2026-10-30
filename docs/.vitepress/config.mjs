@@ -22,7 +22,13 @@ export default defineConfig({
       { text: 'Delivery plan', link: '/planning/delivery-plan' },
       { text: 'Review standards', link: '/development/review-standards' },
       { text: 'Workspace', link: '/development/workspace' },
-      { text: 'User guide', link: '/user-guides/' }
+      {
+        text: 'User guide',
+        items: [
+          { text: 'Overview', link: '/user-guides/' },
+          { text: 'Configuration', link: '/user-guides/configuration' }
+        ]
+      }
     ],
     search: { provider: 'local' }
   }

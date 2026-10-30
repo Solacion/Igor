@@ -16,7 +16,7 @@ In the demo, the approved action is `create_draft_order`, which creates a draft 
 ## Guides to add with the implementation
 
 - Installation and supported platforms.
-- Configuration, credentials and MCP-server startup.
+- MCP-server startup. See [Configuration](configuration.md) for providers, servers, credentials, permissions and limits.
 - Running the reproducible sample demo.
 - Understanding permissions, approvals and local data storage.
 - Troubleshooting unavailable providers, servers and incomplete results.
