@@ -107,28 +107,35 @@ pub struct ModelResponse {
 }
 
 /// Category of a provider failure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Error)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderErrorKind {
     /// Missing or rejected credentials.
+    #[error("authentication failed")]
     Authentication,
     /// Rate limited by the provider.
+    #[error("rate limited")]
     RateLimited,
     /// The request timed out.
+    #[error("timed out")]
     Timeout,
     /// The provider could not be reached.
+    #[error("provider unavailable")]
     Unavailable,
     /// The request was rejected as invalid.
+    #[error("invalid request")]
     InvalidRequest,
     /// The response could not be understood, e.g. a malformed tool call.
+    #[error("malformed response")]
     MalformedResponse,
     /// The request was cancelled.
+    #[error("cancelled")]
     Cancelled,
 }
 
 /// A provider call failed.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("{kind:?}: {message}")]
+#[error("{kind}: {message}")]
 pub struct ProviderError {
     /// Failure category.
     pub kind: ProviderErrorKind,

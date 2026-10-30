@@ -67,7 +67,8 @@ impl fmt::Display for ServerId {
 /// A server identifier failed validation.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error(
-    "invalid server id {0:?}: use lowercase letters, digits, '-' or '_', starting with a letter, at most 32 characters"
+    "invalid server id {0:?}: use lowercase letters, digits, '-' or '_', starting with a letter, at most {max} characters",
+    max = MAX_SERVER_ID_LEN
 )]
 pub struct InvalidServerId(pub String);
 
