@@ -1,0 +1,602 @@
+{
+  "server": {
+    "name": "igor-fixture-sales",
+    "version": "0.1.0"
+  },
+  "tools": [
+    {
+      "name": "get_stock_levels",
+      "title": "Stock levels",
+      "description": "Stock on hand and on order for each product of one supplier, at the end of the given date.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "supplier_id": {
+            "type": "string",
+            "title": "Supplier",
+            "description": "Supplier identifier, for example supplier-x.",
+            "pattern": "^[a-z0-9-]{1,64}$"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Stock snapshot date (YYYY-MM-DD).",
+            "title": "Date"
+          }
+        },
+        "required": [
+          "supplier_id",
+          "date"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "supplier": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "products": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "unit": {
+                  "type": "string",
+                  "description": "Ordering unit, for example case."
+                },
+                "pack_size": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Items per ordering unit."
+                },
+                "on_hand": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Ordering units on hand."
+                },
+                "on_order": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Ordering units ordered but not yet delivered."
+                },
+                "reorder_point": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Stock level, in ordering units, at or below which the product should be reordered."
+                }
+              },
+              "required": [
+                "sku",
+                "name",
+                "unit",
+                "pack_size",
+                "on_hand",
+                "on_order",
+                "reorder_point"
+              ]
+            }
+          }
+        },
+        "required": [
+          "supplier",
+          "date",
+          "products"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_sales_history",
+      "title": "Sales history",
+      "description": "Ordering units (for example cases) sold per day for each product of one supplier over an inclusive date range of at most 31 days.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "supplier_id": {
+            "type": "string",
+            "title": "Supplier",
+            "description": "Supplier identifier, for example supplier-x.",
+            "pattern": "^[a-z0-9-]{1,64}$"
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "First day of the period (YYYY-MM-DD), inclusive.",
+            "title": "From"
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Last day of the period (YYYY-MM-DD), inclusive.",
+            "title": "To"
+          }
+        },
+        "required": [
+          "supplier_id",
+          "from",
+          "to"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "supplier_id": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "products": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string"
+                },
+                "total_units": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "days": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "date": {
+                        "type": "string",
+                        "format": "date",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                      },
+                      "units": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "date",
+                      "units"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "sku",
+                "total_units",
+                "days"
+              ]
+            }
+          }
+        },
+        "required": [
+          "supplier_id",
+          "from",
+          "to",
+          "products"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "create_draft_order",
+      "title": "Create draft order",
+      "description": "Saves a draft purchase order for review. The draft is not submitted to the supplier and no stock, payment or external system changes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "supplier_id": {
+            "type": "string",
+            "title": "Supplier",
+            "description": "Supplier identifier, for example supplier-x.",
+            "pattern": "^[a-z0-9-]{1,64}$"
+          },
+          "delivery_date": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Requested delivery date (YYYY-MM-DD).",
+            "title": "Delivery date"
+          },
+          "lines": {
+            "type": "array",
+            "title": "Order lines",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string",
+                  "title": "SKU",
+                  "description": "Product SKU from get_stock_levels."
+                },
+                "quantity": {
+                  "type": "integer",
+                  "title": "Quantity",
+                  "description": "Number of ordering units (for example cases).",
+                  "minimum": 1,
+                  "maximum": 1000
+                },
+                "rationale": {
+                  "type": "string",
+                  "title": "Rationale",
+                  "description": "Why this quantity is proposed.",
+                  "maxLength": 500
+                }
+              },
+              "required": [
+                "sku",
+                "quantity",
+                "rationale"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "notes": {
+            "type": "string",
+            "title": "Notes",
+            "description": "Optional notes for the reviewer.",
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "supplier_id",
+          "delivery_date",
+          "lines"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "draft_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "const": "draft"
+          },
+          "submitted": {
+            "type": "boolean",
+            "const": false
+          }
+        },
+        "required": [
+          "draft_id",
+          "status",
+          "submitted"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "calls": [
+    {
+      "tool": "get_stock_levels",
+      "arguments": {
+        "supplier_id": "supplier-x",
+        "date": "2026-07-13"
+      },
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"supplier\":{\"id\":\"supplier-x\",\"name\":\"Supplier X Drinks Co.\"},\"date\":\"2026-07-13\",\"products\":[{\"sku\":\"COLA-330-24\",\"name\":\"Cola 330 ml can\",\"unit\":\"case\",\"pack_size\":24,\"on_hand\":18,\"on_order\":0,\"reorder_point\":20},{\"sku\":\"WATER-500-24\",\"name\":\"Still water 500 ml bottle\",\"unit\":\"case\",\"pack_size\":24,\"on_hand\":22,\"on_order\":0,\"reorder_point\":25},{\"sku\":\"LEMON-330-24\",\"name\":\"Sparkling lemonade 330 ml can\",\"unit\":\"case\",\"pack_size\":24,\"on_hand\":10,\"on_order\":0,\"reorder_point\":12},{\"sku\":\"COCOA-1KG-6\",\"name\":\"Hot chocolate powder 1 kg\",\"unit\":\"case\",\"pack_size\":6,\"on_hand\":9,\"on_order\":0,\"reorder_point\":4}]}"
+          }
+        ],
+        "structuredContent": {
+          "supplier": {
+            "id": "supplier-x",
+            "name": "Supplier X Drinks Co."
+          },
+          "date": "2026-07-13",
+          "products": [
+            {
+              "sku": "COLA-330-24",
+              "name": "Cola 330 ml can",
+              "unit": "case",
+              "pack_size": 24,
+              "on_hand": 18,
+              "on_order": 0,
+              "reorder_point": 20
+            },
+            {
+              "sku": "WATER-500-24",
+              "name": "Still water 500 ml bottle",
+              "unit": "case",
+              "pack_size": 24,
+              "on_hand": 22,
+              "on_order": 0,
+              "reorder_point": 25
+            },
+            {
+              "sku": "LEMON-330-24",
+              "name": "Sparkling lemonade 330 ml can",
+              "unit": "case",
+              "pack_size": 24,
+              "on_hand": 10,
+              "on_order": 0,
+              "reorder_point": 12
+            },
+            {
+              "sku": "COCOA-1KG-6",
+              "name": "Hot chocolate powder 1 kg",
+              "unit": "case",
+              "pack_size": 6,
+              "on_hand": 9,
+              "on_order": 0,
+              "reorder_point": 4
+            }
+          ]
+        },
+        "isError": false
+      }
+    },
+    {
+      "tool": "get_stock_levels",
+      "arguments": {
+        "supplier_id": "supplier-unknown",
+        "date": "2026-07-13"
+      },
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"error\":{\"code\":\"unknown_supplier\",\"message\":\"No supplier with id supplier-unknown.\"}}"
+          }
+        ],
+        "isError": true
+      }
+    },
+    {
+      "tool": "get_stock_levels",
+      "arguments": "*",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"error\":{\"code\":\"no_data\",\"message\":\"No stock snapshot for the requested supplier and date. Fixture data covers supplier-x: sales 2026-07-06 to 2026-07-12, stock on 2026-07-13.\"}}"
+          }
+        ],
+        "isError": true
+      }
+    },
+    {
+      "tool": "get_sales_history",
+      "arguments": {
+        "supplier_id": "supplier-x",
+        "from": "2026-07-06",
+        "to": "2026-07-12"
+      },
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"supplier_id\":\"supplier-x\",\"from\":\"2026-07-06\",\"to\":\"2026-07-12\",\"products\":[{\"sku\":\"COLA-330-24\",\"total_units\":59,\"days\":[{\"date\":\"2026-07-06\",\"units\":6},{\"date\":\"2026-07-07\",\"units\":7},{\"date\":\"2026-07-08\",\"units\":6},{\"date\":\"2026-07-09\",\"units\":8},{\"date\":\"2026-07-10\",\"units\":9},{\"date\":\"2026-07-11\",\"units\":11},{\"date\":\"2026-07-12\",\"units\":12}]},{\"sku\":\"WATER-500-24\",\"total_units\":76,\"days\":[{\"date\":\"2026-07-06\",\"units\":8},{\"date\":\"2026-07-07\",\"units\":8},{\"date\":\"2026-07-08\",\"units\":9},{\"date\":\"2026-07-09\",\"units\":10},{\"date\":\"2026-07-10\",\"units\":12},{\"date\":\"2026-07-11\",\"units\":14},{\"date\":\"2026-07-12\",\"units\":15}]},{\"sku\":\"LEMON-330-24\",\"total_units\":31,\"days\":[{\"date\":\"2026-07-06\",\"units\":3},{\"date\":\"2026-07-07\",\"units\":3},{\"date\":\"2026-07-08\",\"units\":4},{\"date\":\"2026-07-09\",\"units\":4},{\"date\":\"2026-07-10\",\"units\":5},{\"date\":\"2026-07-11\",\"units\":6},{\"date\":\"2026-07-12\",\"units\":6}]},{\"sku\":\"COCOA-1KG-6\",\"total_units\":8,\"days\":[{\"date\":\"2026-07-06\",\"units\":2},{\"date\":\"2026-07-07\",\"units\":2},{\"date\":\"2026-07-08\",\"units\":1},{\"date\":\"2026-07-09\",\"units\":1},{\"date\":\"2026-07-10\",\"units\":1},{\"date\":\"2026-07-11\",\"units\":0},{\"date\":\"2026-07-12\",\"units\":1}]}]}"
+          }
+        ],
+        "structuredContent": {
+          "supplier_id": "supplier-x",
+          "from": "2026-07-06",
+          "to": "2026-07-12",
+          "products": [
+            {
+              "sku": "COLA-330-24",
+              "total_units": 59,
+              "days": [
+                {
+                  "date": "2026-07-06",
+                  "units": 6
+                },
+                {
+                  "date": "2026-07-07",
+                  "units": 7
+                },
+                {
+                  "date": "2026-07-08",
+                  "units": 6
+                },
+                {
+                  "date": "2026-07-09",
+                  "units": 8
+                },
+                {
+                  "date": "2026-07-10",
+                  "units": 9
+                },
+                {
+                  "date": "2026-07-11",
+                  "units": 11
+                },
+                {
+                  "date": "2026-07-12",
+                  "units": 12
+                }
+              ]
+            },
+            {
+              "sku": "WATER-500-24",
+              "total_units": 76,
+              "days": [
+                {
+                  "date": "2026-07-06",
+                  "units": 8
+                },
+                {
+                  "date": "2026-07-07",
+                  "units": 8
+                },
+                {
+                  "date": "2026-07-08",
+                  "units": 9
+                },
+                {
+                  "date": "2026-07-09",
+                  "units": 10
+                },
+                {
+                  "date": "2026-07-10",
+                  "units": 12
+                },
+                {
+                  "date": "2026-07-11",
+                  "units": 14
+                },
+                {
+                  "date": "2026-07-12",
+                  "units": 15
+                }
+              ]
+            },
+            {
+              "sku": "LEMON-330-24",
+              "total_units": 31,
+              "days": [
+                {
+                  "date": "2026-07-06",
+                  "units": 3
+                },
+                {
+                  "date": "2026-07-07",
+                  "units": 3
+                },
+                {
+                  "date": "2026-07-08",
+                  "units": 4
+                },
+                {
+                  "date": "2026-07-09",
+                  "units": 4
+                },
+                {
+                  "date": "2026-07-10",
+                  "units": 5
+                },
+                {
+                  "date": "2026-07-11",
+                  "units": 6
+                },
+                {
+                  "date": "2026-07-12",
+                  "units": 6
+                }
+              ]
+            },
+            {
+              "sku": "COCOA-1KG-6",
+              "total_units": 8,
+              "days": [
+                {
+                  "date": "2026-07-06",
+                  "units": 2
+                },
+                {
+                  "date": "2026-07-07",
+                  "units": 2
+                },
+                {
+                  "date": "2026-07-08",
+                  "units": 1
+                },
+                {
+                  "date": "2026-07-09",
+                  "units": 1
+                },
+                {
+                  "date": "2026-07-10",
+                  "units": 1
+                },
+                {
+                  "date": "2026-07-11",
+                  "units": 0
+                },
+                {
+                  "date": "2026-07-12",
+                  "units": 1
+                }
+              ]
+            }
+          ]
+        },
+        "isError": false
+      }
+    },
+    {
+      "tool": "get_sales_history",
+      "arguments": "*",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"error\":{\"code\":\"no_data\",\"message\":\"No sales data for the requested supplier and period. Fixture data covers supplier-x: sales 2026-07-06 to 2026-07-12, stock on 2026-07-13.\"}}"
+          }
+        ],
+        "isError": true
+      }
+    },
+    {
+      "tool": "create_draft_order",
+      "arguments": "*",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"draft_id\":\"draft-0001\",\"status\":\"draft\",\"submitted\":false}"
+          }
+        ],
+        "structuredContent": {
+          "draft_id": "draft-0001",
+          "status": "draft",
+          "submitted": false
+        },
+        "isError": false
+      }
+    }
+  ]
+}

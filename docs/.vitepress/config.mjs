@@ -5,6 +5,7 @@ export default defineConfig({
   description: 'IGOR specifications, planning and user guides',
   rewrites: {
     'README.md': 'index.md',
+    'specs/contracts/README.md': 'specs/contracts/index.md',
     'user-guides/README.md': 'user-guides/index.md'
   },
   themeConfig: {
@@ -16,7 +17,11 @@ export default defineConfig({
         items: [
           { text: 'Product and demo', link: '/specs/igor' },
           { text: 'Architecture', link: '/specs/architecture' },
-          { text: 'Decisions', link: '/specs/decisions' }
+          { text: 'Decisions', link: '/specs/decisions' },
+          { text: 'Tool contracts', link: '/specs/contracts/' },
+          { text: 'Sales and stock contract', link: '/specs/contracts/sales' },
+          { text: 'Weather contract', link: '/specs/contracts/weather' },
+          { text: 'Fixture file format', link: '/specs/contracts/fixture-format' }
         ]
       },
       { text: 'Delivery plan', link: '/planning/delivery-plan' },
