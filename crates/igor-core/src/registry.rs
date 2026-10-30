@@ -15,9 +15,9 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::canonical::{to_hex, write_canonical, write_string};
+use crate::canonical::{sha256_digest_type, to_hex, write_canonical, write_string};
 use crate::limits::truncate_with_marker;
-use crate::policy::Classification;
+use crate::policy::{Classification, effective_classification};
 use crate::provider::ToolSpec;
 use crate::tools::{ToolDescriptor, ToolId};
 
@@ -46,25 +46,13 @@ const MAX_REPORTED_ARGUMENT_ERRORS: usize = 10;
 /// Maximum number of characters of an unknown model-supplied tool name quoted in an error.
 const MAX_QUOTED_NAME_CHARS: usize = MAX_ALIAS_LEN;
 
-/// SHA-256 over the canonical JSON of a tool's server, name, description and input schema.
-///
-/// A change to any of them changes the fingerprint, so an approval bound to it does not carry
-/// over to a changed tool definition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ToolFingerprint([u8; 32]);
-
-impl ToolFingerprint {
-    /// Raw digest bytes.
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        &self.0
-    }
-}
-
-impl fmt::Display for ToolFingerprint {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&to_hex(&self.0))
-    }
-}
+sha256_digest_type!(
+    /// SHA-256 over the canonical JSON of a tool's server, name, description and input schema.
+    ///
+    /// A change to any of them changes the fingerprint, so an approval bound to it does not carry
+    /// over to a changed tool definition.
+    ToolFingerprint
+);
 
 /// A tool accepted into the registry.
 #[derive(Debug)]
@@ -73,6 +61,7 @@ pub struct RegisteredTool {
     alias: String,
     description: Option<String>,
     input_schema: Value,
+    host_classification: Classification,
     classification: Classification,
     fingerprint: ToolFingerprint,
     validator: Validator,
@@ -99,9 +88,21 @@ impl RegisteredTool {
         &self.input_schema
     }
 
-    /// Host classification; [`Classification::Unclassified`] when the host gave none.
+    /// Classification enforced by the runtime: the host classification, tightened by the
+    /// server's hints (see [`effective_classification`]).
     pub fn classification(&self) -> Classification {
         self.classification
+    }
+
+    /// Classification from host configuration; [`Classification::Unclassified`] when the host
+    /// gave none.
+    pub fn host_classification(&self) -> Classification {
+        self.host_classification
+    }
+
+    /// The server's hints made the enforced classification stricter than the host's.
+    pub fn tightened_by_hints(&self) -> bool {
+        self.classification != self.host_classification
     }
 
     /// Tool-definition fingerprint.
@@ -176,14 +177,37 @@ pub enum CallRejection {
 /// A tool call that passed alias resolution, the permission check and schema validation.
 ///
 /// Only [`ToolRegistry::prepare_call`] creates one. It is deliberately not `Clone`: one model
-/// call yields at most one dispatch. A [`Classification::Write`] call still needs operator
-/// approval before dispatch.
-#[derive(Debug, PartialEq)]
+/// call yields at most one dispatch. Pass it to [`crate::approval::ApprovalGate::admit`] to
+/// obtain a dispatch permit, directly for a read and after operator approval for a write.
+/// There is deliberately no way to take the arguments out other than through the gate.
+#[derive(PartialEq)]
 pub struct ValidatedCall {
     tool: ToolId,
     classification: Classification,
     fingerprint: ToolFingerprint,
     arguments: Map<String, Value>,
+}
+
+impl fmt::Debug for ValidatedCall {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ValidatedCall")
+            .field("tool", &self.tool)
+            .field("classification", &self.classification)
+            .field("fingerprint", &self.fingerprint)
+            .field("arguments", &RedactedArguments(&self.arguments))
+            .finish()
+    }
+}
+
+/// Shows argument names but not values in `Debug` output, so logs cannot leak them (#10).
+pub(crate) struct RedactedArguments<'a>(pub(crate) &'a Map<String, Value>);
+
+impl fmt::Debug for RedactedArguments<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_map()
+            .entries(self.0.keys().map(|key| (key, format_args!("<redacted>"))))
+            .finish()
+    }
 }
 
 impl ValidatedCall {
@@ -207,9 +231,16 @@ impl ValidatedCall {
         &self.arguments
     }
 
-    /// Consumes the call and returns its arguments for dispatch.
-    pub fn into_arguments(self) -> Map<String, Value> {
-        self.arguments
+    /// Splits the call into its parts, for the approval gate.
+    pub(crate) fn into_parts(
+        self,
+    ) -> (ToolId, Classification, ToolFingerprint, Map<String, Value>) {
+        (
+            self.tool,
+            self.classification,
+            self.fingerprint,
+            self.arguments,
+        )
     }
 }
 
@@ -461,7 +492,7 @@ fn register(
         id,
         description,
         input_schema,
-        hints: _,
+        hints,
     } = descriptor;
     let exclude = |id: ToolId, reason| ExcludedTool { id, reason };
 
@@ -497,7 +528,7 @@ fn register(
         );
         text
     });
-    let classification = classes
+    let host_classification = classes
         .get(&id)
         .copied()
         .unwrap_or(Classification::Unclassified);
@@ -506,7 +537,8 @@ fn register(
         alias,
         description,
         input_schema,
-        classification,
+        host_classification,
+        classification: effective_classification(host_classification, &hints),
         fingerprint,
         validator,
     })
@@ -610,6 +642,22 @@ mod tests {
         let names: Vec<String> = registry.tool_specs().into_iter().map(|s| s.name).collect();
         assert_eq!(names, ["sales__lookup", "weather__lookup"]);
         assert_eq!(registry.tools().len(), 4);
+        Ok(())
+    }
+
+    #[test]
+    fn hints_tighten_a_read_tool_to_write() -> TestResult {
+        let tool = id("sales", "update_stock")?;
+        let mut declared = descriptor(&tool, lookup_schema());
+        declared.hints.destructive = Some(true);
+        let classes = HashMap::from([(tool.clone(), Classification::Read)]);
+        let registry = ToolRegistry::build([declared], &classes);
+        let registered = registry.get(&tool).ok_or("tool not registered")?;
+        assert_eq!(registered.host_classification(), Classification::Read);
+        assert_eq!(registered.classification(), Classification::Write);
+        assert!(registered.tightened_by_hints());
+        let call = registry.prepare_call(registered.alias(), json!({ "sku": "A1" }))?;
+        assert_eq!(call.classification(), Classification::Write);
         Ok(())
     }
 
@@ -743,6 +791,16 @@ mod tests {
                 .iter()
                 .all(|spec| spec.description.len() <= MAX_DESCRIPTION_BYTES)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn debug_output_redacts_argument_values() -> TestResult {
+        let registry = two_server_registry()?;
+        let call = registry.prepare_call("sales__lookup", json!({ "sku": "s3cret-sku" }))?;
+        let debug = format!("{call:?}");
+        assert!(debug.contains("sku"), "{debug}");
+        assert!(!debug.contains("s3cret-sku"), "{debug}");
         Ok(())
     }
 

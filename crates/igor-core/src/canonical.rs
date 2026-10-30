@@ -3,9 +3,13 @@
 //! Object keys are sorted by UTF-16 code units and no whitespace is emitted, following
 //! RFC 8785 (JCS). Strings are escaped as JCS requires. Numbers use `serde_json` formatting,
 //! which matches JCS for integers but not for every floating-point value; full JCS number
-//! formatting is needed before canonical arguments are shown to clients (approval binding, #54).
+//! formatting is not implemented.
+//!
+//! This is sufficient because canonical forms and their hashes (tool fingerprints, approval action
+//! hashes) are created and compared inside one runtime process. They must not be compared with
+//! hashes computed by another implementation.
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 /// Appends the canonical form of `value` to `out`.
 pub(crate) fn write_canonical(out: &mut String, value: &Value) {
@@ -24,21 +28,24 @@ pub(crate) fn write_canonical(out: &mut String, value: &Value) {
             }
             out.push(']');
         }
-        Value::Object(map) => {
-            let mut entries: Vec<_> = map.iter().collect();
-            entries.sort_by(|(a, _), (b, _)| a.encode_utf16().cmp(b.encode_utf16()));
-            out.push('{');
-            for (i, (key, item)) in entries.into_iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                write_string(out, key);
-                out.push(':');
-                write_canonical(out, item);
-            }
-            out.push('}');
-        }
+        Value::Object(map) => write_canonical_object(out, map),
     }
+}
+
+/// Appends the canonical form of a JSON object to `out`.
+pub(crate) fn write_canonical_object(out: &mut String, map: &Map<String, Value>) {
+    let mut entries: Vec<_> = map.iter().collect();
+    entries.sort_by(|(a, _), (b, _)| a.encode_utf16().cmp(b.encode_utf16()));
+    out.push('{');
+    for (i, (key, item)) in entries.into_iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        write_string(out, key);
+        out.push(':');
+        write_canonical(out, item);
+    }
+    out.push('}');
 }
 
 /// Appends `s` as a JSON string literal with JCS escaping.
@@ -86,6 +93,78 @@ pub(crate) fn to_hex(bytes: &[u8]) -> String {
     out
 }
 
+/// Parses 64 hexadecimal digits into a 32-byte digest.
+pub(crate) fn parse_hex32(text: &str) -> Option<[u8; 32]> {
+    let digits = text.as_bytes();
+    if digits.len() != 64 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    let (pairs, _) = digits.as_chunks::<2>();
+    for (byte, &[high, low]) in out.iter_mut().zip(pairs) {
+        let value = |d: u8| {
+            char::from(d)
+                .to_digit(16)
+                .and_then(|v| u8::try_from(v).ok())
+        };
+        *byte = (value(high)? << 4) | value(low)?;
+    }
+    Some(out)
+}
+
+/// Defines a SHA-256 digest newtype shown and serialised as lowercase hex.
+macro_rules! sha256_digest_type {
+    ($(#[$meta:meta])* $name:ident) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+        #[serde(try_from = "String", into = "String")]
+        pub struct $name([u8; 32]);
+
+        impl $name {
+            /// Raw digest bytes.
+            pub fn as_bytes(&self) -> &[u8; 32] {
+                &self.0
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(&crate::canonical::to_hex(&self.0))
+            }
+        }
+
+        impl std::str::FromStr for $name {
+            type Err = crate::canonical::InvalidDigest;
+
+            fn from_str(text: &str) -> Result<Self, Self::Err> {
+                crate::canonical::parse_hex32(text)
+                    .map(Self)
+                    .ok_or(crate::canonical::InvalidDigest)
+            }
+        }
+
+        impl TryFrom<String> for $name {
+            type Error = crate::canonical::InvalidDigest;
+
+            fn try_from(text: String) -> Result<Self, Self::Error> {
+                text.parse()
+            }
+        }
+
+        impl From<$name> for String {
+            fn from(digest: $name) -> Self {
+                digest.to_string()
+            }
+        }
+    };
+}
+pub(crate) use sha256_digest_type;
+
+/// Text is not 64 hexadecimal digits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("expected a SHA-256 digest as 64 hexadecimal digits")]
+pub struct InvalidDigest;
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -125,5 +204,14 @@ mod tests {
     #[test]
     fn hex_is_lowercase() {
         assert_eq!(to_hex(&[0x00, 0xAB, 0x0F]), "00ab0f");
+    }
+
+    #[test]
+    fn hex32_round_trips_and_rejects_bad_input() {
+        let bytes: [u8; 32] = core::array::from_fn(|i| u8::try_from(i * 7).unwrap_or(0));
+        assert_eq!(parse_hex32(&to_hex(&bytes)), Some(bytes));
+        assert_eq!(parse_hex32(&to_hex(&bytes).to_uppercase()), Some(bytes));
+        assert_eq!(parse_hex32("00"), None);
+        assert_eq!(parse_hex32(&"g".repeat(64)), None);
     }
 }

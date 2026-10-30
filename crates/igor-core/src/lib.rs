@@ -7,13 +7,16 @@
 //! - [`policy`]: host-controlled tool permission classes.
 //! - [`events`]: the runtime event stream shared by every client (CLI, desktop, future HTTP API).
 //! - [`registry`]: host tool aliases, permission gating and argument validation before dispatch.
+//! - [`approval`]: approval of write calls and the dispatch permit, the only path to a server.
 //! - [`limits`]: bounds on tool results passed to the model.
 //! - [`clock`] and [`ids`]: injected time and identifiers, for deterministic tests.
-//! - `testing` (feature `testing`): a scripted provider and a manual clock for tests.
+//! - `testing` (feature `testing`): a scripted provider, a recording tool backend and a manual clock for
+//!   tests.
 //!
 //! The core must not depend on a desktop UI, a specific model provider, an MCP library or any
 //! example-scenario schema.
 
+pub mod approval;
 mod canonical;
 pub mod clock;
 pub mod events;
