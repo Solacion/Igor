@@ -8,6 +8,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::approval::ApprovalRequest;
 use crate::tools::{ServerId, ToolId};
 
 /// Version of the event schema, bumped on breaking changes.
@@ -58,12 +59,32 @@ pub enum RuntimeEvent {
         /// Proposed arguments.
         arguments: Value,
     },
+    /// A tool call was refused before dispatch: unknown tool, not permitted or invalid
+    /// arguments. Nothing was sent.
+    ToolCallRejected {
+        /// Call identifier.
+        call_id: String,
+        /// Tool name the model used, cut to 64 characters. Untrusted model text.
+        alias: String,
+        /// The tool, when the name resolved to one.
+        tool: Option<ToolId>,
+        /// Why the call was refused.
+        reason: String,
+    },
+    /// A permitted tool call is being sent to its server.
+    ToolCallStarted {
+        /// Call identifier.
+        call_id: String,
+    },
     /// A tool call finished with a response from the server.
     ToolCallCompleted {
         /// Call identifier.
         call_id: String,
         /// The server reported an error result.
         is_error: bool,
+        /// The result was cut at the size limit before it reached the model.
+        #[serde(default)]
+        truncated: bool,
     },
     /// A tool call did not produce a response.
     ToolCallFailed {
@@ -79,6 +100,93 @@ pub enum RuntimeEvent {
         /// The text. Untrusted model output: render as plain text.
         text: String,
     },
+    /// A write call is waiting for the operator. Answer with
+    /// [`crate::session::SessionHandle::resolve_approval`].
+    ApprovalRequested {
+        /// What the operator is asked to approve, including the hash to echo.
+        request: ApprovalRequest,
+    },
+    /// A pending approval ended.
+    ApprovalResolved {
+        /// The approval.
+        approval_id: String,
+        /// Call identifier.
+        call_id: String,
+        /// How it ended.
+        outcome: ApprovalOutcome,
+    },
+    /// The model asked the operator a question. Answer with
+    /// [`crate::session::SessionHandle::answer_clarification`].
+    ClarificationRequested {
+        /// Identifier to answer.
+        request_id: String,
+        /// The question. Untrusted model output: render as plain text.
+        question: String,
+    },
+    /// The operator answered a clarification request.
+    ClarificationAnswered {
+        /// The request answered.
+        request_id: String,
+    },
+    /// An operator input was refused, e.g. an unknown or already used approval, or a wrong
+    /// action hash.
+    InputRejected {
+        /// The approval or clarification id given.
+        id: String,
+        /// Why it was refused.
+        reason: String,
+    },
+    /// The turn started by a user message ended.
+    TurnFinished {
+        /// How it ended.
+        outcome: TurnOutcome,
+    },
+}
+
+/// How a pending approval ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalOutcome {
+    /// The operator approved; the call is dispatched.
+    Approved,
+    /// The operator denied; nothing runs.
+    Denied,
+    /// The turn was cancelled; nothing runs.
+    Cancelled,
+    /// The tool definition or classification changed; nothing runs.
+    Invalidated,
+}
+
+/// How a turn ended. Clients must show anything other than `Completed` as not a full answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum TurnOutcome {
+    /// The model finished its answer.
+    Completed,
+    /// A limit stopped the turn before the model finished.
+    LimitReached {
+        /// The limit hit.
+        limit: LimitKind,
+    },
+    /// The operator or client cancelled the turn.
+    Cancelled,
+    /// The model request failed.
+    Failed {
+        /// Diagnostic message without secrets.
+        message: String,
+    },
+}
+
+/// A limit that can end a turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LimitKind {
+    /// Model requests per user message.
+    ModelRequests,
+    /// Tool calls per user message.
+    ToolCalls,
+    /// The model's output token limit.
+    OutputTokens,
 }
 
 /// Connection state of a tool server.
