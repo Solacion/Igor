@@ -1,0 +1,23 @@
+[package]
+name = "igor-mcp"
+description = "MCP client for IGOR: implements igor-core's ToolBackend over an rmcp stdio child process."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+igor-core = { path = "../igor-core" }
+rmcp = { workspace = true, features = ["client", "transport-child-process"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "process", "time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process", "time"] }
+
+[lints]
+workspace = true
