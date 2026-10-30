@@ -6,33 +6,25 @@
 //!
 //! The adapter does not retry. It marks errors [`ProviderError::retryable`] so the session loop
 //! can retry visibly.
+//!
+//! Extended thinking is not requested. Thinking blocks in a response, if any, are dropped: the
+//! neutral types cannot carry them and they are never replayed.
 
-mod errors;
 mod wire;
 
-use std::collections::VecDeque;
-use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use igor_config::{ProviderConfig, ProviderKind, Secret};
 use igor_core::CancellationToken;
-use igor_core::provider::{Message, ModelRequest, ModelResponse, Provider, ProviderError};
-use serde_json::Value;
+use igor_core::provider::{ModelRequest, ModelResponse, Provider, ProviderError};
+use igor_provider_http::{cancellable, errors, read_body, retry_after};
 use thiserror::Error;
+
+pub use igor_provider_http::{DEFAULT_REQUEST_TIMEOUT, MAX_RESPONSE_BYTES};
 
 /// Messages API version sent in the `anthropic-version` header.
 pub const API_VERSION: &str = "2026-10-21";
-
-/// Default bound on one request, including reading the response. Non-streaming responses with a
-/// large `max_tokens` can take minutes.
-pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
-
-/// Largest response body accepted, in bytes.
-pub const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-
-/// Number of assistant turns whose raw content is remembered for replay.
-const REPLAY_CAPACITY: usize = 64;
 
 /// Settings for [`AnthropicProvider`].
 #[derive(Debug)]
@@ -90,7 +82,6 @@ pub struct AnthropicProvider {
     endpoint: String,
     model: String,
     api_key: Secret,
-    replay: Mutex<ReplayCache>,
 }
 
 impl AnthropicProvider {
@@ -104,20 +95,12 @@ impl AnthropicProvider {
             endpoint: format!("{}/v1/messages", settings.base_url.trim_end_matches('/')),
             model: settings.model,
             api_key: settings.api_key,
-            replay: Mutex::new(ReplayCache::default()),
         })
-    }
-
-    fn replay(&self) -> std::sync::MutexGuard<'_, ReplayCache> {
-        self.replay.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     async fn send(&self, request: &ModelRequest) -> Result<ModelResponse, ProviderError> {
         let secret = self.api_key.expose();
-        let body = {
-            let replay = self.replay();
-            wire::request_body(&self.model, request, |message| replay.get(message))
-        };
+        let body = wire::request_body(&self.model, request);
         let response = self
             .client
             .post(&self.endpoint)
@@ -130,11 +113,7 @@ impl AnthropicProvider {
             .map_err(|err| errors::transport_error(&err, secret))?;
 
         let status = response.status();
-        let retry_after = response
-            .headers()
-            .get("retry-after")
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned);
+        let retry_after = retry_after(&response);
         let bytes = read_body(response, secret).await?;
         if !status.is_success() {
             return Err(errors::status_error(
@@ -145,37 +124,9 @@ impl AnthropicProvider {
             ));
         }
 
-        let parsed = wire::parse_response(&bytes)
-            .map_err(|err| errors::error(err.kind, err.retryable, &err.message, secret))?;
-        if let Some(raw) = parsed.raw_content_to_replay {
-            self.replay().insert(&parsed.response.content, raw);
-        }
-        Ok(parsed.response)
+        wire::parse_response(&bytes)
+            .map_err(|err| errors::error(err.kind, err.retryable, &err.message, secret))
     }
-}
-
-/// Reads the response body, refusing bodies above [`MAX_RESPONSE_BYTES`].
-async fn read_body(
-    mut response: reqwest::Response,
-    secret: &str,
-) -> Result<Vec<u8>, ProviderError> {
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|err| errors::transport_error(&err, secret))?
-    {
-        if bytes.len() + chunk.len() > MAX_RESPONSE_BYTES {
-            return Err(errors::error(
-                igor_core::provider::ProviderErrorKind::MalformedResponse,
-                false,
-                &format!("response body exceeds {MAX_RESPONSE_BYTES} bytes"),
-                secret,
-            ));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    Ok(bytes)
 }
 
 #[async_trait]
@@ -189,82 +140,13 @@ impl Provider for AnthropicProvider {
         request: ModelRequest,
         cancel: CancellationToken,
     ) -> Result<ModelResponse, ProviderError> {
-        if cancel.is_cancelled() {
-            return Err(errors::cancelled());
-        }
-        tokio::select! {
-            biased;
-            () = cancel.cancelled() => Err(errors::cancelled()),
-            result = self.send(&request) => result,
-        }
-    }
-}
-
-/// Raw content of recent assistant turns that held thinking blocks, keyed by their neutral
-/// content.
-///
-/// The neutral [`igor_core::provider::ContentBlock`] has no thinking variant, but the API needs
-/// thinking blocks sent back unchanged when a conversation continues. When the session sends an
-/// assistant message back unchanged, the adapter substitutes the raw content it received.
-#[derive(Debug, Default)]
-struct ReplayCache {
-    entries: VecDeque<(String, Vec<Value>)>,
-}
-
-impl ReplayCache {
-    fn key(content: &[igor_core::provider::ContentBlock]) -> Option<String> {
-        serde_json::to_string(content).ok()
-    }
-
-    fn get(&self, message: &Message) -> Option<Vec<Value>> {
-        let key = Self::key(&message.content)?;
-        self.entries
-            .iter()
-            .rev()
-            .find(|(entry, _)| *entry == key)
-            .map(|(_, raw)| raw.clone())
-    }
-
-    fn insert(&mut self, content: &[igor_core::provider::ContentBlock], raw: Vec<Value>) {
-        let Some(key) = Self::key(content) else {
-            return;
-        };
-        if self.entries.len() == REPLAY_CAPACITY {
-            self.entries.pop_front();
-        }
-        self.entries.push_back((key, raw));
+        cancellable(cancel, self.send(&request)).await?
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use igor_core::provider::{ContentBlock, Role};
-    use serde_json::json;
-
     use super::*;
-
-    #[test]
-    fn replay_cache_is_bounded_and_matches_exact_content() {
-        let mut cache = ReplayCache::default();
-        let content = |n: usize| {
-            vec![ContentBlock::Text {
-                text: format!("turn {n}"),
-            }]
-        };
-        for n in 0..=REPLAY_CAPACITY {
-            cache.insert(&content(n), vec![json!(n)]);
-        }
-        let message = |n| Message {
-            role: Role::Assistant,
-            content: content(n),
-        };
-        assert_eq!(cache.entries.len(), REPLAY_CAPACITY);
-        assert_eq!(cache.get(&message(0)), None, "oldest entry evicted");
-        assert_eq!(
-            cache.get(&message(REPLAY_CAPACITY)),
-            Some(vec![json!(REPLAY_CAPACITY)])
-        );
-    }
 
     #[test]
     fn debug_output_never_contains_the_key() -> Result<(), BuildError> {

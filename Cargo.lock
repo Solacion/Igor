@@ -811,9 +811,21 @@ dependencies = [
  "async-trait",
  "igor-config",
  "igor-core",
+ "igor-provider-http",
  "reqwest",
  "serde_json",
  "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "igor-provider-http"
+version = "0.1.0"
+dependencies = [
+ "igor-config",
+ "igor-core",
+ "reqwest",
+ "serde_json",
  "tokio",
 ]
 
@@ -824,6 +836,7 @@ dependencies = [
  "async-trait",
  "igor-config",
  "igor-core",
+ "igor-provider-http",
  "reqwest",
  "serde_json",
  "thiserror",

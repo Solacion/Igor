@@ -8,7 +8,6 @@
 //! The adapter does not retry. It marks errors [`ProviderError::retryable`] so the session loop
 //! can retry visibly.
 
-mod errors;
 mod wire;
 
 use std::time::Duration;
@@ -16,18 +15,12 @@ use std::time::Duration;
 use async_trait::async_trait;
 use igor_config::{ProviderConfig, ProviderKind, Secret};
 use igor_core::CancellationToken;
-use igor_core::provider::{
-    ModelRequest, ModelResponse, Provider, ProviderError, ProviderErrorKind,
-};
+use igor_core::provider::{ModelRequest, ModelResponse, Provider, ProviderError};
+use igor_provider_http::{cancellable, errors, read_body, retry_after};
 use thiserror::Error;
 
+pub use igor_provider_http::{DEFAULT_REQUEST_TIMEOUT, MAX_RESPONSE_BYTES};
 pub use wire::TOOL_ERROR_PREFIX;
-
-/// Default bound on one request, including reading the response. Local models can be slow.
-pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
-
-/// Largest response body accepted, in bytes.
-pub const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
 /// Settings for [`OpenAiCompatibleProvider`].
 #[derive(Debug)]
@@ -127,11 +120,7 @@ impl OpenAiCompatibleProvider {
             .map_err(|err| errors::transport_error(&err, secret))?;
 
         let status = response.status();
-        let retry_after = response
-            .headers()
-            .get("retry-after")
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned);
+        let retry_after = retry_after(&response);
         let bytes = read_body(response, secret).await?;
         if !status.is_success() {
             return Err(errors::status_error(
@@ -146,30 +135,6 @@ impl OpenAiCompatibleProvider {
     }
 }
 
-/// Reads the response body, refusing bodies above [`MAX_RESPONSE_BYTES`].
-async fn read_body(
-    mut response: reqwest::Response,
-    secret: &str,
-) -> Result<Vec<u8>, ProviderError> {
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|err| errors::transport_error(&err, secret))?
-    {
-        if bytes.len() + chunk.len() > MAX_RESPONSE_BYTES {
-            return Err(errors::error(
-                ProviderErrorKind::MalformedResponse,
-                false,
-                &format!("response body exceeds {MAX_RESPONSE_BYTES} bytes"),
-                secret,
-            ));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    Ok(bytes)
-}
-
 #[async_trait]
 impl Provider for OpenAiCompatibleProvider {
     fn name(&self) -> &str {
@@ -181,14 +146,7 @@ impl Provider for OpenAiCompatibleProvider {
         request: ModelRequest,
         cancel: CancellationToken,
     ) -> Result<ModelResponse, ProviderError> {
-        if cancel.is_cancelled() {
-            return Err(errors::cancelled());
-        }
-        tokio::select! {
-            biased;
-            () = cancel.cancelled() => Err(errors::cancelled()),
-            result = self.send(&request) => result,
-        }
+        cancellable(cancel, self.send(&request)).await?
     }
 }
 

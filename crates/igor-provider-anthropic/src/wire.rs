@@ -3,27 +3,16 @@
 use serde_json::{Map, Value, json};
 
 use igor_core::provider::{
-    ContentBlock, Message, ModelRequest, ModelResponse, ProviderError, ProviderErrorKind, Role,
-    StopReason,
+    ContentBlock, ModelRequest, ModelResponse, ProviderError, ProviderErrorKind, Role, StopReason,
 };
 
-/// Builds the Messages API request body. `assistant_content` may supply the exact content an
-/// earlier response carried for an assistant message, so blocks the neutral types cannot hold
-/// (thinking blocks) are sent back unchanged.
-pub(crate) fn request_body(
-    model: &str,
-    request: &ModelRequest,
-    assistant_content: impl Fn(&Message) -> Option<Vec<Value>>,
-) -> Value {
+/// Builds the Messages API request body.
+pub(crate) fn request_body(model: &str, request: &ModelRequest) -> Value {
     let messages: Vec<Value> = request
         .messages
         .iter()
         .map(|message| {
-            let content = match message.role {
-                Role::Assistant => assistant_content(message),
-                Role::User => None,
-            }
-            .unwrap_or_else(|| message.content.iter().map(content_block).collect());
+            let content: Vec<Value> = message.content.iter().map(content_block).collect();
             json!({ "role": role(message.role), "content": content })
         })
         .collect();
@@ -78,15 +67,8 @@ fn content_block(block: &ContentBlock) -> Value {
     }
 }
 
-/// A parsed response: the neutral form, plus the raw content when it held blocks the neutral
-/// form drops.
-pub(crate) struct Parsed {
-    pub response: ModelResponse,
-    pub raw_content_to_replay: Option<Vec<Value>>,
-}
-
 /// Parses a successful Messages API response body.
-pub(crate) fn parse_response(body: &[u8]) -> Result<Parsed, ProviderError> {
+pub(crate) fn parse_response(body: &[u8]) -> Result<ModelResponse, ProviderError> {
     let value: Value = serde_json::from_slice(body)
         .map_err(|err| malformed(format!("response is not JSON: {err}")))?;
     let raw_content = value
@@ -99,26 +81,21 @@ pub(crate) fn parse_response(body: &[u8]) -> Result<Parsed, ProviderError> {
         .ok_or_else(|| malformed("response has no `stop_reason`".into()))?;
 
     let mut content = Vec::with_capacity(raw_content.len());
-    let mut has_opaque_blocks = false;
     for (index, block) in raw_content.iter().enumerate() {
-        match parse_block(block)
+        if let Some(block) = parse_block(block)
             .map_err(|problem| malformed(format!("content[{index}]: {problem}")))?
         {
-            Some(block) => content.push(block),
-            None => has_opaque_blocks = true,
+            content.push(block);
         }
     }
 
-    Ok(Parsed {
-        response: ModelResponse {
-            content,
-            stop_reason: stop_reason_from(stop_reason),
-        },
-        raw_content_to_replay: has_opaque_blocks.then(|| raw_content.clone()),
+    Ok(ModelResponse {
+        content,
+        stop_reason: stop_reason_from(stop_reason),
     })
 }
 
-/// Parses one content block. `Ok(None)` is a thinking block, kept only for replay.
+/// Parses one content block. `Ok(None)` is a thinking block, which is dropped.
 fn parse_block(block: &Value) -> Result<Option<ContentBlock>, String> {
     let string = |field: &str| {
         block
@@ -168,7 +145,7 @@ fn malformed(message: String) -> ProviderError {
 
 #[cfg(test)]
 mod tests {
-    use igor_core::provider::ToolSpec;
+    use igor_core::provider::{Message, ToolSpec};
 
     use super::*;
 
@@ -210,7 +187,7 @@ mod tests {
 
     #[test]
     fn request_translates_every_block_type() {
-        let body = request_body("test-model", &request(), |_| None);
+        let body = request_body("test-model", &request());
         assert_eq!(
             body,
             json!({
@@ -241,17 +218,9 @@ mod tests {
         let mut request = request();
         request.system.clear();
         request.tools.clear();
-        let body = request_body("m", &request, |_| None);
+        let body = request_body("m", &request);
         assert!(body.get("system").is_none());
         assert!(body.get("tools").is_none());
-    }
-
-    #[test]
-    fn replayed_assistant_content_replaces_the_neutral_form() {
-        let raw = vec![json!({ "type": "thinking", "thinking": "", "signature": "sig" })];
-        let body = request_body("m", &request(), |_| Some(raw.clone()));
-        assert_eq!(body["messages"][1]["content"], json!(raw));
-        assert_eq!(body["messages"][0]["content"][0]["type"], "text");
     }
 
     #[test]
@@ -266,7 +235,7 @@ mod tests {
         ];
         for (wire, expected) in cases {
             let body = json!({ "content": [], "stop_reason": wire }).to_string();
-            let parsed = parse_response(body.as_bytes()).map(|p| p.response.stop_reason);
+            let parsed = parse_response(body.as_bytes()).map(|p| p.stop_reason);
             assert_eq!(parsed.ok(), Some(expected), "{wire}");
         }
     }
@@ -293,7 +262,7 @@ mod tests {
     }
 
     #[test]
-    fn thinking_blocks_are_kept_only_for_replay() -> Result<(), ProviderError> {
+    fn thinking_blocks_are_dropped() -> Result<(), ProviderError> {
         let body = json!({
             "content": [
                 { "type": "thinking", "thinking": "", "signature": "sig" },
@@ -303,8 +272,8 @@ mod tests {
         })
         .to_string();
         let parsed = parse_response(body.as_bytes())?;
-        assert_eq!(parsed.response.content.len(), 1);
-        assert_eq!(parsed.raw_content_to_replay.map(|raw| raw.len()), Some(2));
+        assert_eq!(parsed.content.len(), 1);
+        assert!(matches!(parsed.content[0], ContentBlock::ToolUse { .. }));
         Ok(())
     }
 }

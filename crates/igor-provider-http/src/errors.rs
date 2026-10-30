@@ -1,16 +1,14 @@
 //! Mapping of HTTP and transport failures to [`ProviderError`].
-//!
-//! Every message is scrubbed of the API key, when one is configured, and bounded in length before it leaves the adapter.
 
 use igor_config::REDACTED;
 use igor_core::provider::{ProviderError, ProviderErrorKind};
 use serde_json::Value;
 
 /// Maximum length, in characters, of a provider error message.
-const MAX_MESSAGE_CHARS: usize = 300;
+pub const MAX_MESSAGE_CHARS: usize = 300;
 
-/// Builds an error, scrubbing `secret` from the message and bounding its length.
-pub(crate) fn error(
+/// Builds an error, scrubbing `secret` from the message (when non-empty) and bounding its length.
+pub fn error(
     kind: ProviderErrorKind,
     retryable: bool,
     message: &str,
@@ -34,7 +32,10 @@ pub(crate) fn error(
 
 /// Maps a non-success HTTP response. 429, 408, 409 and every 5xx (including 529 overloaded) are
 /// retryable; authentication, permission and request errors are not.
-pub(crate) fn status_error(
+///
+/// Reads `{"error": {"type": ..., "message": ...}}` (Anthropic and OpenAI) and the plain
+/// `{"error": "..."}` some OpenAI-compatible servers, such as LM Studio, send.
+pub fn status_error(
     status: u16,
     retry_after: Option<&str>,
     body: &[u8],
@@ -54,8 +55,6 @@ pub(crate) fn status_error(
         .and_then(|error| error.get("type"))
         .and_then(Value::as_str)
         .unwrap_or("unknown_error");
-    // OpenAI-compatible servers send `{"error": {"message": ...}}`; some, such as LM Studio
-    // for some failures, send `{"error": "..."}`.
     let api_message = api_error
         .and_then(|error| {
             error
@@ -65,7 +64,8 @@ pub(crate) fn status_error(
         })
         .unwrap_or("no error message");
     let mut message = format!("HTTP {status} {error_type}: {api_message}");
-    if let Some(seconds) = retry_after.filter(|value| !value.is_empty()) {
+    // Retry-After may also be an HTTP date; only a delay in seconds is reported.
+    if let Some(seconds) = retry_after.and_then(|value| value.trim().parse::<u64>().ok()) {
         message.push_str(&format!(" (retry after {seconds}s)"));
     }
     error(kind, retryable, &message, secret)
@@ -73,7 +73,7 @@ pub(crate) fn status_error(
 
 /// Maps a transport failure. Timeouts and connection failures are retryable: a model call has
 /// no external effect.
-pub(crate) fn transport_error(err: &reqwest::Error, secret: &str) -> ProviderError {
+pub fn transport_error(err: &reqwest::Error, secret: &str) -> ProviderError {
     if err.is_timeout() {
         error(
             ProviderErrorKind::Timeout,
@@ -88,7 +88,7 @@ pub(crate) fn transport_error(err: &reqwest::Error, secret: &str) -> ProviderErr
 }
 
 /// The request was cancelled through its cancellation token.
-pub(crate) fn cancelled() -> ProviderError {
+pub fn cancelled() -> ProviderError {
     error(ProviderErrorKind::Cancelled, false, "request cancelled", "")
 }
 
@@ -119,12 +119,18 @@ mod tests {
 
     #[test]
     fn message_names_status_type_and_retry_after() {
-        let body = br#"{"error":{"type":"rate_limit_error","message":"Slow down"}}"#;
+        let body = br#"{"type":"error","error":{"type":"rate_limit_error","message":"Slow down"}}"#;
         let err = status_error(429, Some("12"), body, "");
         assert_eq!(
             err.message,
             "HTTP 429 rate_limit_error: Slow down (retry after 12s)"
         );
+    }
+
+    #[test]
+    fn http_date_retry_after_is_not_reported_as_seconds() {
+        let err = status_error(429, Some("Wed, 21 Oct 2026 07:28:00 GMT"), b"", "");
+        assert_eq!(err.message, "HTTP 429 unknown_error: no error message");
     }
 
     #[test]

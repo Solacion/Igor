@@ -139,11 +139,12 @@ pub(crate) fn parse_response(body: &[u8]) -> Result<ModelResponse, ProviderError
             text: text.to_owned(),
         });
     }
-    let calls = message
-        .get("tool_calls")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default();
+    // Absent or null means no tool calls; anything other than an array is malformed.
+    let calls = match message.get("tool_calls") {
+        None | Some(Value::Null) => &[][..],
+        Some(Value::Array(calls)) => calls.as_slice(),
+        Some(_) => return Err(malformed("`tool_calls` is not an array".into())),
+    };
     for (index, call) in calls.iter().enumerate() {
         let block = tool_call(call)
             .map_err(|problem| malformed(format!("tool_calls[{index}]: {problem}")))?;
@@ -216,6 +217,22 @@ mod tests {
     use igor_core::provider::{Message, ToolSpec};
 
     use super::*;
+
+    #[test]
+    fn non_array_tool_calls_are_malformed() {
+        let body = json!({
+            "choices": [{
+                "message": { "role": "assistant", "content": "Hi", "tool_calls": { "id": "x" } },
+                "finish_reason": "tool_calls"
+            }]
+        })
+        .to_string();
+        let err = parse_response(body.as_bytes()).err();
+        assert_eq!(
+            err.map(|e| e.kind),
+            Some(ProviderErrorKind::MalformedResponse)
+        );
+    }
 
     #[test]
     fn request_translates_every_block_type() {

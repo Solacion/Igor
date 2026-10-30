@@ -13,31 +13,18 @@ use igor_core::provider::{
     StopReason, ToolSpec,
 };
 use igor_provider_anthropic::{API_VERSION, AnthropicProvider, AnthropicSettings};
+use igor_provider_http::stub::{Reply, Stub};
 use serde_json::{Value, json};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::task::JoinHandle;
 
 type TestResult = Result<(), Box<dyn Error>>;
 
 const SENTINEL_KEY: &str = "IGOR-TEST-SECRET-7f3a";
 
-/// What the stub does with each accepted connection, in order.
-enum Reply {
-    Http {
-        status: u16,
-        headers: Vec<(&'static str, &'static str)>,
-        body: String,
-    },
-    /// Read the request, then close the connection without answering.
-    Close,
-    /// Read the request, then never answer.
-    Hang,
-}
-
+// A missing fixture is a broken test setup: fail loudly with its path.
+#[allow(clippy::panic)]
 fn fixture(name: &str) -> String {
     let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
-    std::fs::read_to_string(path).unwrap_or_else(|err| format!("missing fixture {name}: {err}"))
+    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("cannot read fixture {path}: {err}"))
 }
 
 fn ok(name: &str) -> Reply {
@@ -53,104 +40,6 @@ fn status(status: u16, name: &str) -> Reply {
         status,
         headers: Vec::new(),
         body: fixture(name),
-    }
-}
-
-/// A received request: header lines (lowercased names) and the JSON body.
-#[derive(Debug)]
-struct Received {
-    head: String,
-    body: Value,
-}
-
-impl Received {
-    fn header(&self, name: &str) -> Option<&str> {
-        self.head.lines().find_map(|line| {
-            let (key, value) = line.split_once(':')?;
-            key.eq_ignore_ascii_case(name).then(|| value.trim())
-        })
-    }
-}
-
-struct Stub {
-    base_url: String,
-    task: JoinHandle<Vec<Received>>,
-}
-
-impl Stub {
-    async fn start(replies: Vec<Reply>) -> Result<Self, Box<dyn Error>> {
-        let listener = TcpListener::bind("127.0.0.1:0").await?;
-        let base_url = format!("http://{}", listener.local_addr()?);
-        let task = tokio::spawn(async move {
-            let mut received = Vec::new();
-            for reply in replies {
-                let Ok((mut stream, _)) = listener.accept().await else {
-                    break;
-                };
-                if let Some(request) = read_request(&mut stream).await {
-                    received.push(request);
-                }
-                match reply {
-                    Reply::Http {
-                        status,
-                        headers,
-                        body,
-                    } => {
-                        let mut response = format!(
-                            "HTTP/1.1 {status} STUB\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n",
-                            body.len()
-                        );
-                        for (name, value) in headers {
-                            response.push_str(&format!("{name}: {value}\r\n"));
-                        }
-                        response.push_str("\r\n");
-                        response.push_str(&body);
-                        let _ = stream.write_all(response.as_bytes()).await;
-                        let _ = stream.shutdown().await;
-                    }
-                    Reply::Close => drop(stream),
-                    Reply::Hang => {
-                        std::future::pending::<()>().await;
-                    }
-                }
-            }
-            received
-        });
-        Ok(Self { base_url, task })
-    }
-
-    async fn received(self) -> Result<Vec<Received>, Box<dyn Error>> {
-        Ok(self.task.await?)
-    }
-}
-
-async fn read_request(stream: &mut TcpStream) -> Option<Received> {
-    let mut data = Vec::new();
-    let mut buffer = [0_u8; 8192];
-    loop {
-        let read = stream.read(&mut buffer).await.ok()?;
-        if read == 0 {
-            return None;
-        }
-        data.extend_from_slice(buffer.get(..read)?);
-        let text = String::from_utf8_lossy(&data);
-        let Some(header_end) = text.find("\r\n\r\n") else {
-            continue;
-        };
-        let head = text.get(..header_end)?.to_owned();
-        let length: usize = head
-            .lines()
-            .find_map(|line| {
-                let (key, value) = line.split_once(':')?;
-                key.eq_ignore_ascii_case("content-length")
-                    .then(|| value.trim().parse().ok())?
-            })
-            .unwrap_or(0);
-        let body_start = header_end + 4;
-        if data.len() >= body_start + length {
-            let body = serde_json::from_slice(data.get(body_start..body_start + length)?).ok()?;
-            return Some(Received { head, body });
-        }
     }
 }
 
@@ -185,7 +74,7 @@ async fn complete_once(reply: Reply) -> Result<Result<StopReason, ProviderError>
         .complete(request(), CancellationToken::new())
         .await
         .map(|response| response.stop_reason);
-    stub.task.abort();
+    stub.abort();
     Ok(result)
 }
 
@@ -217,7 +106,7 @@ async fn text_turn_round_trip_sends_headers_and_body() -> TestResult {
 }
 
 #[tokio::test]
-async fn several_tool_calls_in_one_turn_and_thinking_replay() -> TestResult {
+async fn several_tool_calls_in_one_turn_drop_thinking_blocks() -> TestResult {
     let stub = Stub::start(vec![ok("tool_use_turn.json"), ok("text_turn.json")]).await?;
     let provider = provider(&stub.base_url, Duration::from_secs(5))?;
 
@@ -275,12 +164,12 @@ async fn several_tool_calls_in_one_turn_and_thinking_replay() -> TestResult {
     let second = received.get(1).ok_or("second request missing")?;
     let assistant = &second.body["messages"][1];
     assert_eq!(assistant["role"], "assistant");
-    assert_eq!(
-        assistant["content"][0],
-        json!({ "type": "thinking", "thinking": "", "signature": "fixture-signature" }),
-        "thinking block is sent back unchanged"
+    let blocks = assistant["content"].as_array().ok_or("assistant content")?;
+    assert_eq!(blocks.len(), 3, "the neutral turn is sent back as is");
+    assert!(
+        blocks.iter().all(|block| block["type"] != "thinking"),
+        "thinking blocks are never replayed"
     );
-    assert_eq!(assistant["content"].as_array().map(Vec::len), Some(4));
     let results = &second.body["messages"][2]["content"];
     assert_eq!(results[1]["type"], "tool_result");
     assert_eq!(results[1]["is_error"], true);
@@ -351,7 +240,7 @@ async fn hanging_server_times_out() -> TestResult {
         .await
         .err()
         .ok_or("expected a timeout")?;
-    stub.task.abort();
+    stub.abort();
     assert_eq!(
         (err.kind, err.retryable),
         (ProviderErrorKind::Timeout, true)
@@ -374,7 +263,7 @@ async fn cancellation_aborts_an_in_flight_request() -> TestResult {
         .await
         .err()
         .ok_or("expected cancellation")?;
-    stub.task.abort();
+    stub.abort();
     assert_eq!(
         (err.kind, err.retryable),
         (ProviderErrorKind::Cancelled, false)
@@ -390,7 +279,7 @@ async fn already_cancelled_request_is_not_sent() -> TestResult {
     cancel.cancel();
     let err = provider.complete(request(), cancel).await.err();
     assert_eq!(err.map(|e| e.kind), Some(ProviderErrorKind::Cancelled));
-    stub.task.abort();
+    stub.abort();
     Ok(())
 }
 
