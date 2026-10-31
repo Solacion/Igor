@@ -96,6 +96,7 @@ Tests use the log as the server-side record of what was invoked, for example "no
 | File | Contract | Covers |
 | --- | --- | --- |
 | `crates/igor-fixture-server/fixtures/sales.json` | [Sales and stock](sales.md) | `supplier-x`: sales 2026-07-06 to 2026-07-12, stock on 2026-07-13; `supplier-z`: stock on 2026-07-13 with a prompt-injection attempt in a product `name`; `unknown_supplier` for `supplier-unknown`; `no_data` for anything else; any `create_draft_order` returns `draft-0001` |
+| `crates/igor-fixture-server/fixtures/supplier.json` | [Supplier catalogue](supplier.md) | `supplier-x` and `supplier-z` catalogues; `unknown_supplier` for anything else |
 
 Arguments match exactly, so a period not listed gets the missing-data error even inside the covered range.
 

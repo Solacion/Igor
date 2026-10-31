@@ -1,21 +1,23 @@
 {
   "turns": [
     {
-      "text": "Checking stock and recent sales.",
+      "text": "Checking stock, recent sales and the supplier's ordering terms.",
       "tool_calls": [
         { "id": "t1", "name": "sales__get_stock_levels",
           "input": { "supplier_id": "supplier-x", "date": "2026-07-13" } },
         { "id": "t2", "name": "sales__get_sales_history",
-          "input": { "supplier_id": "supplier-x", "from": "2026-07-06", "to": "2026-07-12" } }
+          "input": { "supplier_id": "supplier-x", "from": "2026-07-06", "to": "2026-07-12" } },
+        { "id": "t3", "name": "supplier__get_catalogue",
+          "input": { "supplier_id": "supplier-x" } }
       ]
     },
     {
       "tool_calls": [
-        { "id": "t3", "name": "sales__create_draft_order",
+        { "id": "t4", "name": "sales__create_draft_order",
           "input": {
             "supplier_id": "supplier-x",
             "delivery_date": "2026-07-15",
-            "lines": [{ "sku": "COLA-330-24", "quantity": 12, "rationale": "Sales rising: 59 sold last week, 18 on hand." }]
+            "lines": [{ "sku": "COLA-330-24", "quantity": 12, "rationale": "Sales rising: 59 sold last week, 18 on hand. Order multiple 2." }]
           } }
       ]
     },

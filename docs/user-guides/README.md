@@ -6,7 +6,7 @@ IGOR is currently in planning. There is no installable application or verified s
 
 1. Open IGOR with the configured model provider and MCP server connections.
 2. Confirm connection status.
-3. Make a request, such as the example "Create an order for supplier X", which uses sales and stock data.
+3. Make a request, such as the example "Create an order for supplier X", which uses sales, stock and supplier catalogue data from two servers.
 4. Answer any clarifying questions, such as the order date or period; IGOR asks rather than assumes.
 5. Inspect tool activity, evidence, assumptions and the proposed action with its exact arguments.
 6. Approve or deny the action. Write-classified tools run only after explicit approval.

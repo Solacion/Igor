@@ -14,7 +14,7 @@ IGOR is a planned standalone, embeddable, local-first AI agent runtime. It will 
 - [Pull request review standards](docs/development/review-standards.md)
 - [User guide](docs/user-guides/README.md)
 
-The first milestone is a small, reproducible interview demo of the generic runtime. IGOR connects to whichever MCP servers the operator configures, fetches data through their tools, reports back, and performs tasks after approval. An example purchasing scenario uses a fixture-backed sales and stock server, standing in for a point-of-sale MCP server, to show tool use and human approval.
+The first milestone is a small, reproducible interview demo of the generic runtime. IGOR connects to whichever MCP servers the operator configures, fetches data through their tools, reports back, and performs tasks after approval. An example purchasing scenario uses two fixture-backed MCP servers, sales and stock (standing in for a point-of-sale server) and a supplier catalogue, to show multi-server tool use and human approval.
 
 Specifications live in this repository. The backlog is tracked in [GitHub Issues](https://github.com/Solacion/Igor/issues) as epics, features and user stories. Every pull request into `main` must pass the gated agent code and security reviews.
 

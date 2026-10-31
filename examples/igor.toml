@@ -4,7 +4,7 @@
 # resolve against this file's directory. Build the fixture server first:
 #   cargo build -p igor-fixture-server
 #
-# Tool names follow the example contract. The fixture server reads one fixture file, given
+# Tool names follow the example contracts. The fixture server reads one fixture file, given
 # relative to the server's working directory (by default this file's directory).
 
 # Local model through LM Studio's OpenAI-compatible server. No API key needed.
@@ -31,12 +31,21 @@ args = ["--fixture", "../crates/igor-fixture-server/fixtures/sales.json"]
 # server needs no variables; a bare command such as `node` would need "PATH".
 startup_timeout_ms = 10000
 
+[[servers]]
+id = "supplier"
+transport = "stdio"
+command = "../target/debug/igor-fixture-server"
+args = ["--fixture", "../crates/igor-fixture-server/fixtures/supplier.json"]
+
 # Host classification is the only source of tool permissions. Tools not listed are
 # unclassified: hidden from the model and refused if called.
 [permissions.sales]
 get_sales_history = "read"
 get_stock_levels = "read"
 create_draft_order = "write"
+
+[permissions.supplier]
+get_catalogue = "read"
 
 [limits]
 max_iterations = 10

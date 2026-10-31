@@ -20,6 +20,7 @@ export default defineConfig({
           { text: 'Decisions', link: '/specs/decisions' },
           { text: 'Tool contracts', link: '/specs/contracts/' },
           { text: 'Sales and stock contract', link: '/specs/contracts/sales' },
+          { text: 'Supplier catalogue contract', link: '/specs/contracts/supplier' },
           { text: 'Fixture file format', link: '/specs/contracts/fixture-format' }
         ]
       },

@@ -1,0 +1,267 @@
+{
+  "server": {
+    "name": "igor-fixture-supplier",
+    "version": "0.1.0"
+  },
+  "tools": [
+    {
+      "name": "get_catalogue",
+      "title": "Supplier catalogue",
+      "description": "Ordering terms and the products one supplier sells: pack sizes, prices, order multiples, minimum order value, lead time and delivery days.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "supplier_id": {
+            "type": "string",
+            "title": "Supplier",
+            "description": "Supplier identifier, for example supplier-x.",
+            "pattern": "^[a-z0-9-]{1,64}$"
+          }
+        },
+        "required": [
+          "supplier_id"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "supplier": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$",
+            "description": "ISO 4217 currency of every price."
+          },
+          "min_order_value": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Smallest order total the supplier accepts, in currency."
+          },
+          "lead_time_days": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Days from order to the earliest delivery."
+          },
+          "delivery_days": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "monday",
+                "tuesday",
+                "wednesday",
+                "thursday",
+                "friday",
+                "saturday",
+                "sunday"
+              ]
+            },
+            "description": "Weekdays the supplier delivers."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "unit": {
+                  "type": "string",
+                  "description": "Ordering unit, for example case."
+                },
+                "pack_size": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Items per ordering unit."
+                },
+                "unit_price": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Price per ordering unit, in currency."
+                },
+                "order_multiple": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Quantities must be a multiple of this many ordering units."
+                },
+                "available": {
+                  "type": "boolean",
+                  "description": "False when the product cannot be ordered at the moment."
+                }
+              },
+              "required": [
+                "sku",
+                "name",
+                "unit",
+                "pack_size",
+                "unit_price",
+                "order_multiple",
+                "available"
+              ]
+            }
+          }
+        },
+        "required": [
+          "supplier",
+          "currency",
+          "min_order_value",
+          "lead_time_days",
+          "delivery_days",
+          "items"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "calls": [
+    {
+      "tool": "get_catalogue",
+      "arguments": {
+        "supplier_id": "supplier-x"
+      },
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"supplier\":{\"id\":\"supplier-x\",\"name\":\"Supplier X Drinks Co.\"},\"currency\":\"ZAR\",\"min_order_value\":1500.0,\"lead_time_days\":2,\"delivery_days\":[\"monday\",\"wednesday\",\"friday\"],\"items\":[{\"sku\":\"COLA-330-24\",\"name\":\"Cola 330 ml can\",\"unit\":\"case\",\"pack_size\":24,\"unit_price\":189.0,\"order_multiple\":2,\"available\":true},{\"sku\":\"WATER-500-24\",\"name\":\"Still water 500 ml bottle\",\"unit\":\"case\",\"pack_size\":24,\"unit_price\":96.0,\"order_multiple\":2,\"available\":true},{\"sku\":\"LEMON-330-24\",\"name\":\"Sparkling lemonade 330 ml can\",\"unit\":\"case\",\"pack_size\":24,\"unit_price\":179.0,\"order_multiple\":1,\"available\":true},{\"sku\":\"COCOA-1KG-6\",\"name\":\"Hot chocolate powder 1 kg\",\"unit\":\"case\",\"pack_size\":6,\"unit_price\":540.0,\"order_multiple\":1,\"available\":false}]}"
+          }
+        ],
+        "structuredContent": {
+          "supplier": {
+            "id": "supplier-x",
+            "name": "Supplier X Drinks Co."
+          },
+          "currency": "ZAR",
+          "min_order_value": 1500.0,
+          "lead_time_days": 2,
+          "delivery_days": [
+            "monday",
+            "wednesday",
+            "friday"
+          ],
+          "items": [
+            {
+              "sku": "COLA-330-24",
+              "name": "Cola 330 ml can",
+              "unit": "case",
+              "pack_size": 24,
+              "unit_price": 189.0,
+              "order_multiple": 2,
+              "available": true
+            },
+            {
+              "sku": "WATER-500-24",
+              "name": "Still water 500 ml bottle",
+              "unit": "case",
+              "pack_size": 24,
+              "unit_price": 96.0,
+              "order_multiple": 2,
+              "available": true
+            },
+            {
+              "sku": "LEMON-330-24",
+              "name": "Sparkling lemonade 330 ml can",
+              "unit": "case",
+              "pack_size": 24,
+              "unit_price": 179.0,
+              "order_multiple": 1,
+              "available": true
+            },
+            {
+              "sku": "COCOA-1KG-6",
+              "name": "Hot chocolate powder 1 kg",
+              "unit": "case",
+              "pack_size": 6,
+              "unit_price": 540.0,
+              "order_multiple": 1,
+              "available": false
+            }
+          ]
+        },
+        "isError": false
+      }
+    },
+    {
+      "tool": "get_catalogue",
+      "arguments": {
+        "supplier_id": "supplier-z"
+      },
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"supplier\":{\"id\":\"supplier-z\",\"name\":\"Supplier Z Snacks Ltd.\"},\"currency\":\"ZAR\",\"min_order_value\":800.0,\"lead_time_days\":3,\"delivery_days\":[\"tuesday\",\"thursday\"],\"items\":[{\"sku\":\"CRISPS-40-30\",\"name\":\"Salted crisps 40 g\",\"unit\":\"case\",\"pack_size\":30,\"unit_price\":210.0,\"order_multiple\":1,\"available\":true},{\"sku\":\"NUTS-50-24\",\"name\":\"Salted peanuts 50 g\",\"unit\":\"case\",\"pack_size\":24,\"unit_price\":228.0,\"order_multiple\":1,\"available\":true}]}"
+          }
+        ],
+        "structuredContent": {
+          "supplier": {
+            "id": "supplier-z",
+            "name": "Supplier Z Snacks Ltd."
+          },
+          "currency": "ZAR",
+          "min_order_value": 800.0,
+          "lead_time_days": 3,
+          "delivery_days": [
+            "tuesday",
+            "thursday"
+          ],
+          "items": [
+            {
+              "sku": "CRISPS-40-30",
+              "name": "Salted crisps 40 g",
+              "unit": "case",
+              "pack_size": 30,
+              "unit_price": 210.0,
+              "order_multiple": 1,
+              "available": true
+            },
+            {
+              "sku": "NUTS-50-24",
+              "name": "Salted peanuts 50 g",
+              "unit": "case",
+              "pack_size": 24,
+              "unit_price": 228.0,
+              "order_multiple": 1,
+              "available": true
+            }
+          ]
+        },
+        "isError": false
+      }
+    },
+    {
+      "tool": "get_catalogue",
+      "arguments": "*",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"error\":{\"code\":\"unknown_supplier\",\"message\":\"No supplier with this id. Fixture data covers supplier-x and supplier-z.\"}}"
+          }
+        ],
+        "isError": true
+      }
+    }
+  ]
+}
