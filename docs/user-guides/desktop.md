@@ -121,3 +121,7 @@ Use the one-command disposable fixture demo above and follow its exact prompts a
 - [ ] **Presentation/security, not run:** inspect light/dark mode and the minimum 420×620 window, keyboard focus, long argument/hash wrapping, literal hostile text, missing-key guidance, provider switch, empty-server Settings link, and shutdown of fixture children after closing Igor.
 
 If any required desktop check remains blocked before the Tuesday 3 November 2026 interview, use the CLI demo and record the exact failing step instead of treating automated tests as manual evidence.
+
+### Answers with gaps
+
+If the model answers after unsuccessful tool calls, the desktop shows “The answer may be incomplete: N tool calls did not succeed.” Unknown future turn outcomes are shown as “Not a full answer”; inspect activity before relying on the response.
