@@ -8,6 +8,8 @@ const { preferences, voices, error } = voice
     <h2 id="voice-title">Voice</h2>
     <p class="hint">Voice is independent of your AI provider. These preferences stay on this device and are never saved in igor.toml.</p>
     <label><input v-model="preferences.enabled" type="checkbox" :disabled="!voice.supported" /> Speak Igor's replies</label>
+    <label><input v-model="preferences.reviewBeforeSending" type="checkbox" /> Review before sending</label>
+    <p class="hint">Leave recorded text in the composer for review instead of sending it automatically.</p>
     <label for="voice-picker">Voice</label>
     <select id="voice-picker" v-model="preferences.voiceURI" :disabled="!voice.supported">
       <option value="">Automatic (best available English voice)</option>
