@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod activity_export;
 mod composition;
 mod sessions;
 mod settings;
@@ -77,6 +78,23 @@ fn close_session(
     runtime: State<'_, Arc<DesktopRuntime>>,
 ) -> Result<(), BridgeError> {
     runtime.close(request)
+}
+
+#[tauri::command]
+async fn export_activity(
+    app: tauri::AppHandle,
+    request: SessionRequest,
+    runtime: State<'_, Arc<DesktopRuntime>>,
+) -> Result<String, BridgeError> {
+    let bytes = runtime.export_activity(request)?;
+    let directory = app.path().app_data_dir().map_err(|_| BridgeError::Export)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        activity_export::save(&directory, &bytes)
+            .map(|path| path.display().to_string())
+            .map_err(|_| BridgeError::Export)
+    })
+    .await
+    .map_err(|_| BridgeError::Export)?
 }
 
 use std::sync::Arc;
@@ -221,6 +239,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             answer_clarification,
             cancel_turn,
             close_session,
+            export_activity,
             settings_view,
             settings_save_server,
             settings_test_server,
