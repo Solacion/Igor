@@ -24,7 +24,7 @@ use std::time::Duration;
 use igor_core::policy::Classification;
 use igor_core::tools::{ServerId, ToolId};
 
-pub use edit::{ConfigDocument, PermissionClass, ServerEntry};
+pub use edit::{ConfigDocument, PermissionClass, ProviderEntry, ServerEntry};
 pub use error::{ConfigError, Origin, Problem};
 pub use secret::{REDACTED, Secret, SecretError, SecretRef};
 
@@ -107,11 +107,13 @@ fn absolute_dir(dir: Option<&Path>) -> std::io::Result<PathBuf> {
 }
 
 /// Supported model provider kinds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ProviderKind {
     /// Anthropic Messages API.
+    #[serde(rename = "anthropic")]
     Anthropic,
     /// OpenAI-compatible chat completions API, such as LM Studio's local server.
+    #[serde(rename = "openai_compatible")]
     OpenAiCompatible,
 }
 

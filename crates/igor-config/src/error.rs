@@ -139,6 +139,9 @@ pub enum Problem {
     /// A server would receive a provider's API key.
     #[error("environment variable {0} holds a provider API key and must not be passed to a server")]
     ExposesProviderKey(String),
+    /// An edit names a provider that is not declared.
+    #[error("undeclared provider {0:?}")]
+    UnknownProvider(String),
     /// A permission refers to a server that is not declared.
     #[error("permission for undeclared server {0:?}")]
     UnknownServer(String),
