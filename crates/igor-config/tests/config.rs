@@ -118,7 +118,7 @@ fn defaults_apply_when_omitted() -> TestResult {
     let claude = config.provider("claude").ok_or("claude missing")?;
     assert_eq!(claude.base_url, "https://api.anthropic.com");
     assert_eq!(
-        claude.api_key.as_ref().map(|k| k.env_var()),
+        claude.api_key.as_ref().and_then(|k| k.env_var()),
         Some("ANTHROPIC_API_KEY")
     );
     Ok(())
@@ -147,7 +147,7 @@ fn explicit_values_override_defaults() -> TestResult {
     assert_eq!(sales.cwd, PathBuf::from("/cfg/run"));
     assert_eq!(sales.env_allowlist, ["PATH"]);
     assert_eq!(
-        sales.env.get("SALES_TOKEN").map(|r| r.env_var()),
+        sales.env.get("SALES_TOKEN").and_then(|r| r.env_var()),
         Some("IGOR_SALES_TOKEN")
     );
     let inventory = config
@@ -452,8 +452,8 @@ fn schema_violations_report_location() -> TestResult {
         ),
         (
             "unsupported secret source",
-            BASE.replacen("{ env = ", "{ keychain = ", 1),
-            "unsupported secret source `keychain`",
+            BASE.replacen("{ env = ", "{ file = ", 1),
+            "unsupported secret source `file`",
         ),
         ("invalid TOML", format!("{BASE}\n[[servers]\n"), ""),
     ];

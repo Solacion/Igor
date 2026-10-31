@@ -47,13 +47,16 @@ Each `[[providers]]` entry has the following keys:
 | `kind` | yes | `anthropic` or `openai_compatible`. LM Studio uses `openai_compatible`. |
 | `model` | yes | Model name sent to the provider. |
 | `base_url` | `openai_compatible` only | An `https` URL without credentials. Plain `http` is accepted only for `localhost`, `127.0.0.1` or `[::1]`, so keys are never sent unencrypted over a network. For `anthropic`, it defaults to `https://api.anthropic.com`. |
-| `api_key` | `anthropic` only | A secret reference. |
+| `api_key` | `anthropic` only | A secret reference: `{ env = "…" }` or `{ keychain = "…" }`. |
 
 ## Secrets
 
-Secrets are never written in the file. A secret field holds a reference to an environment variable, for example `{ env = "ANTHROPIC_API_KEY" }`. IGOR reads the variable when it uses the secret. If the variable is unset or empty, IGOR reports an error that names the variable.
+Secrets are never written in the file. A secret field holds a reference to where the value is kept:
 
-IGOR rejects a literal value in a secret field, and the error does not repeat that value. Resolved secrets are redacted in debug output, display output and serialised output. The macOS Keychain is not supported yet.
+- `{ env = "ANTHROPIC_API_KEY" }`: an environment variable. IGOR reads it when it uses the secret. If it is unset or empty, IGOR reports an error that names the variable.
+- `{ keychain = "claude" }`: an item in your macOS login Keychain, under the service `com.solacion.igor`. The desktop stores a key you paste in **Settings → Model providers** this way. If the item is missing, IGOR reports an error that names it. Only a provider's `api_key` can use the Keychain; MCP server secrets use environment variables.
+
+IGOR rejects a literal value in a secret field, and the error does not repeat that value. Resolved secrets are redacted in debug output, display output and serialised output. To remove a stored key outside IGOR, open Keychain Access and delete the `com.solacion.igor` item, or run `security delete-generic-password -s com.solacion.igor -a claude`.
 
 ## MCP servers
 

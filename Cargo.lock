@@ -776,6 +776,7 @@ name = "igor-config"
 version = "0.1.0"
 dependencies = [
  "igor-core",
+ "security-framework",
  "serde",
  "serde_json",
  "thiserror",

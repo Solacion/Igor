@@ -1,8 +1,8 @@
 //! Secret references and resolved secrets.
 //!
 //! Configuration never holds a secret value. It holds a [`SecretRef`] naming an environment
-//! variable, resolved into a [`Secret`] only when the value is needed. A [`Secret`] never prints
-//! or serialises its value.
+//! variable or a Keychain item (see [`crate::keychain`]), resolved into a [`Secret`] only when
+//! the value is needed. A [`Secret`] never prints or serialises its value.
 
 use std::ffi::OsString;
 use std::fmt;
@@ -10,39 +10,98 @@ use std::fmt;
 use serde::{Serialize, Serializer};
 use thiserror::Error;
 
+use crate::keychain::{KeyStore, SystemKeychain};
+
 /// Text shown in place of a secret value.
 pub const REDACTED: &str = "[REDACTED]";
 
-/// Reference to a secret held outside the configuration file, in an environment variable.
+/// Reference to a secret held outside the configuration file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SecretRef {
-    env: String,
+    source: Source,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Source {
+    Env(String),
+    Keychain(String),
 }
 
 impl SecretRef {
     /// Creates a reference to an already validated environment variable name.
     pub(crate) fn from_validated_env(env: String) -> Self {
-        Self { env }
+        Self {
+            source: Source::Env(env),
+        }
     }
 
-    /// Name of the environment variable holding the secret.
-    pub fn env_var(&self) -> &str {
-        &self.env
+    /// Creates a reference to an already validated Keychain item name.
+    pub(crate) fn from_validated_keychain(name: String) -> Self {
+        Self {
+            source: Source::Keychain(name),
+        }
     }
 
-    /// Reads the secret from IGOR's process environment.
+    /// Name of the environment variable holding the secret, for an `env` reference.
+    pub fn env_var(&self) -> Option<&str> {
+        match &self.source {
+            Source::Env(var) => Some(var),
+            Source::Keychain(_) => None,
+        }
+    }
+
+    /// Name of the Keychain item holding the secret, for a `keychain` reference.
+    pub fn keychain_name(&self) -> Option<&str> {
+        match &self.source {
+            Source::Keychain(name) => Some(name),
+            Source::Env(_) => None,
+        }
+    }
+
+    /// Where the secret is, for messages: `environment variable NAME` or `Keychain item NAME`.
+    pub fn describe(&self) -> String {
+        match &self.source {
+            Source::Env(var) => format!("environment variable {var}"),
+            Source::Keychain(name) => format!("Keychain item {name}"),
+        }
+    }
+
+    /// Reads the secret from IGOR's process environment or the system Keychain.
     pub fn resolve(&self) -> Result<Secret, SecretError> {
-        self.resolve_with(|name| std::env::var_os(name))
+        self.resolve_in(|name| std::env::var_os(name), &SystemKeychain)
     }
 
-    /// Reads the secret through `lookup`, which maps a variable name to its value. Lets callers
-    /// and tests supply an environment without modifying the process environment.
+    /// Reads an `env` secret through `lookup`, which maps a variable name to its value, and a
+    /// `keychain` secret from the system Keychain. Lets callers and tests supply an environment
+    /// without modifying the process environment.
     pub fn resolve_with(
         &self,
         lookup: impl FnOnce(&str) -> Option<OsString>,
     ) -> Result<Secret, SecretError> {
-        let var = || self.env.clone();
-        let value = lookup(&self.env).ok_or_else(|| SecretError::Missing { var: var() })?;
+        self.resolve_in(lookup, &SystemKeychain)
+    }
+
+    /// Reads the secret through `lookup` for an `env` reference, or from `store` for a
+    /// `keychain` reference.
+    pub fn resolve_in(
+        &self,
+        lookup: impl FnOnce(&str) -> Option<OsString>,
+        store: &dyn KeyStore,
+    ) -> Result<Secret, SecretError> {
+        let env = match &self.source {
+            Source::Env(env) => env,
+            Source::Keychain(name) => {
+                let secret = store
+                    .get(name)?
+                    .ok_or_else(|| SecretError::KeychainMissing { name: name.clone() })?;
+                if secret.expose().is_empty() {
+                    return Err(SecretError::KeychainMissing { name: name.clone() });
+                }
+                return Ok(secret);
+            }
+        };
+        let var = || env.clone();
+        let value = lookup(env).ok_or_else(|| SecretError::Missing { var: var() })?;
         let value = value
             .into_string()
             .map_err(|_| SecretError::NotUnicode { var: var() })?;
@@ -110,6 +169,26 @@ pub enum SecretError {
         /// Variable name.
         var: String,
     },
+    /// No key is stored in the Keychain under this name.
+    #[error("no API key is stored in the Keychain as {name}")]
+    KeychainMissing {
+        /// Keychain item name.
+        name: String,
+    },
+    /// The Keychain could not be read or written.
+    #[error("Keychain item {name}: {reason}")]
+    Keychain {
+        /// Keychain item name.
+        name: String,
+        /// What went wrong, without the value.
+        reason: String,
+    },
+    /// The name is not a valid Keychain item name.
+    #[error("invalid Keychain item name: use 1 to 64 letters, digits, '.', '_' or '-'")]
+    InvalidKeychainName,
+    /// This system has no supported Keychain.
+    #[error("the Keychain is only supported on macOS")]
+    KeychainUnsupported,
 }
 
 /// True for portable environment variable names: `[A-Z_][A-Z0-9_]*`, at most 128 characters.
@@ -204,5 +283,26 @@ mod tests {
         ] {
             assert!(!is_env_name(name), "{name:?} should be invalid");
         }
+    }
+
+    #[test]
+    fn keychain_references_resolve_from_the_store_only() -> Result<(), SecretError> {
+        use crate::keychain::MemoryKeyStore;
+        let store = MemoryKeyStore::default();
+        let reference = SecretRef::from_validated_keychain("claude".into());
+        assert_eq!(reference.env_var(), None);
+        assert_eq!(reference.describe(), "Keychain item claude");
+        let missing = reference.resolve_in(|_| Some(SENTINEL.into()), &store);
+        assert_eq!(
+            missing.err(),
+            Some(SecretError::KeychainMissing {
+                name: "claude".into()
+            })
+        );
+        store.set("claude", &Secret::new(SENTINEL))?;
+        let secret = reference.resolve_in(|_| None, &store)?;
+        assert_eq!(secret.expose(), SENTINEL);
+        assert!(!format!("{reference:?} {secret:?}").contains(SENTINEL));
+        Ok(())
     }
 }

@@ -4,7 +4,8 @@
 //! asked to change, and validates the whole result with the same rules as [`Config::load`] before
 //! saving. Saving replaces the file atomically, so a failed save leaves the old file intact.
 //! Secrets are written only as references: [`ServerEntry::env`] and
-//! [`ProviderEntry::api_key_env`] hold variable names, never values.
+//! [`ProviderEntry::api_key_env`] hold variable names, and [`ProviderEntry::api_key_keychain`] a
+//! Keychain item name, never values.
 
 use std::collections::BTreeMap;
 use std::io::{self, Write};
@@ -28,10 +29,14 @@ pub struct ProviderEntry {
     /// API base URL. `None` means the kind's default.
     #[serde(default)]
     pub base_url: Option<String>,
-    /// Name of the environment variable that holds the API key. Required for
-    /// [`ProviderKind::Anthropic`].
+    /// Name of the environment variable that holds the API key. An Anthropic provider needs
+    /// this or [`ProviderEntry::api_key_keychain`].
     #[serde(default)]
     pub api_key_env: Option<String>,
+    /// Name of the Keychain item that holds the API key; see [`crate::keychain`]. At most one
+    /// of this and [`ProviderEntry::api_key_env`] is set.
+    #[serde(default)]
+    pub api_key_keychain: Option<String>,
 }
 
 /// An MCP server entry as written in the configuration file.
@@ -225,7 +230,12 @@ impl ConfigDocument {
                     base_url: provider.base_url,
                     api_key_env: provider
                         .api_key
+                        .as_ref()
                         .and_then(|key| Some(key.get("env")?.as_str()?.to_owned())),
+                    api_key_keychain: provider
+                        .api_key
+                        .as_ref()
+                        .and_then(|key| Some(key.get("keychain")?.as_str()?.to_owned())),
                 })
             })
             .collect())
@@ -247,12 +257,16 @@ impl ConfigDocument {
     }
 
     /// Adds `entry`, or replaces the provider with id `replacing`, keeping its place and
-    /// comments. Fails with [`Problem::UnknownProvider`] when `replacing` is not configured.
+    /// comments. Fails with [`Problem::UnknownProvider`] when `replacing` is not configured, and
+    /// with [`Problem::TwoKeySources`] when the entry names both key sources.
     pub fn put_provider(
         &mut self,
         replacing: Option<&str>,
         entry: &ProviderEntry,
     ) -> Result<(), Problem> {
+        if entry.api_key_env.is_some() && entry.api_key_keychain.is_some() {
+            return Err(Problem::TwoKeySources);
+        }
         if self.put_entry("providers", replacing, |table| write_provider(table, entry)) {
             Ok(())
         } else {
@@ -459,9 +473,14 @@ fn write_provider(table: &mut Table, entry: &ProviderEntry) {
         "base_url",
         entry.base_url.as_deref().map(Value::from),
     );
-    let api_key = entry.api_key_env.as_deref().map(|var| {
+    let source = match (&entry.api_key_env, &entry.api_key_keychain) {
+        (Some(var), _) => Some(("env", var)),
+        (None, Some(name)) => Some(("keychain", name)),
+        (None, None) => None,
+    };
+    let api_key = source.map(|(kind, name)| {
         let mut reference = InlineTable::new();
-        reference.insert("env", Value::from(var));
+        reference.insert(kind, Value::from(name.as_str()));
         Value::InlineTable(reference)
     });
     set(table, "api_key", api_key);
@@ -667,7 +686,7 @@ get_stock_levels = "read" # safe
         assert_eq!(ConfigDocument::open(doc.path())?.servers()?, [full]);
         let server = &config.servers()[0];
         assert_eq!(server.startup_timeout, Duration::from_millis(5_000));
-        assert_eq!(server.env["POS_TOKEN"].env_var(), "IGOR_POS_TOKEN");
+        assert_eq!(server.env["POS_TOKEN"].env_var(), Some("IGOR_POS_TOKEN"));
         Ok(())
     }
 
@@ -765,6 +784,7 @@ command = "./sales-server"
             model: "claude-sonnet-5-5".to_owned(),
             base_url: None,
             api_key_env: Some("IGOR_CLAUDE_KEY".to_owned()),
+            api_key_keychain: None,
         }
     }
 
@@ -781,6 +801,7 @@ command = "./sales-server"
                     model: "qwen/qwen3-vl-8b".to_owned(),
                     base_url: Some("http://127.0.0.1:1234/v1".to_owned()),
                     api_key_env: None,
+                    api_key_keychain: None,
                 },
                 ProviderEntry {
                     model: "claude-haiku-5-5".to_owned(),
@@ -861,6 +882,62 @@ command = "./sales-server"
             .err()
             .ok_or("accepted plain http to a remote host")?;
         assert_eq!(err.field(), Some("providers[1].base_url"));
+        Ok(())
+    }
+
+    #[test]
+    fn provider_keys_can_live_in_the_keychain() -> TestResult {
+        let mut doc = document("providers-keychain", PROVIDERS)?;
+        let mut entry = claude("claude");
+        entry.api_key_env = None;
+        entry.api_key_keychain = Some("claude".to_owned());
+        doc.put_provider(Some("claude"), &entry)?;
+        let config = doc.save()?;
+        let text = std::fs::read_to_string(doc.path())?;
+        assert!(
+            text.contains(r#"api_key = { keychain = "claude" }"#),
+            "{text}"
+        );
+        let key = config
+            .provider("claude")
+            .and_then(|p| p.api_key.as_ref())
+            .ok_or("no key reference")?;
+        assert_eq!(key.keychain_name(), Some("claude"));
+        assert_eq!(ConfigDocument::open(doc.path())?.providers()?[1], entry);
+
+        let mut both = entry.clone();
+        both.api_key_env = Some("ANTHROPIC_API_KEY".to_owned());
+        assert_eq!(
+            doc.put_provider(Some("claude"), &both),
+            Err(Problem::TwoKeySources)
+        );
+
+        let mut bad = entry;
+        bad.api_key_keychain = Some("sk-ant secret".to_owned());
+        doc.put_provider(Some("claude"), &bad)?;
+        let err = doc.validate().err().ok_or("accepted a bad Keychain name")?;
+        assert_eq!(err.field(), Some("providers[1].api_key"));
+        assert!(!err.to_string().contains("sk-ant"));
+        Ok(())
+    }
+
+    #[test]
+    fn server_secrets_cannot_use_the_keychain() -> TestResult {
+        let doc = document(
+            "server-keychain",
+            r#"[[servers]]
+id = "pos"
+transport = "stdio"
+command = "./pos"
+env = { TOKEN = { keychain = "pos" } }
+"#,
+        )?;
+        let err = doc
+            .validate()
+            .err()
+            .ok_or("accepted a Keychain server secret")?;
+        assert_eq!(err.field(), Some("servers[0].env.TOKEN"));
+        assert!(matches!(err.problem(), Some(Problem::KeychainNotAllowed)));
         Ok(())
     }
 }

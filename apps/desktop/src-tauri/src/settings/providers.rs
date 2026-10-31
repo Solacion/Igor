@@ -149,6 +149,7 @@ mod tests {
             model: "qwen/qwen3-vl-8b".into(),
             base_url: Some("http://127.0.0.1:1234/v1".into()),
             api_key_env: None,
+            api_key_keychain: None,
         };
         settings.save_provider(None, local.clone()).await?;
         let before = provider_revision(&settings.provider_choices()?[0]);
@@ -158,6 +159,7 @@ mod tests {
             model: "model".into(),
             base_url: None,
             api_key_env: Some("IGOR_PROVIDER_TEST_UNSET_20261031".into()),
+            api_key_keychain: None,
         };
         let view = settings.save_provider(None, cloud.clone()).await?;
         assert_eq!(
@@ -173,7 +175,7 @@ mod tests {
                 .as_ref()
                 .ok_or("missing reference")?
                 .env_var(),
-            "IGOR_PROVIDER_TEST_UNSET_20261031"
+            Some("IGOR_PROVIDER_TEST_UNSET_20261031")
         );
         let source = std::fs::read_to_string(&path)?;
         assert!(source.contains("# Keep this operator comment."));

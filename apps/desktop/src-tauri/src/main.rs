@@ -134,7 +134,7 @@ fn provider_options(settings: &Settings) -> Result<ProvidersView, BridgeError> {
     let providers = configured.iter().map(|p| ProviderView {
         revision: settings::provider_revision(p),
         id: p.id.clone(), model: p.model.clone(),
-        unavailable: p.api_key.as_ref().filter(|key| settings::key_variable_missing(key.env_var())).map(|key| format!("Environment variable {} is missing or unavailable. Set it before starting Igor.", key.env_var())),
+        unavailable: p.api_key.as_ref().and_then(|key| key.env_var()).filter(|var| settings::key_variable_missing(var)).map(|var| format!("Environment variable {var} is missing or unavailable. Set it before starting Igor.")),
     }).collect();
     Ok(ProvidersView { providers })
 }
@@ -394,6 +394,7 @@ mod tests {
             model: "test".into(),
             base_url: None,
             api_key_env: Some("IGOR_DESKTOP_SENTINEL_KEY_20261031".into()),
+            api_key_keychain: None,
         };
         let request = serde_json::json!({"request":{"replacing":null,"entry":entry}});
         let saved = settings.save_provider(None, entry.clone()).await?;

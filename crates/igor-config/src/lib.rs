@@ -12,6 +12,7 @@
 
 mod edit;
 mod error;
+pub mod keychain;
 mod raw;
 mod secret;
 mod validate;
@@ -26,6 +27,7 @@ use igor_core::tools::{ServerId, ToolId};
 
 pub use edit::{ConfigDocument, PermissionClass, ProviderEntry, ServerEntry};
 pub use error::{ConfigError, Origin, Problem};
+pub use keychain::{KEYCHAIN_SERVICE, KeyStore, MemoryKeyStore, SystemKeychain};
 pub use secret::{REDACTED, Secret, SecretError, SecretRef};
 
 /// Environment variable that overrides the default configuration path.
