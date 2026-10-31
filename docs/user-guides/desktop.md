@@ -225,3 +225,9 @@ When a provider reports that its model cannot call tools, the conversation shows
 ### Conversation and Settings updates
 
 The conversation uses an instance-scoped lifecycle composable and validated core event variants. Settings and the conversation share one application-owned store. Successful native Settings changes emit `settings-changed` to the local main window; runtime connection/tool-list events also trigger a refresh. The desktop no longer uses a three-second browser poll or a provider-change window event. An idle server that exits without a runtime event is detected on the next operation rather than by a browser timer. The Igor brand is a keyboard-accessible home button.
+
+### Conversation timeline
+
+Messages, compact tool-call rows, approvals and questions appear in one chronological timeline. A successful stock read appears as “Checked stock · sales ✓”; expand its details for outcome/arguments. A write card starts with a human summary. Draft orders show SKU, quantity and rationale from the canonical arguments; other tools show key/value arguments. Expand **Exact arguments and action hash** to review the unchanged authority data. Approve/Deny still echo that exact hash; display parsing never changes the request.
+
+New approvals/questions are announced, scrolled into view and focused on their first control. Other new content follows automatically while you are at the bottom; scrolling up pauses following until **Jump to latest**. A thinking indicator appears during a turn and stops animating with the system's reduced-motion preference. **Enter** sends, **Shift+Enter** adds a newline, and text composition does not send prematurely. The compact toolbar keeps the provider and connection dots together. **New conversation** asks for confirmation when history exists; export first if needed.
