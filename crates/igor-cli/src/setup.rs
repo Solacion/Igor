@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use igor_config::{Config, ServerConfig};
 use igor_core::registry::ToolRegistry;
+use igor_core::session::UnavailableServer;
 use igor_core::tools::{ServerId, ToolBackend, ToolDescriptor};
 use igor_mcp::{McpBackend, StdioServerConfig};
 
@@ -18,6 +19,8 @@ pub struct Connected {
     pub registry: ToolRegistry,
     /// Backends by server.
     pub backends: HashMap<ServerId, Arc<dyn ToolBackend>>,
+    /// Configured servers that could not be connected, with the reason.
+    pub unavailable: Vec<UnavailableServer>,
 }
 
 /// Connects every configured server, reporting each result on `out`. A server that fails to
@@ -25,6 +28,7 @@ pub struct Connected {
 pub async fn connect(config: &Config, out: &mut impl Write) -> io::Result<Connected> {
     let mut backends: HashMap<ServerId, Arc<dyn ToolBackend>> = HashMap::new();
     let mut descriptors: Vec<ToolDescriptor> = Vec::new();
+    let mut unavailable = Vec::new();
     for server in config.servers() {
         match connect_one(server).await {
             Ok((backend, tools)) => {
@@ -44,6 +48,10 @@ pub async fn connect(config: &Config, out: &mut impl Write) -> io::Result<Connec
                     server.id,
                     sanitize(&message)
                 )?;
+                unavailable.push(UnavailableServer {
+                    id: server.id.clone(),
+                    reason: message,
+                });
             }
         }
     }
@@ -76,7 +84,11 @@ pub async fn connect(config: &Config, out: &mut impl Write) -> io::Result<Connec
             )?;
         }
     }
-    Ok(Connected { registry, backends })
+    Ok(Connected {
+        registry,
+        backends,
+        unavailable,
+    })
 }
 
 async fn connect_one(

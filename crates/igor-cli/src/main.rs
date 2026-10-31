@@ -113,7 +113,10 @@ async fn run() -> Result<ExitCode, CliError> {
             ids: Arc::new(SequentialIds::new("call")),
             events: Arc::new(sink),
         },
-        session_config(&config)?,
+        SessionConfig {
+            unavailable_servers: connected.unavailable,
+            ..session_config(&config)?
+        },
     );
 
     let mut stdin = BufReader::new(tokio::io::stdin());
