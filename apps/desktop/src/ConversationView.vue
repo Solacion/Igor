@@ -16,6 +16,7 @@ const notice = ref('')
 const status = ref('Ready for a message')
 const questions = ref<Array<{ key: string; id: string; question: string; answer: string; state: string }>>([])
 const approvals = ref<Array<{ key: string; request: ApprovalPreview; state: string }>>([])
+const connections = ref<Array<{ key: string; server: string; state: string; detail: string }>>([])
 const activity = ref<Record<string, Activity>>({})
 let epoch = 0
 const messages = ref<Array<{ role: string; text: string }>>([])
@@ -25,10 +26,11 @@ let lastSequence = -1
 let timer: ReturnType<typeof setInterval> | undefined
 let disposed = false
 let refreshing = false
+let refreshAgain = false
 let stopRequested = false
 
-async function refresh() {
-  if (refreshing) return
+async function refresh(afterEvent = false) {
+  if (refreshing) { refreshAgain ||= afterEvent; return }
   refreshing = true
   try {
     const [options, settings] = await Promise.all([readProviders(), readSettings()])
@@ -39,7 +41,10 @@ async function refresh() {
     loaded.value = true
   } catch {
     if (!disposed) { loaded.value = false; error.value = 'Could not load conversation settings. Check your configuration and try again.' }
-  } finally { refreshing = false }
+  } finally {
+    refreshing = false
+    if (refreshAgain && !disposed) { refreshAgain = false; void refresh() }
+  }
 }
 function finish(outcome: TurnOutcome) {
   for (const item of questions.value) if (item.state === 'pending' || item.state === 'sending') item.state = 'Turn ended'
@@ -61,6 +66,10 @@ function receive(envelope: CoreEvent) {
   lastSequence = envelope.sequence
   const event = envelope.event
   updateActivity(activity.value, event, epoch)
+  if (event.event === 'connection_changed' && typeof event.server === 'string' && typeof event.state === 'string') {
+    connections.value.push({ key: `${epoch}:${envelope.sequence}`, server: event.server, state: event.state, detail: typeof event.detail === 'string' ? event.detail : '' })
+    void refresh(true)
+  }
   if (event.event === 'approval_requested') {
     const request = event.request as unknown as ApprovalPreview
     approvals.value.push({ key: `${epoch}:${request.approval_id}`, request, state: 'pending' })
@@ -150,7 +159,7 @@ async function stop() {
 async function reset() {
   if (busy.value) return
   try {
-    await session?.close(); session = null; messages.value = []; activity.value = {}; approvals.value = []; questions.value = []; notice.value = ''; error.value = ''; status.value = 'Ready for a message'
+    await session?.close(); session = null; messages.value = []; activity.value = {}; connections.value = []; approvals.value = []; questions.value = []; notice.value = ''; error.value = ''; status.value = 'Ready for a message'
   } catch { error.value = 'Could not close the conversation. Try again.' }
 }
 onMounted(() => { void refresh(); timer = setInterval(() => { void refresh() }, 3000) })
@@ -177,8 +186,13 @@ onUnmounted(() => { disposed = true; clearInterval(timer); void session?.close()
     <ol class="messages" aria-label="Conversation messages" aria-live="polite" aria-relevant="additions">
       <li v-for="(message, index) in messages" :key="index"><strong>{{ message.role }}</strong><p class="literal">{{ message.text }}</p></li>
     </ol>
-    <section v-if="Object.keys(activity).length" class="tool-activity" aria-labelledby="activity-title">
+    <section v-if="Object.keys(activity).length || connections.length" class="tool-activity" aria-labelledby="activity-title">
       <h2 id="activity-title">Tool activity</h2>
+      <ol class="connection-events"><li v-for="connection in connections" :key="connection.key" class="activity-row">
+        <strong>{{ connection.server }}</strong>
+        <p>{{ connection.state === 'failed' ? 'Server stopped; later calls are not executed.' : connection.state === 'disconnected' ? 'Server disconnected.' : connection.state === 'connecting' ? 'Server connecting…' : connection.state === 'connected' ? 'Server connected.' : connection.state }}</p>
+        <p v-if="connection.detail" class="literal">{{ connection.detail }}</p>
+      </li></ol>
       <ol><li v-for="(call, key) in activity" :key="key" class="activity-row">
         <strong>{{ call.server }} · {{ call.tool }}</strong><p>{{ call.state }}</p>
         <p v-if="call.detail" class="literal">{{ call.detail }}</p>
@@ -210,7 +224,7 @@ onUnmounted(() => { disposed = true; clearInterval(timer); void session?.close()
       </article>
     </section>
     <p role="status" class="turn-status">{{ status }}</p>
-    <p v-if="error" role="alert">{{ error }} <button v-if="!loaded" @click="refresh">Try again</button></p>
+    <p v-if="error" role="alert">{{ error }} <button v-if="!loaded" @click="refresh()">Try again</button></p>
     <form class="composer" @submit.prevent="send">
       <label for="message">Message Igor</label>
       <textarea id="message" v-model="text" :disabled="busy" maxlength="32768" rows="3" placeholder="What would you like to work on?" />

@@ -149,3 +149,49 @@ it('ignores future tool variants and labels definite failure and server error re
   mock.emit({ event: 'tool_call_completed', call_id: 'b', is_error: true, truncated: false }); await flushPromises()
   expect(wrapper.text()).toContain('The action did not run'); expect(wrapper.text()).toContain('Server reported an error'); wrapper.unmount()
 })
+
+it('shows pushed connection changes literally and refreshes status immediately, retaining poll fallback', async () => {
+  vi.useFakeTimers()
+  let channel: Channel<CoreEvent> | undefined
+  let reads = 0
+  let stopped = false
+  mockIPC((command, args: any) => {
+    if (command === 'conversation_providers') return { providers: [{ id: 'local', model: 'demo', unavailable: null }] }
+    if (command === 'settings_view') { reads++; return { servers: [{ entry: { id: '<img>sales' }, status: { state: stopped ? 'failed' : 'connected' } }] } }
+    if (command === 'start_session') { channel = args.events; return { session_id: 'one', provider_id: 'local', model: 'demo', servers: [] } }
+    if (command === 'send_message') return { outcome: 'completed' }
+  })
+  const wrapper = mount(ConversationView); await start(wrapper)
+  expect(reads).toBe(1)
+  stopped = true
+  channel?.onmessage({ schema_version: 1, sequence: 0, event: { event: 'connection_changed', server: '<img>sales', state: 'failed', detail: '<script>server exited</script>' } }); await flushPromises()
+  expect(reads).toBe(2)
+  expect(wrapper.get('.connection-events').text()).toContain('later calls are not executed')
+  expect(wrapper.get('.conversation-servers').text()).toContain('failed')
+  expect(wrapper.text()).toContain('<script>server exited</script>'); expect(wrapper.find('script').exists()).toBe(false); expect(wrapper.find('img').exists()).toBe(false)
+  // Duplicate delivery cannot add another activity row or issue another refresh.
+  channel?.onmessage({ schema_version: 1, sequence: 0, event: { event: 'connection_changed', server: 'sales', state: 'failed' } }); await flushPromises()
+  expect(wrapper.findAll('.connection-events li')).toHaveLength(1); expect(reads).toBe(2)
+  await vi.advanceTimersByTimeAsync(3000); await flushPromises(); expect(reads).toBe(3)
+  wrapper.unmount(); await vi.advanceTimersByTimeAsync(3000); expect(reads).toBe(3)
+})
+it('queues a status refresh when a connection event arrives during an existing refresh', async () => {
+  let channel: Channel<CoreEvent> | undefined
+  let reads = 0
+  let finishRead: (value: unknown) => void = () => {}
+  mockIPC((command, args: any) => {
+    if (command === 'conversation_providers') return { providers: [{ id: 'local', model: 'demo', unavailable: null }] }
+    if (command === 'settings_view') {
+      if (++reads === 2) return new Promise(resolve => { finishRead = resolve })
+      return { servers: [] }
+    }
+    if (command === 'start_session') { channel = args.events; return { session_id: 'one', provider_id: 'local', model: 'demo' } }
+    if (command === 'send_message') return { outcome: 'completed' }
+  })
+  const wrapper = mount(ConversationView); await start(wrapper)
+  const connection = { event: 'connection_changed', server: 'sales', state: 'failed' }
+  channel?.onmessage({ schema_version: 1, sequence: 0, event: connection }); await flushPromises(); expect(reads).toBe(2)
+  channel?.onmessage({ schema_version: 1, sequence: 1, event: connection }); await flushPromises(); expect(reads).toBe(2)
+  finishRead({ servers: [] }); await flushPromises(); expect(reads).toBe(3)
+  wrapper.unmount()
+})
