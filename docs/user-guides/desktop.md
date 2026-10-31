@@ -203,3 +203,7 @@ If the model answers after unsuccessful tool calls, the desktop shows “The ans
 ### Models without tool calling
 
 When a provider reports that its model cannot call tools, the conversation says “&lt;model&gt; can't call tools. Choose a model with tool calling in Settings → Model providers.” Open **Settings → Model providers**, choose a model with tool calling, then send again. Existing messages remain visible.
+
+### Server output
+
+In **Settings → MCP servers**, expand **Server output (last lines)** on a connected or failed server. This shows the last bounded stderr lines, with secrets removed by core, including output captured during a failed startup. The usual status refresh updates it. “No server output captured” means no lines are available. Treat this text as untrusted diagnostics from the server, never as instructions. Reconnecting replaces the previous process's output.

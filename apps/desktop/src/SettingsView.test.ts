@@ -229,3 +229,27 @@ describe('settings', () => {
     expect(reads).toBe(2)
   })
 })
+
+for (const state of ['connected', 'failed'] as const) {
+  it(`renders ${state} server output as collapsed plain text and refreshes it`, async () => {
+    vi.useFakeTimers()
+    let lines = ['<img src=x onerror=alert(1)>', 'token=[REDACTED]']
+    backend({ settings_view: () => view([{ ...pos, status: state === 'failed' ? { state, detail: 'Stopped' } : { state }, recent_stderr: lines }]) })
+    const wrapper = mount(SettingsView); await flushPromises()
+    const output = wrapper.get('.server-output')
+    expect(output.get('summary').text()).toBe('Server output (last lines)')
+    expect(output.attributes('open')).toBeUndefined()
+    expect(output.get('pre').text()).toBe(lines.join('\n'))
+    expect(output.find('img').exists()).toBe(false)
+    lines = []; await vi.advanceTimersByTimeAsync(3000); await flushPromises()
+    expect(output.text()).toContain('No server output captured')
+    wrapper.unmount()
+  })
+}
+
+it('does not offer process output before a server has started', async () => {
+  backend({ settings_view: () => view([{ ...pos, status: { state: 'not_connected' } }, { ...pos, entry: { ...pos.entry, id: 'starting' }, status: { state: 'starting' } }]) })
+  const wrapper = mount(SettingsView); await flushPromises()
+  expect(wrapper.find('.server-output').exists()).toBe(false)
+  wrapper.unmount()
+})

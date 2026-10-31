@@ -40,6 +40,8 @@ export interface ToolView {
 export interface ServerView {
   entry: ServerEntry
   status: ServerStatus
+  /** Core-redacted server output; render only as plain text. */
+  recent_stderr?: string[]
   tools: ToolView[]
   permissions: Record<string, string>
 }
