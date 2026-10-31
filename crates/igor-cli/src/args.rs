@@ -8,13 +8,14 @@ use thiserror::Error;
 /// Usage text printed on argument errors.
 pub const USAGE: &str =
     "usage: igor-cli [--config <path>] --provider <scripted|ID> [--script <path>] [--export <path>]
-                [REQUEST...]
+                [--spoken] [REQUEST...]
 
   --config <path>    configuration file (default: $IGOR_CONFIG, then ~/Library/Application Support/igor/config.toml)
   --provider <name>  `scripted` for an offline scripted model (needs --script), or a provider id
                      from the configuration
   --script <path>    JSON script of model turns for the scripted provider
   --export <path>    write the session's events to this file as redacted JSON Lines
+  --spoken           ask for short replies suited to being read aloud
   REQUEST            the first message; read as one line from stdin when omitted
 
 After each turn, igor-cli reads a follow-up message from stdin. An empty line or end of input
@@ -41,6 +42,8 @@ pub struct Args {
     pub provider: ProviderChoice,
     /// Redacted activity export file.
     pub export: Option<PathBuf>,
+    /// Ask for replies suited to speech.
+    pub spoken: bool,
     /// Request text, when given on the command line.
     pub request: Option<String>,
 }
@@ -57,6 +60,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Args, ArgsError
     let mut provider = None;
     let mut script = None;
     let mut export = None;
+    let mut spoken = false;
     let mut words = Vec::new();
     while let Some(arg) = args.next() {
         let text = arg
@@ -71,6 +75,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Args, ArgsError
             "--config" => config = Some(PathBuf::from(value("--config")?)),
             "--script" => script = Some(PathBuf::from(value("--script")?)),
             "--export" => export = Some(PathBuf::from(value("--export")?)),
+            "--spoken" => spoken = true,
             "--provider" => {
                 let name = value("--provider")?;
                 let name = name
@@ -107,6 +112,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Args, ArgsError
         config,
         provider,
         export,
+        spoken,
         request,
     })
 }
@@ -168,5 +174,12 @@ mod tests {
         ] {
             assert!(parse_strs(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn spoken_is_off_unless_asked_for() -> Result<(), ArgsError> {
+        assert!(!parse_strs(&["--provider", "lm_studio", "hi"])?.spoken);
+        assert!(parse_strs(&["--provider", "lm_studio", "--spoken", "hi"])?.spoken);
+        Ok(())
     }
 }

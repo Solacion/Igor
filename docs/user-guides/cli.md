@@ -20,7 +20,7 @@ A server that fails to start is reported as unavailable, and the run continues w
 ## Options
 
 ```text
-igor-cli [--config <path>] --provider <scripted|ID> [--script <path>] [--export <path>] [REQUEST...]
+igor-cli [--config <path>] --provider <scripted|ID> [--script <path>] [--export <path>] [--spoken] [REQUEST...]
 ```
 
 | Option | Meaning |
@@ -29,6 +29,7 @@ igor-cli [--config <path>] --provider <scripted|ID> [--script <path>] [--export 
 | `--provider <name>` | `scripted`, or a provider `id` from the configuration, such as `claude` or `lm_studio`. |
 | `--script <path>` | Script of model turns. Required with `--provider scripted`, refused otherwise. |
 | `--export <path>` | Also write every runtime event to this file as JSON Lines, redacted (see below). |
+| `--spoken` | Ask the model for short, plain replies suited to being read aloud: no Markdown, lists or tables. |
 | `REQUEST` | The request. Read as one line from stdin when omitted. |
 
 After each turn, `igor-cli` shows `You:` and reads a follow-up message, which continues the same conversation; use it to answer a question the model asked in its reply. An empty line or end of input ends the session. Press Ctrl-C to cancel the turn in progress; the conversation can continue afterwards.

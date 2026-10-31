@@ -25,7 +25,7 @@ use igor_core::events::TurnOutcome;
 use igor_core::ids::SequentialIds;
 use igor_core::limits::{LimitTooSmall, ResultSizeLimit};
 use igor_core::provider::Provider;
-use igor_core::session::{Session, SessionConfig, SessionParts};
+use igor_core::session::{ReplyStyle, Session, SessionConfig, SessionParts};
 use igor_core::testing::ScriptedProvider;
 use igor_provider_anthropic::{AnthropicProvider, AnthropicSettings};
 use igor_provider_openai::{OpenAiCompatibleProvider, OpenAiSettings};
@@ -116,6 +116,11 @@ async fn run() -> Result<ExitCode, CliError> {
         },
         SessionConfig {
             unavailable_servers: connected.unavailable,
+            reply_style: if args.spoken {
+                ReplyStyle::Spoken
+            } else {
+                ReplyStyle::Written
+            },
             ..session_config(&config)?
         },
     );

@@ -1191,3 +1191,29 @@ async fn preflight_runs_until_it_first_passes() -> TestResult {
     provider.verify()?;
     Ok(())
 }
+
+#[tokio::test]
+async fn spoken_replies_add_the_spoken_prompt_until_switched_back() -> TestResult {
+    let mut h = harness(vec![
+        ScriptedTurn::text("Eighteen cases.").expecting(|request| {
+            if request.system == format!("{DEFAULT_SYSTEM_PROMPT}\n{SPOKEN_REPLY_PROMPT}") {
+                Ok(())
+            } else {
+                Err(format!("unexpected system prompt: {}", request.system))
+            }
+        }),
+        ScriptedTurn::text("Written again.").expecting(|request| {
+            if request.system == DEFAULT_SYSTEM_PROMPT && request.messages.len() == 3 {
+                Ok(())
+            } else {
+                Err(format!("unexpected request: {request:?}"))
+            }
+        }),
+    ])?;
+    h.session.set_reply_style(ReplyStyle::Spoken);
+    run(&mut h, "stock?", Operator::default()).await;
+    h.session.set_reply_style(ReplyStyle::Written);
+    run(&mut h, "again", Operator::default()).await;
+    h.provider.verify()?;
+    Ok(())
+}
