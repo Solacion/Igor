@@ -134,29 +134,36 @@ async fn run() -> Result<ExitCode, CliError> {
             }
         }
     });
-    let outcome = loop {
-        let cancel = CancellationToken::new();
-        if let Ok(mut slot) = current.lock() {
-            *slot = cancel.clone();
+    let conversation: Result<TurnOutcome, CliError> = async {
+        loop {
+            let cancel = CancellationToken::new();
+            if let Ok(mut slot) = current.lock() {
+                *slot = cancel.clone();
+            }
+            let (outcome, operated) = tokio::join!(
+                session.send_message(request, cancel.clone()),
+                operator::operate(
+                    &mut events,
+                    &handle,
+                    &mut stdin,
+                    &mut stdout,
+                    export.as_mut().map(|file| file as &mut dyn Write),
+                    &cancel,
+                )
+            );
+            operated?;
+            // Follow-up messages continue the same conversation until end of input or an empty
+            // line.
+            match read_message(&mut stdin, &mut stdout, "\nYou: ").await? {
+                Some(next) => request = next,
+                None => break Ok(outcome),
+            }
         }
-        let (outcome, operated) = tokio::join!(
-            session.send_message(request, cancel.clone()),
-            operator::operate(
-                &mut events,
-                &handle,
-                &mut stdin,
-                &mut stdout,
-                export.as_mut().map(|file| file as &mut dyn Write),
-                &cancel,
-            )
-        );
-        operated?;
-        // Follow-up messages continue the same conversation until end of input or an empty line.
-        match read_message(&mut stdin, &mut stdout, "\nYou: ").await? {
-            Some(next) => request = next,
-            None => break outcome,
-        }
-    };
+    }
+    .await;
+    // Stop every server, and wait for it, on every path out of the conversation.
+    session.shutdown().await;
+    let outcome = conversation?;
     if let Some(Err(error)) = scripted.map(|provider| provider.verify()) {
         eprintln!("igor-cli: the script did not match the run: {error}");
     }

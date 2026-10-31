@@ -174,6 +174,12 @@ impl ToolBackend for SharedBackend {
     fn server_id(&self) -> &ServerId {
         self.0.server_id()
     }
+    fn is_connected(&self) -> bool {
+        self.0.is_connected()
+    }
+    async fn shutdown(&self) {
+        self.0.shutdown().await;
+    }
     async fn list_tools(&self) -> Result<Vec<ToolDescriptor>, igor_core::tools::BackendError> {
         self.0.list_tools().await
     }
