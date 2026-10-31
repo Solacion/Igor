@@ -103,3 +103,25 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus
   :root { color: #edf1e9; background: #1c2521; --surface: #232e28; --muted: #b4c1b7; --line: #435247; --accent: #a4d2ad; --accent-text: #15271d; --focus: #b6e8be; --ready: #93d5a2; --pending: #e4c16c; --unavailable: #f19b91; }
 }
 @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+
+.conversation { max-width: 860px; margin: 0 auto; width: 100%; }
+.conversation h1 { font-size: clamp(2rem, 5vw, 3rem); margin: .3rem 0 1.5rem; }
+.conversation-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.conversation select, .composer textarea { display: block; width: 100%; margin: .5rem 0 1rem; padding: .8rem; color: inherit; background: var(--surface, transparent); border: 1px solid currentColor; border-radius: .5rem; font: inherit; }
+.conversation-servers { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1rem 0; font-size: .9rem; }
+.messages { list-style: none; padding: 0; }
+.messages li { border-bottom: 1px solid currentColor; padding: 1rem 0; }
+.literal { white-space: pre-wrap; overflow-wrap: anywhere; }
+.composer-actions { display: flex; gap: .75rem; }
+.turn-status { font-size: .9rem; }
+@media (max-width: 560px) { .conversation-heading { align-items: flex-start; flex-direction: column; } }
+
+.tool-activity ol { padding: 0; list-style: none; }
+.activity-row { padding: 1rem; margin: .75rem 0; border: 1px solid var(--line); border-radius: .5rem; background: var(--surface); }
+.conversation pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; }
+
+.approval-card { padding: 1.25rem; margin: 1rem 0; border: 2px solid var(--accent); border-radius: .75rem; }
+.approval-card h2 { font-size: 1.25rem; }
+.approval-card h3 { font-size: 1rem; margin-bottom: .5rem; }
+.approval-card dd { margin: 0 0 .5rem; overflow-wrap: anywhere; }
+.approval-card dt { color: var(--muted); font-size: .85rem; }

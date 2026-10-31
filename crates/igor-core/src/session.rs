@@ -54,7 +54,9 @@ values as retrieved facts, and label every assumption as an assumption.\n\
 - Actions that change data need operator approval, which the host requests. Never claim an \
 action was approved or completed unless its tool result shows it.\n\
 - When required information is missing or uncertain, such as dates, periods, suppliers or \
-quantities, ask the operator (with igor_ask_operator when it is available) instead of guessing.";
+quantities, first look up what the tools can tell you, then ask the operator instead of guessing. \
+When igor_ask_operator is available, ask with it and continue once you have the answer; do not \
+end your reply with a question.";
 
 /// Default maximum number of model requests per user message.
 pub const DEFAULT_MAX_MODEL_REQUESTS: u32 = 10;

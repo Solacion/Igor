@@ -289,7 +289,7 @@ fn unclassified_and_denied_tools_never_reach_the_server() -> TestResult {
         ] },
         { "text": "Could not do it." }
     ] });
-    let run = run("unclassified", &servers, &script, "y\ny\n")?;
+    let run = run("unclassified", &servers, &script, "")?;
     assert!(run.output.status.success(), "{}", run.stdout);
     assert_eq!(run.stdout.matches("refused").count(), 2, "{}", run.stdout);
     assert!(!run.stdout.contains("Approval required"));
