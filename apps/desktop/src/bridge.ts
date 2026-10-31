@@ -88,4 +88,4 @@ export function setPermission(server: string, tool: string, cls: PermissionClass
 }
 
 /** A local Settings destination; never a URL or arbitrary DOM selector. */
-export type SettingsSection = 'mcp-servers' | 'model-providers'
+export type SettingsSection = 'mcp-servers' | 'model-providers' | 'voice'
