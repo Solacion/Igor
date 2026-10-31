@@ -13,7 +13,7 @@ pnpm run desktop
 
 The command starts Vite on loopback port 1420 and opens the native Tauri window. The first run downloads/builds Tauri's Rust dependencies and needs network access. A green circle and **Ready** in the footer appear after the local read-only check passes. This indicates that the embedded desktop backend is ready, not that a model or MCP server is connected. An unavailable backend shows a retry action; there is no separate connection card.
 
-Opening just the frontend in a browser cannot access native IPC; the UI explains that it needs the native window rather than simulating a successful connection. Close the native window or press Ctrl+C in the launch terminal to stop the preview.
+Opening just the frontend in a browser cannot access native IPC; the UI explains that it needs the native window rather than simulating a successful connection. Close the native window or choose **Quit Igor** for orderly shutdown. Igor keeps the event loop responsive while cancelling the session and awaiting all server connections, including removed/replaced connections still held by session leases. Cleanup runs concurrently with a 15-second total deadline; if the deadline expires, a diagnostic states that cleanup may be incomplete. A forced process kill cannot perform this cleanup.
 
 ## Manage MCP servers
 

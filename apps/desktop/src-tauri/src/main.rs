@@ -3,6 +3,7 @@
 mod composition;
 mod sessions;
 mod settings;
+mod shutdown;
 use igor_core::events::{EventEnvelope, TurnOutcome};
 use igor_core::session::EventSink;
 
@@ -198,12 +199,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tauri::Builder::default()
         .manage(settings)
         .manage(Arc::new(DesktopRuntime::default()))
+        .manage(Arc::new(shutdown::ExitState::default()))
         .on_window_event(|window, event| {
-            if matches!(
-                event,
-                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
-            ) {
-                window.state::<Arc<DesktopRuntime>>().shutdown();
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Keep the main window/event loop alive while the exit callback reaps children.
+                api.prevent_close();
+                window.app_handle().exit(0);
             }
         })
         .setup(|app| {
@@ -227,7 +228,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings_reconnect_server,
             settings_set_permission,
         ])
-        .run(tauri::generate_context!())?;
+        .build(tauri::generate_context!())?
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                let exit = Arc::clone(app.state::<Arc<shutdown::ExitState>>().inner());
+                if exit.finished() { return; }
+                api.prevent_exit();
+                if !exit.begin() { return; }
+                let settings = Arc::clone(app.state::<Arc<Settings>>().inner());
+                let runtime = Arc::clone(app.state::<Arc<DesktopRuntime>>().inner());
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_title("Closing Igor — stopping servers…");
+                }
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if !shutdown::shutdown(settings, runtime).await {
+                        eprintln!("Desktop shutdown reached its 15-second deadline; server cleanup may be incomplete.");
+                    }
+                    exit.finish();
+                    app.exit(code.unwrap_or(0));
+                });
+            }
+        });
     Ok(())
 }
 
