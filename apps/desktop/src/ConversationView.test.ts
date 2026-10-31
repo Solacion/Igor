@@ -193,3 +193,20 @@ it('queues a status refresh when a connection event arrives during an existing r
   finishRead({ servers: [] }); await flushPromises(); expect(reads).toBe(3)
   wrapper.unmount()
 })
+
+it('reports completed-with-gaps from both the send result and streamed finish event', async () => {
+  const mock = backend({ send: () => ({ outcome: 'completed_with_gaps', unsuccessful_calls: 2 }) })
+  const wrapper = mount(ConversationView); await start(wrapper)
+  expect(wrapper.text()).toContain('The answer may be incomplete: 2 tool calls did not succeed.')
+  mock.emit({ event: 'turn_finished', outcome: { outcome: 'completed_with_gaps', unsuccessful_calls: 3 } })
+  await flushPromises()
+  expect(wrapper.text()).toContain('The answer may be incomplete: 3 tool calls did not succeed.')
+  expect(wrapper.text()).not.toContain('Completed'); wrapper.unmount()
+})
+it.each([{ outcome: 'future_variant' }, {}, null])('treats unknown or missing outcomes as not a full answer: %j', async (outcome) => {
+  const mock = backend({ send: () => outcome })
+  const wrapper = mount(ConversationView); await start(wrapper)
+  mock.emit({ event: 'turn_finished', outcome }); await flushPromises()
+  expect(wrapper.text()).toContain('Not a full answer')
+  expect(wrapper.text()).not.toContain('Completed'); wrapper.unmount()
+})

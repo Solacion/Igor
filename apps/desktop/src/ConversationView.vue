@@ -46,14 +46,21 @@ async function refresh(afterEvent = false) {
     if (refreshAgain && !disposed) { refreshAgain = false; void refresh() }
   }
 }
-function finish(outcome: TurnOutcome) {
+function finish(value: unknown) {
+  const outcome = value && typeof value === 'object' ? value as Record<string, unknown> : {}
   for (const item of questions.value) if (item.state === 'pending' || item.state === 'sending') item.state = 'Turn ended'
   for (const item of approvals.value) if (item.state === 'pending' || item.state === 'sending') item.state = 'Turn ended'
   switch (outcome.outcome) {
     case 'completed': status.value = 'Completed'; break
+    case 'completed_with_gaps':
+      status.value = typeof outcome.unsuccessful_calls === 'number' && Number.isSafeInteger(outcome.unsuccessful_calls) && outcome.unsuccessful_calls > 0
+        ? `The answer may be incomplete: ${outcome.unsuccessful_calls} tool calls did not succeed.`
+        : 'The answer may be incomplete: some tool calls did not succeed.'
+      break
     case 'cancelled': status.value = 'Cancelled — the answer may be incomplete'; break
     case 'limit_reached': status.value = `Stopped at limit: ${outcome.limit}. The answer may be incomplete.`; break
     case 'failed': status.value = `Turn failed: ${outcome.message}`; break
+    default: status.value = 'Not a full answer — the runtime returned an unrecognized outcome.'; break
   }
 }
 function receive(envelope: CoreEvent) {

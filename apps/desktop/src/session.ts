@@ -14,6 +14,7 @@ export interface SessionInfo {
 }
 export type TurnOutcome =
   | { outcome: 'completed' | 'cancelled' }
+  | { outcome: 'completed_with_gaps'; unsuccessful_calls: number }
   | { outcome: 'limit_reached'; limit: string }
   | { outcome: 'failed'; message: string }
 
