@@ -148,6 +148,11 @@ onUnmounted(() => clearInterval(timer))
                 </div>
                 <p v-if="server.status.state === 'failed'" class="status-detail">{{ server.status.detail }}</p>
 
+                <details v-if="server.recent_stderr?.length" class="server-output">
+                  <summary>Server output (last lines)</summary>
+                  <pre>{{ server.recent_stderr.join('\n') }}</pre>
+                </details>
+
                 <details v-if="tools(server).length" class="tools">
                   <summary>Tools and permissions ({{ tools(server).length }})</summary>
                   <table>
@@ -200,3 +205,7 @@ onUnmounted(() => clearInterval(timer))
     </div>
   </section>
 </template>
+
+<style scoped>
+.server-output pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+</style>

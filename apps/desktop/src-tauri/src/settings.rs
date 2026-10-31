@@ -76,6 +76,8 @@ pub struct ServerView {
     pub status: Status,
     /// Tools from the live connection; empty when not connected.
     pub tools: Vec<ToolView>,
+    /// Bounded, redacted stderr from core; untrusted plain text.
+    pub recent_stderr: Vec<String>,
     /// Permission classes by tool name, as configured. A tool without one is unclassified.
     pub permissions: BTreeMap<String, String>,
 }
@@ -139,6 +141,7 @@ struct Connection {
     tools: Vec<ToolView>,
     descriptors: Vec<ToolDescriptor>,
     tool_list_version: u64,
+    startup_stderr: Vec<String>,
 }
 
 impl Connection {
@@ -149,6 +152,7 @@ impl Connection {
             tools: Vec::new(),
             descriptors: Vec::new(),
             tool_list_version: 0,
+            startup_stderr: Vec::new(),
         }
     }
 }
@@ -270,7 +274,7 @@ impl Settings {
     async fn start(
         &self,
         server: &ServerConfig,
-    ) -> Result<(Arc<McpBackend>, Vec<ToolDescriptor>), String> {
+    ) -> Result<(Arc<McpBackend>, Vec<ToolDescriptor>), StartError> {
         let _start = self.starts.read().await;
         if self.closing.load(Ordering::Acquire) {
             return Err("Desktop is closing".into());
@@ -412,10 +416,18 @@ impl Settings {
                 |c| (c.current_status(), c.tools.clone()),
             );
             servers.push(ServerView {
-                entry,
+                entry: entry.clone(),
                 status,
                 tools,
                 permissions,
+                recent_stderr: connections
+                    .get(&entry.id)
+                    .map_or_else(Vec::new, |connection| {
+                        connection.backend.as_ref().map_or_else(
+                            || connection.startup_stderr.clone(),
+                            |backend| ToolBackend::recent_stderr(backend.as_ref()),
+                        )
+                    }),
             });
         }
         Ok(SettingsView {
@@ -500,7 +512,10 @@ impl Settings {
             .servers()
             .get(index)
             .ok_or_else(|| CommandError::message("the server was not added"))?;
-        let (backend, tools) = self.start(server).await.map_err(CommandError::message)?;
+        let (backend, tools) = self
+            .start(server)
+            .await
+            .map_err(|error| CommandError::message(error.detail))?;
         // Keep exit's startup barrier until this temporary connection is fully reaped.
         // A concurrent second McpBackend::shutdown call can return before the first finishes.
         let _stopping_test = self.starts.read().await;
@@ -549,8 +564,15 @@ impl Settings {
                 status: Status::Connected,
                 tools: tools.iter().map(ToolView::from).collect(),
                 descriptors: tools,
+                startup_stderr: Vec::new(),
             },
-            Err(detail) => Connection::new(Status::Failed { detail }),
+            Err(error) => {
+                let mut connection = Connection::new(Status::Failed {
+                    detail: error.detail,
+                });
+                connection.startup_stderr = error.stderr;
+                connection
+            }
         };
         let mut connections = self.connections.lock().await;
         // A server removed or renamed while starting is not re-added.
@@ -574,11 +596,31 @@ fn position(doc: &ConfigDocument, replacing: Option<&str>) -> Result<usize, Comm
     })
 }
 
+struct StartError {
+    detail: String,
+    stderr: Vec<String>,
+}
+
+impl From<String> for StartError {
+    fn from(detail: String) -> Self {
+        Self {
+            detail,
+            stderr: Vec::new(),
+        }
+    }
+}
+
+impl From<&str> for StartError {
+    fn from(detail: &str) -> Self {
+        detail.to_owned().into()
+    }
+}
+
 /// Starts a server and lists its tools.
 async fn start(
     server: &ServerConfig,
     owned: &Mutex<Vec<Arc<McpBackend>>>,
-) -> Result<(Arc<McpBackend>, Vec<ToolDescriptor>), String> {
+) -> Result<(Arc<McpBackend>, Vec<ToolDescriptor>), StartError> {
     let mut stdio = StdioServerConfig::new(&server.command);
     stdio.args = server.args.iter().map(OsString::from).collect();
     stdio.cwd = Some(server.cwd.clone());
@@ -594,14 +636,20 @@ async fn start(
     let id: ServerId = server.id.clone();
     let backend = McpBackend::connect(id, &stdio)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| StartError {
+            detail: error.to_string(),
+            stderr: error.stderr().to_vec(),
+        })?;
     let backend = Arc::new(backend);
     owned.lock().await.push(backend.clone());
     let tools = match backend.list_tools().await {
         Ok(tools) => tools,
         Err(error) => {
             backend.shutdown().await;
-            return Err(error.to_string());
+            return Err(StartError {
+                detail: error.to_string(),
+                stderr: backend.recent_stderr(),
+            });
         }
     };
     Ok((backend, tools))
@@ -682,6 +730,82 @@ mod tests {
             args: vec!["--fixture".to_owned(), fixture.display().to_string()],
             ..ServerEntry::default()
         }
+    }
+
+    #[test]
+    fn failed_start_view_never_exposes_secret_value() -> TestResult {
+        let output = Command::new(std::env::current_exe()?)
+            .args(["--exact", "settings::tests::stderr_secret_probe"])
+            .env("IGOR_STDERR_PROBE", "1")
+            .env("IGOR_STDERR_SECRET", "desktop-stderr-sentinel-83fa")
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("desktop-stderr-sentinel-83fa"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn stderr_secret_probe() -> TestResult {
+        if std::env::var_os("IGOR_STDERR_PROBE").is_none() {
+            return Ok(());
+        }
+        let settings = Settings::new(Some(temp_config("stderr-secret")?));
+        let entry = ServerEntry {
+            id: "secret-output".into(),
+            command: "/bin/sh".into(),
+            args: vec!["-c".into(), r#"echo "x $TOKEN" >&2; exit 1"#.into()],
+            env: [("TOKEN".into(), "IGOR_STDERR_SECRET".into())].into(),
+            ..ServerEntry::default()
+        };
+        let view = settings.save_server(None, entry).await?;
+        assert!(matches!(view.servers[0].status, Status::Failed { .. }));
+        assert_eq!(view.servers[0].recent_stderr, ["x [REDACTED]"]);
+        let payload = serde_json::to_string(&view)?;
+        assert!(!payload.contains("desktop-stderr-sentinel-83fa"));
+        settings.shutdown().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn stderr_survives_start_failure_and_shared_backend_forwarding() -> TestResult {
+        let binary = fixture_server()?;
+        let settings = Settings::new(Some(temp_config("stderr")?));
+        let mut entry = sales_entry(&binary);
+        let mut args = vec![
+            "-c".into(),
+            r#"echo '<server diagnostic>' >&2; exec "$@""#.into(),
+            "fixture".into(),
+            binary.display().to_string(),
+        ];
+        args.extend(entry.args.clone());
+        entry.command = "/bin/sh".into();
+        entry.args = args;
+        settings.save_server(None, entry.clone()).await?;
+        let mut lines = Vec::new();
+        for _ in 0..100 {
+            lines = settings.view().await?.servers[0].recent_stderr.clone();
+            if !lines.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(lines, ["<server diagnostic>"]);
+        let snapshot = settings.snapshot().await?;
+        assert_eq!(
+            snapshot.servers[0].recent_stderr(),
+            lines,
+            "SharedBackend must forward stderr"
+        );
+        entry.args = vec!["-c".into(), "echo 'startup failed' >&2; exit 3".into()];
+        let view = settings.save_server(Some("pos"), entry).await?;
+        assert!(matches!(view.servers[0].status, Status::Failed { .. }));
+        assert_eq!(view.servers[0].recent_stderr, ["startup failed"]);
+        settings.shutdown().await;
+        Ok(())
     }
 
     #[tokio::test]
