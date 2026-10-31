@@ -413,6 +413,9 @@ impl Settings {
             .get(index)
             .ok_or_else(|| CommandError::message("the server was not added"))?;
         let (backend, tools) = self.start(server).await.map_err(CommandError::message)?;
+        // Keep exit's startup barrier until this temporary connection is fully reaped.
+        // A concurrent second McpBackend::shutdown call can return before the first finishes.
+        let _stopping_test = self.starts.read().await;
         backend.shutdown().await;
         Ok(tools.iter().map(ToolView::from).collect())
     }
