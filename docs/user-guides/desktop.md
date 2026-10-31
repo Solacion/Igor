@@ -105,7 +105,25 @@ The dedicated macOS workflow runs those checks. The debug app is at `apps/deskto
 - Native diagnostics are not echoed into the frontend on failure. Native version text is rendered with Vue interpolation, never HTML. Component tests mock Tauri IPC to cover success, failure/retry, pending state and markup escaping.
 - Session commands stream core event envelopes on a channel scoped to the session. Replies include the session and request identifiers; approval replies echo core's action hash. Unknown request fields are rejected, commands have generated permissions restricted to the local main window, and closing the window cancels the session. Resolved credential values are blocked before core events cross IPC; this is a defensive exact-value check, not a general-purpose secret detector. All model, tool and server content is rendered as plain text.
 
-The separate root `pnpm run verify` and Rust dependency audit cover the core workspace, not this standalone desktop graph. Use the desktop workflow/commands above for its validation. Desktop-specific dependency audit coverage remains a follow-up when this shell is adopted; no change to runtime dependency policy is implied.
+The root `pnpm run verify` covers the core workspace; use the desktop workflow/commands above for this standalone desktop package. The dependency workflow now runs separate core and desktop graph checks with the same pinned cargo-deny 0.20.2 and the unchanged root `deny.toml`. Both use their committed lockfiles. Neither job suppresses advisories or filters away platform dependencies; a desktop failure does not cancel the core job.
+
+### Desktop dependency findings — 31 October 2026
+
+The initial desktop scan **failed** under the root policy. This is a recorded audit result, not an ignored exception or a clean audit:
+
+- **RUSTSEC-2024-0370:** `proc-macro-error` 1.0.4 is unmaintained, pulled in by GTK/glib macro dependencies in the desktop's all-platform graph. The advisory reports no safe upgrade. The scan includes this graph even when run on macOS; no target filter or advisory ignore was added.
+- **MPL-2.0 is not allowed by the current policy:** `cssparser` 0.37.0, `cssparser-macros` 0.7.1, `dtoa-short` 0.3.5, `option-ext` 0.2.0 and `selectors` 0.38.0.
+- **Apache-2.0 WITH LLVM-exception is not allowed by the current policy:** `target-lexicon` 0.12.16.
+
+The desktop CI job remains failing until dependency remediation and/or an explicit licence-policy review resolves these findings. The policy was not broadened for this change. CI retains the full inclusion graphs in the check log and writes a short findings summary even on failure. No vulnerability exploitability claim is made from an unmaintained-package advisory.
+
+To reproduce from the repository root with the pinned cargo-deny installed:
+
+```sh
+cargo deny --manifest-path apps/desktop/src-tauri/Cargo.toml --config deny.toml --locked check licenses advisories
+```
+
+Audit results depend on the fetched advisory database and may change independently of a source change. The dated list above records this run; read the latest job output before treating it as current.
 
 ## Manual smoke-test checklist — NOT RUN
 

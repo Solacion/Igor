@@ -15,7 +15,17 @@ permissions:
 
 jobs:
   dependencies:
-    name: Rust dependency licences and advisories
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - graph: core
+            name: Rust dependency licences and advisories
+            manifest: Cargo.toml
+          - graph: desktop
+            name: Desktop dependency licences and advisories
+            manifest: apps/desktop/src-tauri/Cargo.toml
     runs-on: macos-latest
     timeout-minutes: 15
     steps:
@@ -55,4 +65,24 @@ jobs:
           echo "$tools_dir/$asset" >> "$GITHUB_PATH"
 
       - name: Check locked dependencies
-        run: cargo deny --locked check licenses advisories
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo deny --manifest-path "${{ matrix.manifest }}" --config deny.toml --locked \
+            check licenses advisories 2>&1 | tee "$RUNNER_TEMP/cargo-deny-${{ matrix.graph }}.log"
+
+      - name: Record dependency findings
+        if: always()
+        shell: bash
+        run: |
+          audit_log="$RUNNER_TEMP/cargo-deny-${{ matrix.graph }}.log"
+          if [[ -f "$audit_log" ]]; then
+            {
+              echo '### ${{ matrix.name }}'
+              echo 'Policy: root deny.toml; no advisory ignores or licence exceptions added.'
+              echo 'Full inclusion graphs are retained in the check step log.'
+              echo '```text'
+              awk '/^(error|warning)/ || /RUSTSEC-/ || /license =/ || /advisories (ok|FAILED)|licenses (ok|FAILED)/' "$audit_log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
