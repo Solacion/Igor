@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import SettingsView from './SettingsView.vue'
+import ConversationView from './ConversationView.vue'
 import { readDesktopStatus } from './bridge'
 import type { DesktopStatus } from './bridge'
 
@@ -40,17 +41,11 @@ onMounted(checkReadiness)
       </div>
     </header>
 
-    <main v-if="page === 'settings'" id="main" tabindex="-1" class="wide">
+    <main v-if="page === 'settings'" id="settings-main" tabindex="-1" class="wide">
       <SettingsView @close="page = 'home'" />
     </main>
-    <main v-else id="main" tabindex="-1">
-      <section class="intro" aria-labelledby="welcome-title">
-        <p class="eyebrow">Your models. Your tools. Your control.</p>
-        <h1 id="welcome-title">A place for your<br />next good idea.</h1>
-        <p class="lede">A local home for working with AI. Connect the models and tools you choose, with you in control of every action.</p>
-      </section>
-
-      <p class="preview-note">Add the MCP servers Igor should use in Settings. Conversations and model selection are coming next.</p>
+    <main v-show="page === 'home'" id="main" tabindex="-1" class="wide">
+      <ConversationView @settings="page = 'settings'" />
     </main>
     <footer class="app-footer">
       <div class="footer-readiness">

@@ -12,7 +12,7 @@ describe('desktop status bridge', () => {
       expect(args).toEqual({ request: { scope: 'runtime' } })
       return { app_version: '0.1.0', core_event_schema: 1 }
     })
-    const wrapper = mount(App)
+    const wrapper = mount(App, { global: { stubs: { ConversationView: true } } })
     await flushPromises()
     expect(wrapper.get('footer [role="status"]').text()).toBe('Ready')
     expect(wrapper.get('footer').text()).toContain('v0.1.0')
@@ -29,7 +29,7 @@ describe('desktop status bridge', () => {
       if (calls === 1) throw new Error('private-config-path-and-secret')
       return { app_version: '0.1.0', core_event_schema: 1 }
     })
-    const wrapper = mount(App)
+    const wrapper = mount(App, { global: { stubs: { ConversationView: true } } })
     await flushPromises()
     expect(wrapper.get('[role="alert"]').text()).toContain('Desktop unavailable')
     expect(wrapper.text()).not.toContain('private-config-path-and-secret')
@@ -43,7 +43,7 @@ describe('desktop status bridge', () => {
   it('shows pending readiness without a green dot and renders native text literally', async () => {
     let finish: ((value: unknown) => void) | undefined
     mockIPC(() => new Promise((resolve) => { finish = resolve }))
-    const wrapper = mount(App)
+    const wrapper = mount(App, { global: { stubs: { ConversationView: true } } })
     await flushPromises()
     expect(wrapper.get('footer [role="status"]').text()).toBe('Starting…')
     expect(wrapper.get('.readiness-dot').classes()).not.toContain('is-ready')

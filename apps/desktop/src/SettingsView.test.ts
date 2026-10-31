@@ -46,7 +46,7 @@ describe('settings', () => {
       desktop_status: () => ({ app_version: '0.1.0', core_event_schema: 1 }),
       settings_view: () => view(),
     })
-    const wrapper = mount(App)
+    const wrapper = mount(App, { global: { stubs: { ConversationView: true } } })
     await flushPromises()
     await wrapper.get('.topbar button').trigger('click')
     await flushPromises()
