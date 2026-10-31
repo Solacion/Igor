@@ -1,3 +1,4 @@
+import { emitSettingsChanged } from './test/settingsEvents'
 import { mount, flushPromises } from '@vue/test-utils'
 import { mockIPC, clearMocks } from '@tauri-apps/api/mocks'
 import { Channel } from '@tauri-apps/api/core'
@@ -106,7 +107,7 @@ it('refreshes provider edits immediately and resets the model session when its c
     if (command === 'send_message') return { outcome: 'completed' }
   })
   const wrapper = mount(ConversationView); await start(wrapper)
-  revision = 'edited'; window.dispatchEvent(new Event('igor:providers-changed')); await flushPromises()
+  revision = 'edited'; emitSettingsChanged(); await flushPromises()
   expect(wrapper.get('#provider').text()).toContain('edited')
   await wrapper.get('#message').setValue('Again'); await wrapper.get('form').trigger('submit'); await flushPromises()
   expect(calls.filter(call => call === 'start_session')).toHaveLength(2)
@@ -124,7 +125,7 @@ it('selects a remaining provider after removal and starts its model session on t
     if (command === 'send_message') return { outcome: 'completed' }
   })
   const wrapper = mount(ConversationView); await start(wrapper)
-  removed = true; window.dispatchEvent(new Event('igor:providers-changed')); await flushPromises()
+  removed = true; emitSettingsChanged(); await flushPromises()
   await wrapper.get('#message').setValue('Again'); await wrapper.get('form').trigger('submit'); await flushPromises()
   expect(calls.filter(call => call.command === 'start_session').map(call => call.args.request.provider_id)).toEqual(['local','other'])
   expect(wrapper.text()).toContain('Provider changed'); wrapper.unmount()
@@ -217,7 +218,7 @@ it('ignores future tool variants and labels definite failure and server error re
   expect(wrapper.text()).toContain('The action did not run'); expect(wrapper.text()).toContain('Server reported an error'); wrapper.unmount()
 })
 
-it('shows pushed connection changes literally and refreshes status immediately, retaining poll fallback', async () => {
+it('shows pushed connection changes literally and refreshes status immediately, without polling', async () => {
   vi.useFakeTimers()
   let channel: Channel<CoreEvent> | undefined
   let reads = 0
@@ -239,8 +240,8 @@ it('shows pushed connection changes literally and refreshes status immediately, 
   // Duplicate delivery cannot add another activity row or issue another refresh.
   channel?.onmessage({ schema_version: 1, sequence: 0, event: { event: 'connection_changed', server: 'sales', state: 'failed' } }); await flushPromises()
   expect(wrapper.findAll('.connection-events li')).toHaveLength(1); expect(reads).toBe(2)
-  await vi.advanceTimersByTimeAsync(3000); await flushPromises(); expect(reads).toBe(3)
-  wrapper.unmount(); await vi.advanceTimersByTimeAsync(3000); expect(reads).toBe(3)
+  emitSettingsChanged(); await flushPromises(); await flushPromises(); expect(reads).toBe(3)
+  wrapper.unmount(); emitSettingsChanged(); await flushPromises(); expect(reads).toBe(3)
 })
 it('queues a status refresh when a connection event arrives during an existing refresh', async () => {
   let channel: Channel<CoreEvent> | undefined

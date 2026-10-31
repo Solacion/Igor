@@ -125,3 +125,5 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus
 .approval-card h3 { font-size: 1rem; margin-bottom: .5rem; }
 .approval-card dd { margin: 0 0 .5rem; overflow-wrap: anywhere; }
 .approval-card dt { color: var(--muted); font-size: .85rem; }
+
+button.brand { background: transparent; color: inherit; padding: 0; border-radius: 0; font-size: 24px; font-weight: 650; }

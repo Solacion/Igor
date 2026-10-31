@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useSettingsStore } from './stores/settings'
 import ServerForm from './ServerForm.vue'
 import ProviderSettings from './ProviderSettings.vue'
-import { isCommandError, readSettings, reconnectServer, removeServer, setPermission } from './bridge'
+import { isCommandError, reconnectServer, removeServer, setPermission } from './bridge'
 import type { PermissionClass, ServerEntry, ServerView, SettingsView, ToolView, SettingsSection } from './bridge'
-
-const props = withDefaults(defineProps<{ initialSection?: SettingsSection }>(), { initialSection: 'mcp-servers' })
+const props = withDefaults(defineProps<{
+  initialSection?: SettingsSection
+}>(), { initialSection: 'mcp-servers' })
 const section = ref<SettingsSection>(props.initialSection)
 async function focusSection(next: SettingsSection) {
   section.value = next
@@ -15,59 +17,57 @@ async function focusSection(next: SettingsSection) {
   target?.scrollIntoView?.({ block: 'start' })
   target?.focus({ preventScroll: true })
 }
-watch(() => props.initialSection, next => { void focusSection(next) })
-
-const emit = defineEmits<{ close: [] }>()
-
+watch(() => props.initialSection, next => { void focusSection(next); })
+const emit = defineEmits<{
+  close: [
+  ]
+}>()
 /** How often the server list refreshes connection status while Settings is open. */
-const REFRESH_MS = 3000
-
-const view = ref<SettingsView | null>(null)
+const store = useSettingsStore()
+const view = store.settings
 const loadError = ref<string | null>(null)
 const actionError = ref<string | null>(null)
 /** `new` for the add form, or the id of the server being edited. */
 const editing = ref<string | null>(null)
 const confirmingRemove = ref<string | null>(null)
 const busy = ref<string | null>(null)
-let timer: ReturnType<typeof setInterval> | undefined
-
+const unsubscribe = store.subscribe(() => { void refresh(); })
 async function refresh() {
   try {
-    view.value = await readSettings()
+    view.value = await store.refreshSettings()
     loadError.value = null
-  } catch (error) {
+  }
+  catch (error) {
     loadError.value = isCommandError(error) ? error.message : 'Settings are only available in the desktop window.'
   }
 }
-
 async function act(key: string, action: () => Promise<SettingsView>) {
-  if (busy.value) return
+  if (busy.value)
+    return
   busy.value = key
   actionError.value = null
   try {
     view.value = await action()
-  } catch (error) {
+  }
+  catch (error) {
     actionError.value = isCommandError(error) ? error.message : 'Igor could not complete this. Try again.'
-  } finally {
+  }
+  finally {
     busy.value = null
   }
 }
-
 function saved(next: SettingsView) {
   view.value = next
   editing.value = null
 }
-
 function remove(id: string) {
   confirmingRemove.value = null
   void act(`remove:${id}`, () => removeServer(id))
 }
-
 function permission(server: string, tool: string, value: string) {
   const cls = value === '' ? null : (value as PermissionClass)
   void act(`permission:${server}:${tool}`, () => setPermission(server, tool, cls))
 }
-
 /** Live tools, plus tools that have a permission but are not currently reported. */
 function tools(server: ServerView): ToolView[] {
   const live = new Set(server.tools.map((tool) => tool.name))
@@ -76,7 +76,6 @@ function tools(server: ServerView): ToolView[] {
     .map((name) => ({ name, description: null, read_only_hint: null, destructive_hint: null }))
   return [...server.tools, ...configuredOnly]
 }
-
 function statusText(server: ServerView): string {
   switch (server.status.state) {
     case 'connected': return 'Connected'
@@ -85,21 +84,17 @@ function statusText(server: ServerView): string {
     default: return 'Not connected yet'
   }
 }
-
 function commandLine(entry: ServerEntry): string {
   return [entry.command, ...entry.args].join(' ')
 }
-
 function editingEntry(): ServerEntry | null {
   return view.value?.servers.find((server) => server.entry.id === editing.value)?.entry ?? null
 }
-
 onMounted(() => {
   void focusSection(props.initialSection)
   void refresh()
-  timer = setInterval(() => { if (!busy.value) void refresh() }, REFRESH_MS)
 })
-onUnmounted(() => clearInterval(timer))
+onUnmounted(unsubscribe)
 </script>
 
 <template>

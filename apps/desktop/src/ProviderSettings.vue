@@ -1,25 +1,43 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
+import { useSettingsStore } from './stores/settings'
 import ProviderForm from './ProviderForm.vue'
-import { readProviderSettings, removeProvider, providersChanged, type ProviderSettingsView } from './providers'
-const view = ref<ProviderSettingsView | null>(null)
+import { removeProvider, type ProviderSettingsView } from './providers'
+const store = useSettingsStore()
+const view = store.providerSettings
+const unsubscribe = store.subscribe(() => { void refresh(); })
 const editing = ref<string | null>(null)
 const removing = ref<string | null>(null)
 const busy = ref(false)
 const error = ref('')
 async function refresh() {
-  try { view.value = await readProviderSettings(); error.value = '' }
-  catch { error.value = 'Could not load model providers. Try again.' }
+  try {
+    view.value = await store.refreshProviderSettings()
+    error.value = ''
+  }
+  catch {
+    error.value = 'Could not load model providers. Try again.'
+  }
 }
-function saved(next: ProviderSettingsView) { view.value = next; editing.value = null }
+function saved(next: ProviderSettingsView) { view.value = next; editing.value = null; }
 async function remove(id: string) {
-  if (busy.value) return
-  busy.value = true; error.value = ''
-  try { view.value = await removeProvider(id); removing.value = null; providersChanged() }
-  catch { error.value = 'Could not remove this provider. Try again.' }
-  finally { busy.value = false }
+  if (busy.value)
+    return
+  busy.value = true
+  error.value = ''
+  try {
+    view.value = await removeProvider(id)
+    removing.value = null
+  }
+  catch {
+    error.value = 'Could not remove this provider. Try again.'
+  }
+  finally {
+    busy.value = false
+  }
 }
 onMounted(refresh)
+onUnmounted(unsubscribe)
 </script>
 <template>
   <section id="model-providers" aria-labelledby="providers-title">

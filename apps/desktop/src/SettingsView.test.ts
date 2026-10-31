@@ -1,3 +1,4 @@
+import { emitSettingsChanged } from './test/settingsEvents'
 import { flushPromises, mount } from '@vue/test-utils'
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -47,7 +48,7 @@ describe('settings', () => {
     let changed = false
     backend({ settings_view: () => view([{ ...pos, tools: changed ? [...pos.tools, { name: 'new_tool', description: null, read_only_hint: true, destructive_hint: null }] : pos.tools }]) })
     const wrapper = mount(SettingsView); await flushPromises()
-    changed = true; await vi.advanceTimersByTimeAsync(3000); await flushPromises()
+    changed = true; emitSettingsChanged(); await flushPromises(); await flushPromises()
     const row = wrapper.findAll('tbody tr').find(row => row.text().includes('new_tool'))!
     expect(row.exists()).toBe(true)
     expect((row.get('select').element as HTMLSelectElement).value).toBe('')
@@ -61,7 +62,7 @@ describe('settings', () => {
     })
     const wrapper = mount(App, { global: { stubs: { ConversationView: true } } })
     await flushPromises()
-    await wrapper.get('.topbar button').trigger('click')
+    await wrapper.get('.topbar-actions button').trigger('click')
     await flushPromises()
     expect(wrapper.get('h1').text()).toBe('Settings')
     expect(wrapper.text()).toContain('MCP servers')
@@ -216,16 +217,16 @@ describe('settings', () => {
     wrapper.unmount()
   })
 
-  it('refreshes status while open and stops when closed', async () => {
+  it('refreshes status on settings changes and stops when closed', async () => {
     vi.useFakeTimers()
     let reads = 0
     backend({ settings_view: () => { reads++; return view() } })
     const wrapper = mount(SettingsView)
     await flushPromises()
-    await vi.advanceTimersByTimeAsync(3000)
+    emitSettingsChanged(); await flushPromises()
     expect(reads).toBe(2)
     wrapper.unmount()
-    await vi.advanceTimersByTimeAsync(9000)
+    emitSettingsChanged(); await flushPromises()
     expect(reads).toBe(2)
   })
 })
@@ -242,7 +243,7 @@ for (const state of ['connected', 'failed'] as const) {
     expect(output.get('pre').text()).toBe(lines.join('\n'))
     expect(output.find('img').exists()).toBe(false)
     expect(output.find('a').exists()).toBe(false)
-    lines = []; await vi.advanceTimersByTimeAsync(3000); await flushPromises()
+    lines = []; emitSettingsChanged(); await flushPromises(); await flushPromises()
     expect(wrapper.find('.server-output').exists()).toBe(false)
     wrapper.unmount()
   })

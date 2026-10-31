@@ -23,6 +23,8 @@
     "allow-cancel-turn",
     "allow-close-session",
     "allow-export-activity",
-    "allow-conversation-providers"
+    "allow-conversation-providers",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
   ]
 }
