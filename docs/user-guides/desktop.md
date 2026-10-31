@@ -109,21 +109,19 @@ The root `pnpm run verify` covers the core workspace; use the desktop workflow/c
 
 ### Desktop dependency findings — 31 October 2026
 
-The initial desktop scan **failed** under the root policy. This is a recorded audit result, not an ignored exception or a clean audit:
+The initial all-target desktop scan failed under the root policy: GTK3 brings in unmaintained `proc-macro-error` 1.0.4 (RUSTSEC-2024-0370) and `target-lexicon` with `Apache-2.0 WITH LLVM-exception`. Maintained parser and directory dependencies also require MPL-2.0.
 
-- **RUSTSEC-2024-0370:** `proc-macro-error` 1.0.4 is unmaintained, pulled in by GTK/glib macro dependencies in the desktop's all-platform graph. The advisory reports no safe upgrade. The scan includes this graph even when run on macOS; no target filter or advisory ignore was added.
-- **MPL-2.0 is not allowed by the current policy:** `cssparser` 0.37.0, `cssparser-macros` 0.7.1, `dtoa-short` 0.3.5, `option-ext` 0.2.0 and `selectors` 0.38.0.
-- **Apache-2.0 WITH LLVM-exception is not allowed by the current policy:** `target-lexicon` 0.12.16.
+The newest Tauri releases at least two weeks old on 2026-10-31 are Rust `tauri` 2.12.4, `tauri-build` 2.7.3, CLI 2.12.3 and API 2.12.4. Testing this set still finds the same GTK3 dependency in the all-target graph. The desktop therefore uses its own `apps/desktop/src-tauri/deny.toml`, covering both Apple Silicon and Intel macOS, the supported demo targets. Neither macOS graph contains `proc-macro-error`, `target-lexicon` or GTK. Adding Linux support would bring back the unmaintained GTK3 stack, an upstream Tauri dependency issue that must be resolved or explicitly reviewed before broadening this policy.
 
-The desktop CI job remains failing until dependency remediation and/or an explicit licence-policy review resolves these findings. The policy was not broadened for this change. CI retains the full inclusion graphs in the check log and writes a short findings summary even on failure. No vulnerability exploitability claim is made from an unmaintained-package advisory.
+The desktop policy copies the root licence/advisory rules and additionally accepts MPL-2.0 for the maintained Servo parser and `option-ext` dependencies. MPL-2.0 is file-level copyleft; the desktop itself is GPL-3.0-only. Distribution must retain applicable licence notices and meet source obligations. There are no advisory ignores. The root `deny.toml` remains unchanged and strict for the core graph. CI records findings and fails on policy violations within each graph.
 
-To reproduce from the repository root with the pinned cargo-deny installed:
+To reproduce from the repository root with pinned cargo-deny:
 
 ```sh
-cargo deny --manifest-path apps/desktop/src-tauri/Cargo.toml --config deny.toml --locked check licenses advisories
+cargo deny --manifest-path apps/desktop/src-tauri/Cargo.toml --config apps/desktop/src-tauri/deny.toml --locked check licenses advisories
 ```
 
-Audit results depend on the fetched advisory database and may change independently of a source change. The dated list above records this run; read the latest job output before treating it as current.
+Audit results depend on the fetched advisory database; read the latest job output.
 
 ## Manual smoke-test checklist — NOT RUN
 
