@@ -52,14 +52,12 @@ it('uses fixed IPC failure text without exposing native diagnostics', async () =
   backend({ send: () => { throw new Error('secret-native-detail') } }); const wrapper = mount(ConversationView)
   await start(wrapper); expect(wrapper.text()).toContain('turn could not finish'); expect(wrapper.text()).not.toContain('secret-native-detail'); wrapper.unmount()
 })
-it('starts a fresh session after Settings change, explaining history reset before retry', async () => {
-  let attempts = 0
-  const mock = backend({ send: () => { if (++attempts === 2) throw { code: 'settings_changed' }; return { outcome: 'completed' } } })
-  const wrapper = mount(ConversationView); await start(wrapper)
+it('keeps the session and visible history for subsequent messages without a Settings reset notice', async () => {
+  const mock = backend(); const wrapper = mount(ConversationView); await start(wrapper)
   await wrapper.get('#message').setValue('Updated'); await wrapper.get('form').trigger('submit'); await flushPromises()
-  expect(wrapper.text()).toContain('Settings changed. A new model conversation')
-  expect(mock.calls.filter(c => c.command === 'start_session')).toHaveLength(2)
-  expect(mock.calls.filter(c => c.command === 'send_message')).toHaveLength(3)
+  expect(wrapper.text()).not.toContain('Settings changed. A new model conversation')
+  expect(mock.calls.filter(c => c.command === 'start_session')).toHaveLength(1)
+  expect(mock.calls.filter(c => c.command === 'send_message')).toHaveLength(2)
   expect(wrapper.findAll('.messages li')).toHaveLength(2); wrapper.unmount()
 })
 
