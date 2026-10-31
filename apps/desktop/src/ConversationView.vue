@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { updateActivity, type Activity } from './activity'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { readSettings, type ServerView } from './bridge'
+import { readSettings, type ServerView, type SettingsSection } from './bridge'
 import { readProviders, startSession, type ApprovalPreview, type CoreEvent, type ProviderView, type TurnOutcome } from './session'
 
-const emit = defineEmits<{ settings: [] }>()
+const emit = defineEmits<{ settings: [section?: SettingsSection] }>()
 const providers = ref<ProviderView[]>([])
 const providerId = ref('')
 const servers = ref<ServerView[]>([])
@@ -199,11 +199,11 @@ onUnmounted(() => { window.removeEventListener('igor:providers-changed', refresh
     <select id="provider" v-model="providerId" :disabled="busy || !loaded">
       <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.id }} · {{ provider.model }}</option>
     </select>
-    <p v-if="loaded && !providers.length">No providers configured. Add a provider to your Igor configuration, then restart Igor.</p>
+    <p v-if="loaded && !providers.length" class="provider-setup">No model providers configured. Add one to start a conversation. <button class="secondary" @click="emit('settings', 'model-providers')">Open Model providers</button></p>
     <p v-if="selected?.unavailable" role="alert">{{ selected.unavailable }}</p>
     <div class="conversation-servers" aria-label="Server connections">
       <span v-for="server in servers" :key="server.entry.id">{{ server.entry.id }}: {{ server.status.state.replaceAll('_', ' ') }}</span>
-      <p v-if="loaded && !servers.length">No MCP servers configured. <button class="secondary" @click="emit('settings')">Open Settings</button></p>
+      <p v-if="loaded && !servers.length">No MCP servers configured. <button class="secondary" @click="emit('settings', 'mcp-servers')">Open Settings</button></p>
     </div>
     <p v-if="notice" role="status">{{ notice }}</p>
     <ol class="messages" aria-label="Conversation messages" aria-live="polite" aria-relevant="additions">

@@ -1,9 +1,21 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import ServerForm from './ServerForm.vue'
 import ProviderSettings from './ProviderSettings.vue'
 import { isCommandError, readSettings, reconnectServer, removeServer, setPermission } from './bridge'
-import type { PermissionClass, ServerEntry, ServerView, SettingsView, ToolView } from './bridge'
+import type { PermissionClass, ServerEntry, ServerView, SettingsView, ToolView, SettingsSection } from './bridge'
+
+const props = withDefaults(defineProps<{ initialSection?: SettingsSection }>(), { initialSection: 'mcp-servers' })
+const section = ref<SettingsSection>(props.initialSection)
+async function focusSection(next: SettingsSection) {
+  section.value = next
+  await nextTick()
+  const target = document.getElementById(next)
+  target?.setAttribute('tabindex', '-1')
+  target?.scrollIntoView?.({ block: 'start' })
+  target?.focus({ preventScroll: true })
+}
+watch(() => props.initialSection, next => { void focusSection(next) })
 
 const emit = defineEmits<{ close: [] }>()
 
@@ -83,6 +95,7 @@ function editingEntry(): ServerEntry | null {
 }
 
 onMounted(() => {
+  void focusSection(props.initialSection)
   void refresh()
   timer = setInterval(() => { if (!busy.value) void refresh() }, REFRESH_MS)
 })
@@ -98,8 +111,8 @@ onUnmounted(() => clearInterval(timer))
 
     <div class="settings-layout">
       <nav class="settings-nav" aria-label="Settings sections">
-        <a href="#mcp-servers">MCP servers</a>
-        <a href="#model-providers">Model providers</a>
+        <a href="#mcp-servers" :class="{ 'is-active': section === 'mcp-servers' }" :aria-current="section === 'mcp-servers' ? 'location' : undefined" @click.prevent="focusSection('mcp-servers')">MCP servers</a>
+        <a href="#model-providers" :class="{ 'is-active': section === 'model-providers' }" :aria-current="section === 'model-providers' ? 'location' : undefined" @click.prevent="focusSection('model-providers')">Model providers</a>
       </nav>
 
       <div class="settings-body">
