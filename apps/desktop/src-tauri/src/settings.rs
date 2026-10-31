@@ -675,6 +675,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn walkthrough_notes_connect_and_return_the_documented_brief() -> TestResult {
+        let binary = fixture_server()?;
+        let path = temp_config("walkthrough-notes")?;
+        let settings = Settings::new(Some(path.clone()));
+        settings
+            .save_server(
+                None,
+                ServerEntry {
+                    id: "notes".into(),
+                    command: binary.display().to_string(),
+                    args: vec![
+                        "--fixture".into(),
+                        repo_root()
+                            .join("apps/desktop/fixtures/notes.json")
+                            .display()
+                            .to_string(),
+                    ],
+                    ..ServerEntry::default()
+                },
+            )
+            .await?;
+        let view = settings.view().await?;
+        assert_eq!(view.servers[0].status, Status::Connected);
+        assert_eq!(view.servers[0].tools[0].name, "list_notes");
+        assert!(view.servers[0].permissions.is_empty());
+        let snapshot = settings.snapshot().await?;
+        let backend = &snapshot.backends[&ServerId::new("notes")?];
+        let output = backend
+            .call_tool(
+                "list_notes",
+                serde_json::Map::new(),
+                igor_core::CancellationToken::new(),
+            )
+            .await?;
+        assert!(!output.is_error);
+        let text = serde_json::to_string(&output.structured)?;
+        for value in [
+            "supplier-x",
+            "2026-07-13",
+            "2026-07-15",
+            "previous seven days",
+            "Draft only",
+        ] {
+            assert!(text.contains(value));
+        }
+        drop(snapshot);
+        settings.shutdown().await;
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn invalid_entry_reports_its_field_and_is_not_saved() -> TestResult {
         let path = temp_config("invalid")?;
         let settings = Settings::new(Some(path.clone()));
