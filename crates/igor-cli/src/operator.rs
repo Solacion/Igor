@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 /// Only an explicit `y` or `yes` approves. Any other answer, or end of input, denies. End of
 /// input at a clarification prompt cancels the turn.
 pub async fn operate<R, W>(
-    mut events: mpsc::UnboundedReceiver<EventEnvelope>,
+    events: &mut mpsc::UnboundedReceiver<EventEnvelope>,
     handle: &SessionHandle,
     input: &mut R,
     out: &mut W,

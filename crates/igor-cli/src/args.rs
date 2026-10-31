@@ -15,7 +15,10 @@ pub const USAGE: &str =
                      from the configuration
   --script <path>    JSON script of model turns for the scripted provider
   --export <path>    write the session's events to this file as redacted JSON Lines
-  REQUEST            the request; read as one line from stdin when omitted";
+  REQUEST            the first message; read as one line from stdin when omitted
+
+After each turn, igor-cli reads a follow-up message from stdin. An empty line or end of input
+ends the session.";
 
 /// Which model provider to use.
 #[derive(Debug, Clone, PartialEq, Eq)]
