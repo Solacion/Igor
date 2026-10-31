@@ -1,6 +1,82 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod composition;
+mod sessions;
 mod settings;
+use igor_core::events::{EventEnvelope, TurnOutcome};
+use igor_core::session::EventSink;
+
+use sessions::{
+    ApprovalRequest, BridgeError, ClarificationRequest, DesktopRuntime, MessageRequest,
+    SessionInfo, SessionRequest, StartRequest,
+};
+
+use tauri::ipc::Channel;
+
+struct ChannelSink {
+    channel: Channel<EventEnvelope>,
+    cancel: igor_core::CancellationToken,
+}
+impl EventSink for ChannelSink {
+    fn emit(&self, event: EventEnvelope) {
+        if self.channel.send(event).is_err() {
+            self.cancel.cancel();
+        }
+    }
+}
+
+#[tauri::command]
+async fn start_session(
+    request: StartRequest,
+    events: Channel<EventEnvelope>,
+    settings: State<'_, Arc<Settings>>,
+    runtime: State<'_, Arc<DesktopRuntime>>,
+) -> Result<SessionInfo, BridgeError> {
+    runtime
+        .start(request, &settings, |cancel| {
+            Arc::new(ChannelSink {
+                channel: events,
+                cancel,
+            })
+        })
+        .await
+}
+#[tauri::command]
+async fn send_message(
+    request: MessageRequest,
+    settings: State<'_, Arc<Settings>>,
+    runtime: State<'_, Arc<DesktopRuntime>>,
+) -> Result<TurnOutcome, BridgeError> {
+    runtime.send_configured(request, &settings).await
+}
+#[tauri::command]
+fn resolve_approval(
+    request: ApprovalRequest,
+    runtime: State<'_, Arc<DesktopRuntime>>,
+) -> Result<(), BridgeError> {
+    runtime.approve(request)
+}
+#[tauri::command]
+fn answer_clarification(
+    request: ClarificationRequest,
+    runtime: State<'_, Arc<DesktopRuntime>>,
+) -> Result<(), BridgeError> {
+    runtime.clarify(request)
+}
+#[tauri::command]
+fn cancel_turn(
+    request: SessionRequest,
+    runtime: State<'_, Arc<DesktopRuntime>>,
+) -> Result<(), BridgeError> {
+    runtime.cancel(request)
+}
+#[tauri::command]
+fn close_session(
+    request: SessionRequest,
+    runtime: State<'_, Arc<DesktopRuntime>>,
+) -> Result<(), BridgeError> {
+    runtime.close(request)
+}
 
 use std::sync::Arc;
 
@@ -11,6 +87,31 @@ use crate::settings::{
     CommandError, PermissionRequest, SaveServerRequest, ServerRequest, Settings, SettingsView,
     ToolView,
 };
+
+#[derive(Serialize)]
+struct ProviderView {
+    id: String,
+    model: String,
+    unavailable: Option<String>,
+}
+#[derive(Serialize)]
+struct ProvidersView {
+    providers: Vec<ProviderView>,
+}
+#[tauri::command]
+async fn conversation_providers(
+    settings: State<'_, Arc<Settings>>,
+) -> Result<ProvidersView, BridgeError> {
+    let snapshot = settings
+        .snapshot()
+        .await
+        .map_err(|_| BridgeError::Configuration)?;
+    let providers = snapshot.config.providers().iter().map(|p| ProviderView {
+        id: p.id.clone(), model: p.model.clone(),
+        unavailable: p.api_key.as_ref().filter(|key| key.resolve().is_err()).map(|key| format!("Environment variable {} is missing or unavailable. Set it before starting Igor.", key.env_var())),
+    }).collect();
+    Ok(ProvidersView { providers })
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -96,6 +197,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let settings = Arc::new(Settings::new(igor_config::config_path(None)));
     tauri::Builder::default()
         .manage(settings)
+        .manage(Arc::new(DesktopRuntime::default()))
+        .on_window_event(|window, event| {
+            if matches!(
+                event,
+                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
+            ) {
+                window.state::<Arc<DesktopRuntime>>().shutdown();
+            }
+        })
         .setup(|app| {
             let settings = Arc::clone(app.state::<Arc<Settings>>().inner());
             tauri::async_runtime::spawn(async move { settings.connect_all().await });
@@ -103,6 +213,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .invoke_handler(tauri::generate_handler![
             desktop_status,
+            conversation_providers,
+            start_session,
+            send_message,
+            resolve_approval,
+            answer_clarification,
+            cancel_turn,
+            close_session,
             settings_view,
             settings_save_server,
             settings_test_server,

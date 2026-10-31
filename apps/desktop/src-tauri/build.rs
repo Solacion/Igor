@@ -2,6 +2,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "desktop_status",
+            "conversation_providers",
+            "start_session",
+            "send_message",
+            "resolve_approval",
+            "answer_clarification",
+            "cancel_turn",
+            "close_session",
             "settings_view",
             "settings_save_server",
             "settings_test_server",
