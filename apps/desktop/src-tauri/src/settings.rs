@@ -17,7 +17,8 @@ use igor_config::{ConfigDocument, ConfigError, PermissionClass, ServerConfig, Se
 use igor_core::tools::{ServerId, ToolBackend, ToolDescriptor};
 use igor_mcp::{McpBackend, StdioServerConfig};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::{Mutex, RwLock};
 
 /// Connection state of one server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -157,7 +158,7 @@ impl Connection {
 }
 
 /// The final owner disconnects a server; an in-flight turn keeps its lease after a Settings edit.
-pub struct SharedBackend(pub McpBackend);
+pub struct SharedBackend(pub Arc<McpBackend>);
 impl std::ops::Deref for SharedBackend {
     type Target = McpBackend;
     fn deref(&self) -> &Self::Target {
@@ -206,6 +207,11 @@ pub struct Settings {
     connections: Mutex<BTreeMap<String, Connection>>,
     /// Serialises edits, so two saves cannot interleave read and write.
     edits: Mutex<()>,
+    /// Retain native handles even after a connection/lease drops and requests background stop.
+    /// Exit must still await their transport/process cleanup before the runtime disappears.
+    owned: Mutex<Vec<Arc<McpBackend>>>,
+    starts: RwLock<()>,
+    closing: AtomicBool,
 }
 
 impl Settings {
@@ -215,10 +221,50 @@ impl Settings {
             path,
             connections: Mutex::new(BTreeMap::new()),
             edits: Mutex::new(()),
+            owned: Mutex::new(Vec::new()),
+            starts: RwLock::new(()),
+            closing: AtomicBool::new(false),
         }
     }
 
+    /// Stop accepting starts, wait for starts already in progress, then reap every owned
+    /// native connection concurrently. This also covers connections retired from Settings
+    /// while a session lease was keeping them alive.
+    pub fn stop_accepting(&self) {
+        self.closing.store(true, Ordering::Release);
+    }
+
+    pub async fn shutdown(&self) {
+        self.stop_accepting();
+        let mut tasks = tokio::task::JoinSet::new();
+        // Reap established connections immediately, even if a different server is starting.
+        for server in std::mem::take(&mut *self.owned.lock().await) {
+            tasks.spawn(async move { server.shutdown().await });
+        }
+        let _starts = self.starts.write().await;
+        // A start already in progress may have registered its handle during the wait.
+        for server in std::mem::take(&mut *self.owned.lock().await) {
+            tasks.spawn(async move { server.shutdown().await });
+        }
+        self.connections.lock().await.clear();
+        while tasks.join_next().await.is_some() {}
+    }
+
+    async fn start(
+        &self,
+        server: &ServerConfig,
+    ) -> Result<(Arc<McpBackend>, Vec<ToolDescriptor>), String> {
+        let _start = self.starts.read().await;
+        if self.closing.load(Ordering::Acquire) {
+            return Err("Desktop is closing".into());
+        }
+        start(server, &self.owned).await
+    }
+
     fn document(&self) -> Result<ConfigDocument, CommandError> {
+        if self.closing.load(Ordering::Acquire) {
+            return Err(CommandError::message("Desktop is closing"));
+        }
         let path = self.path.as_deref().ok_or_else(|| {
             CommandError::message("no configuration location: set IGOR_CONFIG or HOME")
         })?;
@@ -366,8 +412,8 @@ impl Settings {
             .servers()
             .get(index)
             .ok_or_else(|| CommandError::message("the server was not added"))?;
-        let (backend, tools) = start(server).await.map_err(CommandError::message)?;
-        backend.disconnect();
+        let (backend, tools) = self.start(server).await.map_err(CommandError::message)?;
+        backend.shutdown().await;
         Ok(tools.iter().map(ToolView::from).collect())
     }
 
@@ -405,7 +451,7 @@ impl Settings {
             .lock()
             .await
             .insert(id.clone(), Connection::new(Status::Starting));
-        let connection = match start(server).await {
+        let connection = match self.start(server).await {
             Ok((backend, tools)) => Connection {
                 backend: Some(Arc::new(SharedBackend(backend))),
                 status: Status::Connected,
@@ -437,7 +483,10 @@ fn position(doc: &ConfigDocument, replacing: Option<&str>) -> Result<usize, Comm
 }
 
 /// Starts a server and lists its tools.
-async fn start(server: &ServerConfig) -> Result<(McpBackend, Vec<ToolDescriptor>), String> {
+async fn start(
+    server: &ServerConfig,
+    owned: &Mutex<Vec<Arc<McpBackend>>>,
+) -> Result<(Arc<McpBackend>, Vec<ToolDescriptor>), String> {
     let mut stdio = StdioServerConfig::new(&server.command);
     stdio.args = server.args.iter().map(OsString::from).collect();
     stdio.cwd = Some(server.cwd.clone());
@@ -454,7 +503,15 @@ async fn start(server: &ServerConfig) -> Result<(McpBackend, Vec<ToolDescriptor>
     let backend = McpBackend::connect(id, &stdio)
         .await
         .map_err(|e| e.to_string())?;
-    let tools = backend.list_tools().await.map_err(|e| e.to_string())?;
+    let backend = Arc::new(backend);
+    owned.lock().await.push(backend.clone());
+    let tools = match backend.list_tools().await {
+        Ok(tools) => tools,
+        Err(error) => {
+            backend.shutdown().await;
+            return Err(error.to_string());
+        }
+    };
     Ok((backend, tools))
 }
 
@@ -638,6 +695,100 @@ mod tests {
         };
         let view = settings.save_server(None, entry).await?;
         assert!(matches!(view.servers[0].status, Status::Failed { .. }));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod exit_tests {
+    use super::*;
+    use std::path::Path;
+    use std::process::Command;
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+    fn processes(dir: &Path) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        let output = Command::new("pgrep").arg("-f").arg(dir).output()?;
+        if !matches!(output.status.code(), Some(0 | 1)) {
+            return Err("pgrep failed".into());
+        }
+        Ok(String::from_utf8(output.stdout)?
+            .lines()
+            .map(str::to_owned)
+            .collect())
+    }
+
+    #[tokio::test]
+    async fn exit_reaps_current_and_retired_fixture_servers_even_with_session_leases() -> TestResult
+    {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let built = Command::new(env!("CARGO"))
+            .args(["build", "--locked", "-q", "-p", "igor-fixture-server"])
+            .current_dir(&root)
+            .status()?;
+        assert!(built.success());
+        let dir = std::env::temp_dir().join(format!("igor-desktop-exit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("config.toml");
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+        }
+        let settings = Arc::new(Settings::new(Some(path)));
+        for id in ["retired", "current"] {
+            settings
+                .save_server(
+                    None,
+                    ServerEntry {
+                        id: id.into(),
+                        command: root
+                            .join("target/debug/igor-fixture-server")
+                            .display()
+                            .to_string(),
+                        args: vec![
+                            "--fixture".into(),
+                            root.join("crates/igor-fixture-server/fixtures/sales.json")
+                                .display()
+                                .to_string(),
+                            "--call-log".into(),
+                            dir.join(format!("{id}.jsonl")).display().to_string(),
+                        ],
+                        ..ServerEntry::default()
+                    },
+                )
+                .await?;
+        }
+        let snapshot = settings.snapshot().await?;
+        assert_eq!(snapshot.servers.len(), 2);
+        assert_eq!(
+            processes(&dir)?.len(),
+            2,
+            "prove real fixture children exist first"
+        );
+        // A model session can retain a lease after the server is removed from Settings.
+        settings.remove_server("retired").await?;
+        assert!(
+            snapshot
+                .servers
+                .iter()
+                .all(|backend| backend.is_connected())
+        );
+        let runtime = Arc::new(crate::sessions::DesktopRuntime::default());
+        assert!(crate::shutdown::shutdown(settings.clone(), runtime).await);
+        assert!(
+            processes(&dir)?.is_empty(),
+            "shutdown must await process exit, not merely schedule it"
+        );
+        assert!(
+            snapshot
+                .servers
+                .iter()
+                .all(|backend| !backend.is_connected())
+        );
+        settings.shutdown().await; // Repeated quit requests are harmless.
+        assert!(
+            settings.snapshot().await.is_err(),
+            "no new session may snapshot during exit"
+        );
+        std::fs::remove_dir_all(dir)?;
         Ok(())
     }
 }
