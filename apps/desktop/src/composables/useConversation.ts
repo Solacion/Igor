@@ -1,5 +1,6 @@
 import { updateActivity, type Activity } from '../activity'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import type { TimelineEntry } from '../conversationDisplay'
 import { parseEvent } from '../events'
 import { useSettingsStore } from '../stores/settings'
 import { startSession, type ApprovalPreview, type CoreEvent } from '../session'
@@ -49,6 +50,13 @@ export function useConversation() {
     detail: string
   }>>([])
   const activity = ref<Record<string, Activity>>({})
+  const timeline = ref<TimelineEntry[]>([])
+  let messageId = 0
+  function appendMessage(role: string, text: string) {
+    const message = { role, text }
+    messages.value.push(message)
+    timeline.value.push({ kind: 'message', key: `${epoch}:message:${messageId++}`, message })
+  }
   let epoch = 0
   const messages = ref<Array<{
     role: string
@@ -142,17 +150,30 @@ export function useConversation() {
     if (!event)
       return
     updateActivity(activity.value, event, epoch)
+    if ('call_id' in event && event.event.startsWith('tool_call_')) {
+      const key = `${epoch}:${event.call_id}`
+      const call = activity.value[key]
+      if (call && !timeline.value.some(entry => entry.kind === 'tool' && entry.key === key)) {
+        timeline.value.push({ kind: 'tool', key, call })
+      }
+    }
     if (event.event === 'connection_changed' && typeof event.server === 'string' && typeof event.state === 'string') {
       connections.value.push({ key: `${epoch}:${envelope.sequence}`, server: event.server, state: event.state, detail: typeof event.detail === 'string' ? event.detail : '' })
+      const connection = connections.value.at(-1)
+      if (connection) timeline.value.push({ kind: 'connection', key: connection.key, connection })
       void refresh(true)
     }
     if (event.event === 'tools_changed' && typeof event.server === 'string') {
       connections.value.push({ key: `${epoch}:${envelope.sequence}`, server: event.server, state: 'tools_changed', detail: '' })
+      const connection = connections.value.at(-1)
+      if (connection) timeline.value.push({ kind: 'connection', key: connection.key, connection })
       void refresh(true)
     }
     if (event.event === 'approval_requested') {
       const request = event.request
       approvals.value.push({ key: `${epoch}:${request.approval_id}`, request, state: 'pending' })
+      const item = approvals.value.at(-1)
+      if (item) timeline.value.push({ kind: 'approval', key: item.key, item })
       status.value = 'Waiting for your approval'
     }
     if (event.event === 'approval_resolved') {
@@ -163,13 +184,15 @@ export function useConversation() {
     }
     if (event.event === 'clarification_requested' && typeof event.question === 'string' && typeof event.request_id === 'string') {
       questions.value.push({ key: `${epoch}:${event.request_id}`, id: event.request_id, question: event.question, answer: '', state: 'pending' })
+      const item = questions.value.at(-1)
+      if (item) timeline.value.push({ kind: 'question', key: item.key, item })
       status.value = 'Waiting for your answer'
     }
     if (event.event === 'clarification_answered') {
       const item = questions.value.find(item => item.key === `${epoch}:${String(event.request_id)}`)
       if (item) {
         item.state = 'Answered'
-        messages.value.push({ role: 'You', text: item.answer })
+        appendMessage('You', item.answer)
       }
       status.value = 'Working…'
     }
@@ -183,7 +206,7 @@ export function useConversation() {
       error.value = `Your response was refused: ${String(event.reason)}`
     }
     if (event.event === 'assistant_text' && typeof event.text === 'string')
-      messages.value.push({ role: 'Igor', text: event.text })
+      appendMessage('Igor', event.text)
     if (event.event === 'turn_finished')
       finish(event.outcome)
   }
@@ -229,7 +252,7 @@ export function useConversation() {
       const active = session
       if (!active)
         return
-      messages.value.push({ role: 'You', text: message })
+      appendMessage('You', message)
       text.value = ''
       const outcome = await active.send(message)
       finish(outcome)
@@ -312,6 +335,7 @@ export function useConversation() {
       await session?.close()
       session = null
       messages.value = []
+      timeline.value = []
       activity.value = {}
       connections.value = []
       approvals.value = []
@@ -334,5 +358,5 @@ export function useConversation() {
     disposed = true
     void session?.close().catch(() => { })
   })
-  return { providers, providerId, servers, loaded, busy, text, error, notice, status, toolsUnsupported, exportNotice, exporting, hasSession, questions, approvals, connections, activity, messages, selected, refresh, finish, receive, send, answer, decide, exportActivity, stop, reset }
+  return { timeline, providers, providerId, servers, loaded, busy, text, error, notice, status, toolsUnsupported, exportNotice, exporting, hasSession, questions, approvals, connections, activity, messages, selected, refresh, finish, receive, send, answer, decide, exportActivity, stop, reset }
 }

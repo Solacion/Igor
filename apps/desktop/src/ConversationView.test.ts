@@ -45,6 +45,7 @@ it('exports finished session activity and displays the fixed native destination'
   expect(mock.calls.find(call => call.command === 'export_activity')?.args).toEqual({ request: { session_id: 'one' } })
   expect(wrapper.text()).toContain('Activity saved to /app-data/activity.jsonl')
   await wrapper.findAll('button').find(button => button.text() === 'New conversation')!.trigger('click'); await flushPromises()
+  await wrapper.get('[role=alertdialog] button').trigger('click'); await flushPromises()
   expect(exportButton().attributes('disabled')).toBeDefined()
   expect(wrapper.text()).not.toContain('Activity saved to'); wrapper.unmount()
 })
