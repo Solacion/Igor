@@ -24,6 +24,7 @@
 - [Foundation verification, 30 October 2026](verification/2026-10-30-foundation-checks.md): actual local results and limitations.
 - [Live LM Studio verification, 31 October 2026](verification/2026-10-31-live-lm-studio.md): deterministic checks plus live CLI demo scenarios with a local model.
 - [Clean-checkout reproduction, 31 October 2026](verification/2026-10-31-clean-checkout.md): fresh clone, verify, scripted CLI demo and desktop build.
+- [Local model evaluation, 31 October 2026](verification/2026-10-31-model-evaluation.md): which LM Studio model suits the voice demo.
 - [Verification record template](verification/run-template.md): separate automated, manual and live-provider evidence.
 
 ## User guides
