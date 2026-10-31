@@ -14,6 +14,9 @@ const text = ref('')
 const error = ref('')
 const notice = ref('')
 const status = ref('Ready for a message')
+const exportNotice = ref('')
+const exporting = ref(false)
+const hasSession = ref(false)
 const questions = ref<Array<{ key: string; id: string; question: string; answer: string; state: string }>>([])
 const approvals = ref<Array<{ key: string; request: ApprovalPreview; state: string }>>([])
 const connections = ref<Array<{ key: string; server: string; state: string; detail: string }>>([])
@@ -134,6 +137,7 @@ async function send() {
     if (session) { try { await session.close() } catch { /* Keep diagnostics native. */ } session = null }
   } finally {
     busy.value = false
+    hasSession.value = session !== null
     for (const item of [...questions.value, ...approvals.value]) {
       if (item.state === 'pending' || item.state === 'sending') item.state = 'Turn ended'
     }
@@ -151,6 +155,13 @@ async function decide(item: (typeof approvals.value)[number], decision: 'approve
   try { await session.approve(item.request.approval_id, item.request.action_hash, decision) }
   catch { item.state = 'pending'; error.value = 'Could not submit your decision. Nothing is assumed approved; try again or stop the turn.' }
 }
+async function exportActivity() {
+  if (!session || busy.value || exporting.value) return
+  exporting.value = true; exportNotice.value = ''
+  try { exportNotice.value = `Activity saved to ${await session.exportActivity()}` }
+  catch { exportNotice.value = 'Could not export the complete activity. Try again.' }
+  finally { exporting.value = false }
+}
 async function stop() {
   stopRequested = true
   try { await session?.cancel(); status.value = 'Stopping…' }
@@ -160,6 +171,7 @@ async function reset() {
   if (busy.value) return
   try {
     await session?.close(); session = null; messages.value = []; activity.value = {}; connections.value = []; approvals.value = []; questions.value = []; notice.value = ''; error.value = ''; status.value = 'Ready for a message'
+    hasSession.value = false; exportNotice.value = ''
   } catch { error.value = 'Could not close the conversation. Try again.' }
 }
 onMounted(() => { void refresh(); timer = setInterval(() => { void refresh() }, 3000) })
@@ -170,8 +182,9 @@ onUnmounted(() => { disposed = true; clearInterval(timer); void session?.close()
   <section class="conversation" aria-labelledby="conversation-title">
     <div class="conversation-heading">
       <div><p class="eyebrow">Your models. Your tools. Your control.</p><h1 id="conversation-title">Conversation</h1></div>
-      <button class="secondary" :disabled="busy" @click="reset">New conversation</button>
+      <div><button class="secondary" :disabled="busy || exporting || !hasSession" @click="exportActivity">Export activity</button> <button class="secondary" :disabled="busy || exporting" @click="reset">New conversation</button></div>
     </div>
+    <p v-if="exportNotice" role="status">{{ exportNotice }}</p>
     <label for="provider">Model provider</label>
     <select id="provider" v-model="providerId" :disabled="busy || !loaded">
       <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.id }} · {{ provider.model }}</option>

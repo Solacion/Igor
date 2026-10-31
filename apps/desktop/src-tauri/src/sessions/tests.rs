@@ -539,3 +539,70 @@ async fn real_fixture_approve_once_deny_never_and_settings_snapshot_is_leased() 
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn exports_only_current_session_events_through_core_redaction() -> TestResult {
+    let mut h = harness(
+        vec![
+            ScriptedTurn::tool_call(
+                "export",
+                "sales__create_order",
+                json!({"supplier":"private-export-supplier"}),
+            ),
+            ScriptedTurn::text("private-export-answer"),
+        ],
+        vec![],
+    )?;
+    let runner = h.runtime.clone();
+    let request = message(&h.id);
+    let turn = tokio::spawn(async move { runner.send(request).await });
+    let pending = approval(&mut h.events).await?;
+    assert_eq!(
+        h.runtime.export_activity(SessionRequest {
+            session_id: h.id.clone()
+        }),
+        Err(BridgeError::Busy)
+    );
+    h.runtime.approve(ApprovalRequest {
+        session_id: h.id.clone(),
+        approval_id: pending.approval_id,
+        action_hash: pending.action_hash,
+        decision: Decision::Deny,
+    })?;
+    tokio::time::timeout(Duration::from_secs(2), turn).await???;
+    let bytes = h.runtime.export_activity(SessionRequest {
+        session_id: h.id.clone(),
+    })?;
+    let text = String::from_utf8(bytes)?;
+    assert!(!text.contains("private-export-supplier"));
+    assert!(!text.contains("private-export-answer"));
+    let values = text
+        .lines()
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<Result<Vec<_>, _>>()?;
+    assert!(
+        values
+            .iter()
+            .any(|event| event["event"]["event"] == "tool_call_proposed")
+    );
+    assert!(
+        values
+            .iter()
+            .any(|event| event["event"]["event"] == "turn_finished")
+    );
+    assert_eq!(
+        h.runtime.export_activity(SessionRequest {
+            session_id: "stale".into()
+        }),
+        Err(BridgeError::NoSession)
+    );
+    h.runtime.close(SessionRequest {
+        session_id: h.id.clone(),
+    })?;
+    assert_eq!(
+        h.runtime
+            .export_activity(SessionRequest { session_id: h.id }),
+        Err(BridgeError::NoSession)
+    );
+    Ok(())
+}

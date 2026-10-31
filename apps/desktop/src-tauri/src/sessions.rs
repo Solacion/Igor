@@ -36,6 +36,8 @@ pub enum BridgeError {
     Cancelled,
     #[error("Output containing a credential was blocked")]
     SensitiveOutput,
+    #[error("Activity could not be exported completely")]
+    Export,
     #[error("The desktop runtime is unavailable")]
     Unavailable,
 }
@@ -110,6 +112,7 @@ fn valid_text(value: &str) -> bool {
 }
 
 struct Active {
+    activity: Arc<Mutex<crate::activity_export::ActivityLog>>,
     id: String,
     session: Arc<AsyncMutex<Session>>,
     handle: SessionHandle,
@@ -211,6 +214,11 @@ impl DesktopRuntime {
         mut prepared: Prepared,
         sink: Arc<dyn EventSink>,
     ) -> Result<SessionInfo, BridgeError> {
+        let activity = Arc::new(Mutex::new(crate::activity_export::ActivityLog::default()));
+        let sink = Arc::new(crate::activity_export::RecordingSink {
+            next: sink,
+            log: activity.clone(),
+        });
         let mut state = self.lock()?;
         if cancel.is_cancelled() || !state.starting.as_ref().is_some_and(|start| start.id == id) {
             return Err(BridgeError::Cancelled);
@@ -224,6 +232,7 @@ impl DesktopRuntime {
         });
         let (session, handle) = Session::new(prepared.parts, prepared.config);
         state.active = Some(Active {
+            activity,
             id: id.clone(),
             session: Arc::new(AsyncMutex::new(session)),
             handle,
@@ -335,6 +344,20 @@ impl DesktopRuntime {
             .handle
             .answer_clarification(request.request_id, request.answer)
             .map_err(|_| BridgeError::NoSession)
+    }
+
+    pub fn export_activity(&self, request: SessionRequest) -> Result<Vec<u8>, BridgeError> {
+        let mut state = self.lock()?;
+        let active = active_mut(&mut state, &request.session_id)?;
+        if active.turn.is_some() {
+            return Err(BridgeError::Busy);
+        }
+        let bytes = active
+            .activity
+            .lock()
+            .map_err(|_| BridgeError::Export)?
+            .snapshot()?;
+        Ok(bytes)
     }
 
     pub fn cancel(&self, request: SessionRequest) -> Result<(), BridgeError> {

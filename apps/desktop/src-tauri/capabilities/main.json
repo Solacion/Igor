@@ -19,6 +19,7 @@
     "allow-answer-clarification",
     "allow-cancel-turn",
     "allow-close-session",
+    "allow-export-activity",
     "allow-conversation-providers"
   ]
 }

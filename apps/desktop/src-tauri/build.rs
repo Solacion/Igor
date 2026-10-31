@@ -9,6 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "answer_clarification",
             "cancel_turn",
             "close_session",
+            "export_activity",
             "settings_view",
             "settings_save_server",
             "settings_test_server",

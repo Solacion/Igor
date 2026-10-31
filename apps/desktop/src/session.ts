@@ -43,6 +43,7 @@ export async function startSession(
     answer: (requestId: string, answer: string) =>
       invoke<void>('answer_clarification', { request: { ...request, request_id: requestId, answer } }),
     cancel: () => invoke<void>('cancel_turn', { request }),
+    exportActivity: () => invoke<string>('export_activity', { request }),
     close: async () => {
       await invoke<void>('close_session', { request })
       listening = false

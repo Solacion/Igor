@@ -96,6 +96,12 @@ pnpm run desktop:build
 
 The dedicated macOS workflow runs those checks. The debug app is at `apps/desktop/src-tauri/target/debug/bundle/macos/Igor.app`, with its executable also at `apps/desktop/src-tauri/target/debug/igor-desktop`. Distribution signing, installers and releases are outside this slice.
 
+### Export activity
+
+After a turn finishes, choose **Export activity**. The native app writes the active model conversation's events as JSON Lines to `activity.jsonl` in its application data directory (on macOS, `~/Library/Application Support/com.solacion.igor/`; the UI reports the exact path). Each export atomically replaces the previous file with owner-only permissions on macOS. No save-dialog or general filesystem-plugin capability is added: the frontend can request only this fixed native destination for the active session. Export runs outside the UI thread.
+
+Redaction uses `igor_core::export::write_event`, including argument values and model text; the desktop does not implement a second redaction policy. Identifiers, tool names, outcomes and diagnostic reasons remain, so inspect the file before sharing. Only redacted events are retained for export. A new model session (including a provider change) starts a new export; earlier messages may still be visible but are excluded. Nothing is persisted until you export. Capture is limited to 16 MiB per session; if it exceeds that limit or cannot be captured, export fails instead of silently saving partial activity. Manual export/visual smoke checks remain unrun.
+
 ## Boundaries and handoff
 
 - The desktop is a pnpm workspace package under `apps/desktop`. Its Rust package has a separate workspace and committed lockfile so shell work does not edit the core/CLI Cargo graph. It depends inward on `igor-core`; the core has no desktop dependency.
