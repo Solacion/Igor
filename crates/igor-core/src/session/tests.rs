@@ -954,3 +954,44 @@ async fn a_denied_write_alone_is_not_a_gap() -> TestResult {
     assert_eq!(outcome, TurnOutcome::Completed);
     Ok(())
 }
+
+#[tokio::test]
+async fn the_model_is_told_which_servers_are_unavailable() -> TestResult {
+    let config = SessionConfig {
+        unavailable_servers: vec![UnavailableServer {
+            id: ServerId::new("supplier")?,
+            reason: "cannot start server supplier:\nNo such file".to_owned(),
+        }],
+        ..SessionConfig::default()
+    };
+    let mut h = harness_with(
+        vec![
+            ScriptedTurn::text("Catalogue data is unavailable.").expecting(|request| {
+                let expected = "unavailable, so their tools are not offered and their data \
+cannot be retrieved: supplier (cannot start server supplier: No such file).";
+                if request.system.starts_with(DEFAULT_SYSTEM_PROMPT)
+                    && request.system.contains(expected)
+                {
+                    Ok(())
+                } else {
+                    Err(format!("unexpected system prompt: {}", request.system))
+                }
+            }),
+            ScriptedTurn::text("All servers are back.").expecting(|request| {
+                if request.system == DEFAULT_SYSTEM_PROMPT {
+                    Ok(())
+                } else {
+                    Err(format!("stale note: {}", request.system))
+                }
+            }),
+        ],
+        config,
+        Vec::new(),
+        Vec::new(),
+    )?;
+    run(&mut h, "order", Operator::default()).await;
+    h.session.set_unavailable_servers(Vec::new());
+    run(&mut h, "again", Operator::default()).await;
+    h.provider.verify()?;
+    Ok(())
+}

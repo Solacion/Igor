@@ -92,7 +92,23 @@ pub struct SessionConfig {
     pub result_limit: ResultSizeLimit,
     /// Offer the [`ASK_OPERATOR_TOOL`] host tool.
     pub ask_operator: bool,
+    /// Configured servers that are not available, such as ones that failed to start. The model
+    /// is told about them, so it can say which data is missing instead of answering as if the
+    /// data did not exist. Update between turns with [`Session::set_unavailable_servers`].
+    pub unavailable_servers: Vec<UnavailableServer>,
 }
+
+/// A configured server that is not available.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnavailableServer {
+    /// The server.
+    pub id: ServerId,
+    /// Why, for example a startup error. Host diagnostic text; bounded before the model sees it.
+    pub reason: String,
+}
+
+/// Largest reason text per unavailable server passed to the model, in bytes.
+const MAX_UNAVAILABLE_REASON_BYTES: usize = 200;
 
 impl Default for SessionConfig {
     fn default() -> Self {
@@ -105,6 +121,7 @@ impl Default for SessionConfig {
             tool_timeout: DEFAULT_TOOL_TIMEOUT,
             result_limit: ResultSizeLimit::default(),
             ask_operator: true,
+            unavailable_servers: Vec::new(),
         }
     }
 }
@@ -318,6 +335,12 @@ impl Session {
         std::mem::replace(&mut self.backends, backends)
     }
 
+    /// Replaces the list of configured servers that are not available, from the next model
+    /// request. Hosts call it with [`Session::replace_tools`] when connections change.
+    pub fn set_unavailable_servers(&mut self, servers: Vec<UnavailableServer>) {
+        self.config.unavailable_servers = servers;
+    }
+
     /// Stops every server and waits until they have stopped. Call it once, after the last turn.
     pub async fn shutdown(&self) {
         for backend in self.backends.values() {
@@ -424,7 +447,7 @@ impl Session {
             return Err(TurnOutcome::Cancelled);
         }
         let request = ModelRequest {
-            system: self.config.system_prompt.clone(),
+            system: self.system_prompt(),
             messages: self.messages.clone(),
             tools: self.tools.clone(),
             max_tokens: self.config.max_tokens,
@@ -768,6 +791,33 @@ impl Session {
             id,
             reason: reason.to_owned(),
         });
+    }
+
+    /// The host system prompt, plus a note on unavailable servers when there are any.
+    fn system_prompt(&self) -> String {
+        let servers = &self.config.unavailable_servers;
+        if servers.is_empty() {
+            return self.config.system_prompt.clone();
+        }
+        let listed: Vec<String> = servers
+            .iter()
+            .map(|server| {
+                let mut reason: String = server
+                    .reason
+                    .chars()
+                    .map(|c| if c.is_control() { ' ' } else { c })
+                    .collect();
+                truncate_with_marker(&mut reason, MAX_UNAVAILABLE_REASON_BYTES, TRUNCATION_MARKER);
+                format!("{} ({})", server.id, reason.trim())
+            })
+            .collect();
+        format!(
+            "{}\n- These configured servers are unavailable, so their tools are not offered and \
+their data cannot be retrieved: {}. When this affects the request, tell the operator which data \
+is missing.",
+            self.config.system_prompt,
+            listed.join("; ")
+        )
     }
 
     fn emit(&mut self, event: RuntimeEvent) {
