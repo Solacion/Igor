@@ -118,3 +118,34 @@ it('keeps an approval pending after IPC failure and permits cancellation', async
   expect(wrapper.text()).toContain('Nothing is assumed approved'); expect(wrapper.text()).not.toContain('secret')
   expect(wrapper.get('.approval-card button').attributes('disabled')).toBeUndefined(); expect(wrapper.text()).toContain('Stop turn'); wrapper.unmount()
 })
+
+it('shows a literal clarification, sends its scoped answer once and waits for core confirmation', async () => {
+  let done: (value: unknown) => void = () => {}
+  const mock = backend({ send: () => new Promise(resolve => { done = resolve }) }); const wrapper = mount(ConversationView); await start(wrapper)
+  mock.emit({ event: 'clarification_requested', request_id: 'q1', question: 'Which date? <img src=x>' }); await flushPromises()
+  expect(wrapper.text()).toContain('Which date? <img src=x>'); expect(wrapper.find('img').exists()).toBe(false)
+  expect(wrapper.get('.clarifications button').attributes('disabled')).toBeDefined()
+  await wrapper.get('.clarifications textarea').setValue('Tuesday <b>3 November</b>'); await wrapper.get('.clarifications form').trigger('submit'); await flushPromises()
+  expect(mock.calls.find(c => c.command === 'answer_clarification')?.args).toEqual({ request: { session_id: 'one', request_id: 'q1', answer: 'Tuesday <b>3 November</b>' } })
+  expect(wrapper.get('.clarifications button').attributes('disabled')).toBeDefined(); expect(wrapper.text()).toContain('Stop turn')
+  mock.emit({ event: 'clarification_answered', request_id: 'q1' }); await flushPromises()
+  expect(wrapper.get('.clarifications').text()).toContain('Answered'); expect(wrapper.get('.messages').text()).toContain('Tuesday <b>3 November</b>'); expect(wrapper.find('b').exists()).toBe(false)
+  done({ outcome: 'completed' }); await flushPromises(); wrapper.unmount()
+})
+it('can cancel while waiting for clarification and clears stale answer controls', async () => {
+  let done: (value: unknown) => void = () => {}
+  const mock = backend({ send: () => new Promise(resolve => { done = resolve }) }); const wrapper = mount(ConversationView); await start(wrapper)
+  mock.emit({ event: 'clarification_requested', request_id: 'q1', question: 'When?' }); await flushPromises()
+  await wrapper.get('.composer-actions button[type=button]').trigger('click'); await flushPromises()
+  expect(mock.calls.some(c => c.command === 'cancel_turn')).toBe(true)
+  done({ outcome: 'cancelled' }); await flushPromises(); expect(wrapper.find('.clarifications textarea').exists()).toBe(false); expect(wrapper.get('.clarifications').text()).toContain('Turn ended'); wrapper.unmount()
+})
+
+it('ignores future tool variants and labels definite failure and server error results', async () => {
+  const mock = backend(); const wrapper = mount(ConversationView); await start(wrapper)
+  mock.emit({ event: 'tool_call_future_variant', call_id: 'future' }); await flushPromises()
+  expect(wrapper.find('.tool-activity').exists()).toBe(false)
+  mock.emit({ event: 'tool_call_failed', call_id: 'a', outcome: 'not_executed', message: 'Not connected' })
+  mock.emit({ event: 'tool_call_completed', call_id: 'b', is_error: true, truncated: false }); await flushPromises()
+  expect(wrapper.text()).toContain('The action did not run'); expect(wrapper.text()).toContain('Server reported an error'); wrapper.unmount()
+})

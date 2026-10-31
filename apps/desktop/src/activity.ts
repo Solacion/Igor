@@ -2,7 +2,7 @@ import type { CoreEvent } from './session'
 export interface Activity { callId: string; server: string; tool: string; arguments?: unknown; state: string; detail: string }
 /** Only core events affect activity. This display never dispatches tools. */
 export function updateActivity(rows: Record<string, Activity>, event: CoreEvent['event'], epoch: number) {
-  if (!event.event.startsWith('tool_call_') || typeof event.call_id !== 'string') return
+  if (!['tool_call_proposed', 'tool_call_rejected', 'tool_call_started', 'tool_call_completed', 'tool_call_failed'].includes(event.event) || typeof event.call_id !== 'string') return
   const key = `${epoch}:${event.call_id}`
   const tool = event.tool as { server?: string; name?: string } | undefined
   const row = rows[key] ??= { callId: event.call_id, server: tool?.server ?? 'Unknown server', tool: tool?.name ?? String(event.alias ?? 'Unknown tool'), state: 'Proposed', detail: '' }

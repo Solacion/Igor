@@ -238,6 +238,7 @@ impl Settings {
                 && let Some(backend) = &connection.backend
             {
                 (Arc::as_ptr(backend) as usize).hash(&mut hash);
+                backend.is_connected().hash(&mut hash);
                 if backend.is_connected() {
                     descriptors.extend(connection.descriptors.clone());
                     backends.insert(server.id.clone(), backend.clone() as Arc<dyn ToolBackend>);
@@ -560,6 +561,7 @@ mod tests {
         let config = igor_config::Config::load(&path)?;
         assert_eq!(config.servers()[0].id.as_str(), "pos");
 
+        let connected_revision = settings.snapshot().await?.revision;
         if let Some(backend) = settings
             .connections
             .lock()
@@ -571,6 +573,8 @@ mod tests {
         }
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         let view = settings.view().await?;
+        assert_ne!(settings.snapshot().await?.revision, connected_revision);
+        assert!(settings.snapshot().await?.descriptors.is_empty());
         assert_eq!(
             view.servers[0].status,
             Status::Failed {
