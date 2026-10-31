@@ -2,7 +2,7 @@
 import { updateActivity, type Activity } from './activity'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { readSettings, type ServerView } from './bridge'
-import { readProviders, startSession, type CoreEvent, type ProviderView, type TurnOutcome } from './session'
+import { readProviders, startSession, type ApprovalPreview, type CoreEvent, type ProviderView, type TurnOutcome } from './session'
 
 const emit = defineEmits<{ settings: [] }>()
 const providers = ref<ProviderView[]>([])
@@ -14,6 +14,7 @@ const text = ref('')
 const error = ref('')
 const notice = ref('')
 const status = ref('Ready for a message')
+const approvals = ref<Array<{ key: string; request: ApprovalPreview; state: string }>>([])
 const activity = ref<Record<string, Activity>>({})
 let epoch = 0
 const messages = ref<Array<{ role: string; text: string }>>([])
@@ -40,6 +41,7 @@ async function refresh() {
   } finally { refreshing = false }
 }
 function finish(outcome: TurnOutcome) {
+  for (const item of approvals.value) if (item.state === 'pending' || item.state === 'sending') item.state = 'Turn ended'
   switch (outcome.outcome) {
     case 'completed': status.value = 'Completed'; break
     case 'cancelled': status.value = 'Cancelled — the answer may be incomplete'; break
@@ -57,6 +59,21 @@ function receive(envelope: CoreEvent) {
   lastSequence = envelope.sequence
   const event = envelope.event
   updateActivity(activity.value, event, epoch)
+  if (event.event === 'approval_requested') {
+    const request = event.request as unknown as ApprovalPreview
+    approvals.value.push({ key: `${epoch}:${request.approval_id}`, request, state: 'pending' })
+    status.value = 'Waiting for your approval'
+  }
+  if (event.event === 'approval_resolved') {
+    const item = approvals.value.find(item => item.key === `${epoch}:${String(event.approval_id)}`)
+    if (item) item.state = String(event.outcome)
+    status.value = 'Working…'
+  }
+  if (event.event === 'input_rejected') {
+    const item = approvals.value.find(item => item.key === `${epoch}:${String(event.id)}`)
+    if (item?.state === 'sending') item.state = 'pending'
+    error.value = `Your response was refused: ${String(event.reason)}`
+  }
   if (event.event === 'assistant_text' && typeof event.text === 'string') messages.value.push({ role: 'Igor', text: event.text })
   if (event.event === 'turn_finished') finish(event.outcome as TurnOutcome)
 }
@@ -93,7 +110,13 @@ async function send() {
     error.value = 'The turn could not finish. Check the provider and server settings before sending another message.'
     status.value = 'Turn failed — the answer may be incomplete'
     if (session) { try { await session.close() } catch { /* Keep diagnostics native. */ } session = null }
-  } finally { busy.value = false }
+  } finally { busy.value = false; for (const item of approvals.value) if (item.state === 'pending' || item.state === 'sending') item.state = 'Turn ended' }
+}
+async function decide(item: (typeof approvals.value)[number], decision: 'approve' | 'deny') {
+  if (!busy.value || item.state !== 'pending' || !session) return
+  item.state = 'sending'; error.value = ''
+  try { await session.approve(item.request.approval_id, item.request.action_hash, decision) }
+  catch { item.state = 'pending'; error.value = 'Could not submit your decision. Nothing is assumed approved; try again or stop the turn.' }
 }
 async function stop() {
   stopRequested = true
@@ -103,7 +126,7 @@ async function stop() {
 async function reset() {
   if (busy.value) return
   try {
-    await session?.close(); session = null; messages.value = []; activity.value = {}; notice.value = ''; error.value = ''; status.value = 'Ready for a message'
+    await session?.close(); session = null; messages.value = []; activity.value = {}; approvals.value = []; notice.value = ''; error.value = ''; status.value = 'Ready for a message'
   } catch { error.value = 'Could not close the conversation. Try again.' }
 }
 onMounted(() => { void refresh(); timer = setInterval(() => { void refresh() }, 3000) })
@@ -137,6 +160,19 @@ onUnmounted(() => { disposed = true; clearInterval(timer); void session?.close()
         <p v-if="call.detail" class="literal">{{ call.detail }}</p>
         <details v-if="call.arguments !== undefined"><summary>Proposed arguments</summary><pre>{{ JSON.stringify(call.arguments, null, 2) }}</pre></details>
       </li></ol>
+    </section>
+    <section v-if="approvals.length" class="approvals" aria-label="Write action approvals">
+      <article v-for="item in approvals" :key="item.key" class="approval-card">
+        <h2>Review write action</h2>
+        <dl><dt>Server</dt><dd>{{ item.request.tool.server }}</dd><dt>Tool</dt><dd>{{ item.request.tool.name }}</dd></dl>
+        <h3>Exact arguments</h3><pre>{{ item.request.canonical_arguments }}</pre>
+        <h3>Action hash</h3><p class="literal">{{ item.request.action_hash }}</p>
+        <p role="status">{{ item.state === 'pending' ? 'Waiting for your decision. Nothing runs until you approve.' : item.state === 'sending' ? 'Decision sent; waiting for the runtime.' : item.state }}</p>
+        <div v-if="busy && (item.state === 'pending' || item.state === 'sending')" class="composer-actions">
+          <button type="button" :disabled="item.state !== 'pending'" @click="decide(item, 'approve')">Approve</button>
+          <button type="button" class="secondary" :disabled="item.state !== 'pending'" @click="decide(item, 'deny')">Deny</button>
+        </div>
+      </article>
     </section>
     <p role="status" class="turn-status">{{ status }}</p>
     <p v-if="error" role="alert">{{ error }} <button v-if="!loaded" @click="refresh">Try again</button></p>
