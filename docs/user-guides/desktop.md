@@ -15,6 +15,10 @@ The command starts Vite on loopback port 1420 and opens the native Tauri window.
 
 Opening just the frontend in a browser cannot access native IPC; the UI explains that it needs the native window rather than simulating a successful connection. Close the native window or choose **Quit Igor** for orderly shutdown. Igor keeps the event loop responsive while cancelling the session and awaiting all server connections, including removed/replaced connections still held by session leases. Cleanup runs concurrently with a 15-second total deadline; if the deadline expires, a diagnostic states that cleanup may be incomplete. A forced process kill cannot perform this cleanup.
 
+## First-run setup
+
+An empty valid configuration is a normal starting point. The home view explains each missing resource separately: **No model providers configured** links to **Open Model providers**, and **No MCP servers configured** links to Settings’ **MCP servers** section. Each link opens, scrolls to and focuses the matching section; the Settings navigation marks it as current. If both are missing, both choices appear. Add a provider and servers without editing TOML or restarting Igor. The home picker and connection list refresh after setup. A real configuration-loading failure still shows a retryable error instead of pretending the configuration is empty.
+
 ## One-command fixture demo
 
 Use Node.js 22, pnpm 12.11.2 and the pinned Rust toolchain from the prerequisites guide. Install the locked dependencies from the repository root with `pnpm install --frozen-lockfile`. Before launching the no-cost live option, start LM Studio's OpenAI-compatible server at `http://127.0.0.1:1234/v1` and load **qwen/qwen3-vl-8b**. Then, from the repository root, run:

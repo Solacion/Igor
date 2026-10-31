@@ -3,12 +3,16 @@ import { onMounted, ref } from 'vue'
 import SettingsView from './SettingsView.vue'
 import ConversationView from './ConversationView.vue'
 import { readDesktopStatus } from './bridge'
-import type { DesktopStatus } from './bridge'
+import type { DesktopStatus, SettingsSection } from './bridge'
 
 const status = ref<DesktopStatus | null>(null)
 const loading = ref(false)
 const error = ref(false)
 const page = ref<'home' | 'settings'>('home')
+const settingsSection = ref<SettingsSection>('mcp-servers')
+function openSettings(section: SettingsSection = 'mcp-servers') {
+  settingsSection.value = section; page.value = 'settings'
+}
 
 async function checkReadiness() {
   if (loading.value) return
@@ -37,15 +41,15 @@ onMounted(checkReadiness)
       </a>
       <div class="topbar-actions">
         <span class="edition">Desktop preview</span>
-        <button type="button" class="secondary" :aria-pressed="page === 'settings'" @click="page = page === 'settings' ? 'home' : 'settings'">Settings</button>
+        <button type="button" class="secondary" :aria-pressed="page === 'settings'" @click="page === 'settings' ? page = 'home' : openSettings()">Settings</button>
       </div>
     </header>
 
     <main v-if="page === 'settings'" id="settings-main" tabindex="-1" class="wide">
-      <SettingsView @close="page = 'home'" />
+      <SettingsView :initial-section="settingsSection" @close="page = 'home'" />
     </main>
     <main v-show="page === 'home'" id="main" tabindex="-1" class="wide">
-      <ConversationView @settings="page = 'settings'" />
+      <ConversationView @settings="openSettings" />
     </main>
     <footer class="app-footer">
       <div class="footer-readiness">

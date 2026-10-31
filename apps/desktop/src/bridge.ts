@@ -84,3 +84,6 @@ export function reconnectServer(id: string): Promise<SettingsView> {
 export function setPermission(server: string, tool: string, cls: PermissionClass | null): Promise<SettingsView> {
   return invoke<SettingsView>('settings_set_permission', { request: { server, tool, class: cls } })
 }
+
+/** A local Settings destination; never a URL or arbitrary DOM selector. */
+export type SettingsSection = 'mcp-servers' | 'model-providers'
