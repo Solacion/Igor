@@ -39,6 +39,8 @@ Exit codes, from the last turn: `0` completed, `1` startup error (configuration,
 
 With `--provider claude`, the key is read from the variable named in the configuration (`ANTHROPIC_API_KEY` in the sample). With `--provider lm_studio`, load the model in LM Studio and start its local server first. The LM Studio path was checked with `qwen/qwen3-vl-8b` on 31 October 2026; see the [live verification record](../verification/2026-10-31-live-lm-studio.md). The Claude path has not been checked against the live API yet.
 
+Before the first request, IGOR asks LM Studio whether the configured model supports tool calling. If LM Studio does not list tool use for it, the turn fails with `failed: model "…" cannot call tools` and exit code `2`, and nothing is sent to the model. IGOR never reads tool calls out of a model's free text. Servers other than LM Studio are not checked.
+
 ## Script format
 
 A script is a JSON object with a `turns` array, one entry per model request. Each turn has optional `text` and optional `tool_calls`, each `{ "id", "name", "input" }`. `name` is the alias the model sees, `<server>__<tool>`, such as `sales__get_stock_levels`. A turn may instead be `{ "error": "message" }`, which fails that model request. If the run does not use the script exactly, `igor-cli` prints a warning on stderr.

@@ -125,6 +125,8 @@ struct State {
     turns: VecDeque<ScriptedTurn>,
     requests: Vec<ModelRequest>,
     problems: Vec<String>,
+    preflight: Option<ProviderError>,
+    preflights: usize,
 }
 
 /// A [`Provider`] that replays scripted turns in order and records every request.
@@ -146,6 +148,16 @@ impl ScriptedProvider {
                 ..State::default()
             }),
         }
+    }
+
+    /// Makes [`Provider::preflight`] fail with `error`, or succeed again with `None`.
+    pub fn set_preflight_error(&self, error: Option<ProviderError>) {
+        self.lock().preflight = error;
+    }
+
+    /// How many times [`Provider::preflight`] was called.
+    pub fn preflights(&self) -> usize {
+        self.lock().preflights
     }
 
     /// Every request received so far, in order, including rejected ones.
@@ -209,6 +221,12 @@ impl ScriptedProvider {
 impl Provider for ScriptedProvider {
     fn name(&self) -> &str {
         "scripted"
+    }
+
+    async fn preflight(&self, _cancel: CancellationToken) -> Result<(), ProviderError> {
+        let mut state = self.lock();
+        state.preflights += 1;
+        state.preflight.clone().map_or(Ok(()), Err)
     }
 
     async fn complete(

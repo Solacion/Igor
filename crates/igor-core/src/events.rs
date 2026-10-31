@@ -188,6 +188,12 @@ pub enum TurnOutcome {
         /// Diagnostic message without secrets.
         message: String,
     },
+    /// The configured model cannot call tools, so the turn was not sent. Choose a model with
+    /// tool calling.
+    ToolsUnsupported {
+        /// Diagnostic message without secrets, naming the model.
+        message: String,
+    },
 }
 
 /// A limit that can end a turn.

@@ -1,0 +1,11 @@
+{
+  "id": "fixture-model",
+  "object": "model",
+  "type": "vlm",
+  "publisher": "fixture",
+  "arch": "qwen2_5_vl",
+  "compatibility_type": "mlx",
+  "quantization": "8bit",
+  "state": "not-loaded",
+  "max_context_length": 128000
+}

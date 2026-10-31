@@ -5,6 +5,7 @@ IGOR reports failures rather than hiding them. This page explains the common one
 ## The model provider is unavailable
 
 - **LM Studio:** open LM Studio, load `qwen/qwen3-vl-8b` and start the local server (Developer tab) on port 1234. Check it answers with `curl http://127.0.0.1:1234/v1/models`. Until it does, each turn fails with a connection error. IGOR never substitutes a scripted reply.
+- **"cannot call tools":** LM Studio does not list tool use for the configured model, so IGOR refused to send the request. Choose a model that LM Studio marks with tool use, such as `qwen/qwen3-vl-8b`.
 - **Wrong model name:** the `model` in the provider entry must match the identifier LM Studio lists, exactly.
 - **Claude:** a turn that fails with an authentication error means the key was refused. The error shows `[REDACTED]` in place of the key.
 

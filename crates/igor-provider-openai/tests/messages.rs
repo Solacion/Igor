@@ -268,3 +268,75 @@ async fn api_key_never_appears_in_errors() -> TestResult {
     }
     Ok(())
 }
+
+// Tool-support preflight against LM Studio's model details endpoint.
+
+async fn preflight_once(
+    reply: Reply,
+) -> Result<(Result<(), ProviderError>, String), Box<dyn Error>> {
+    let stub = Stub::start(vec![reply]).await?;
+    let provider = provider_with_key(&stub.base_url, Duration::from_secs(5), Some(SENTINEL_KEY))?;
+    let result = provider.preflight(CancellationToken::new()).await;
+    let received = stub.received().await?;
+    let head = received.first().map(|r| r.head.clone()).unwrap_or_default();
+    Ok((result, head))
+}
+
+#[tokio::test]
+async fn preflight_asks_lm_studio_for_the_models_capabilities() -> TestResult {
+    let (result, head) = preflight_once(ok(DIR, "details_tool_use.json")).await?;
+    assert_eq!(result, Ok(()));
+    assert!(
+        head.starts_with("GET /api/v0/models/fixture-model "),
+        "{head}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_model_without_tool_use_is_reported_as_unable_to_call_tools() -> TestResult {
+    let (result, _) = preflight_once(ok(DIR, "details_no_tool_use.json")).await?;
+    let err = result.err().ok_or("expected ToolsUnsupported")?;
+    assert_eq!(
+        (err.kind, err.retryable),
+        (ProviderErrorKind::ToolsUnsupported, false)
+    );
+    assert!(err.message.contains("\"fixture-model\""), "{err}");
+    assert!(!err.message.contains(SENTINEL_KEY));
+    Ok(())
+}
+
+#[tokio::test]
+async fn preflight_treats_anything_but_lm_studio_details_as_unknown() -> TestResult {
+    let other_model = json!({ "id": "other", "object": "model", "type": "llm" }).to_string();
+    for reply in [
+        status(400, DIR, "details_not_found.json"),
+        status(404, DIR, "error_401.json"),
+        Reply::Http {
+            status: 200,
+            headers: Vec::new(),
+            body: other_model,
+        },
+        Reply::Http {
+            status: 200,
+            headers: Vec::new(),
+            body: "not json".to_owned(),
+        },
+        Reply::Close,
+    ] {
+        let (result, _) = preflight_once(reply).await?;
+        assert_eq!(result, Ok(()));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn preflight_is_skipped_when_the_base_url_does_not_end_in_v1() -> TestResult {
+    let stub = Stub::start(Vec::new()).await?;
+    let settings = OpenAiSettings::new(format!("{}/openai", stub.base_url), "fixture-model");
+    let provider = OpenAiCompatibleProvider::new(settings)?;
+    assert_eq!(provider.preflight(CancellationToken::new()).await, Ok(()));
+    assert_eq!(stub.accepted(), 0);
+    stub.abort();
+    Ok(())
+}

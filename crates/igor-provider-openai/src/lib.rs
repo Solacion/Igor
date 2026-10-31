@@ -5,6 +5,11 @@
 //! calling. Base URL, model and timeout are configuration values; an API key is optional and is
 //! held as a redacted [`Secret`].
 //!
+//! Before the first request that offers tools, [`Provider::preflight`] asks LM Studio's model
+//! details endpoint, `GET {root}/api/v0/models/{model}`, whether the model lists the `tool_use`
+//! capability. Other servers, and any answer that is not LM Studio's model details, leave tool
+//! support unknown and the session goes ahead.
+//!
 //! The adapter does not retry. It marks errors [`ProviderError::retryable`] so the session loop
 //! can retry visibly.
 
@@ -15,7 +20,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use igor_config::{ProviderConfig, ProviderKind, Secret};
 use igor_core::CancellationToken;
-use igor_core::provider::{ModelRequest, ModelResponse, Provider, ProviderError};
+use igor_core::provider::{
+    ModelRequest, ModelResponse, Provider, ProviderError, ProviderErrorKind,
+};
 use igor_provider_http::{cancellable, errors, send_json};
 
 pub use igor_provider_http::BuildError;
@@ -65,11 +72,19 @@ impl OpenAiSettings {
     }
 }
 
+/// Bound on the tool-support check, which LM Studio answers from its model list.
+const PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Largest model details body read by the tool-support check.
+const MAX_DETAILS_BYTES: usize = 64 * 1024;
+
 /// OpenAI-compatible chat completions provider.
 #[derive(Debug)]
 pub struct OpenAiCompatibleProvider {
     client: reqwest::Client,
     endpoint: String,
+    /// LM Studio's model details URL, when the base URL ends in `/v1`.
+    details: Option<reqwest::Url>,
     model: String,
     api_key: Option<Secret>,
 }
@@ -84,6 +99,7 @@ impl OpenAiCompatibleProvider {
                 "{}/chat/completions",
                 settings.base_url.trim_end_matches('/')
             ),
+            details: details_url(&settings.base_url, &settings.model),
             model: settings.model,
             api_key: settings.api_key,
         })
@@ -99,6 +115,42 @@ impl OpenAiCompatibleProvider {
         let bytes = send_json(http, body.to_string(), secret).await?;
         wire::parse_response(&bytes).map_err(|err| errors::scrub(err, secret))
     }
+
+    /// Whether LM Studio's model details say the model cannot call tools. Any failure to get
+    /// them means unknown, which is `false`.
+    async fn lacks_tool_use(&self) -> bool {
+        let Some(url) = &self.details else {
+            return false;
+        };
+        let mut http = self.client.get(url.clone()).timeout(PREFLIGHT_TIMEOUT);
+        if let Some(key) = &self.api_key {
+            http = http.bearer_auth(key.expose());
+        }
+        let Ok(response) = http.send().await else {
+            return false;
+        };
+        if !response.status().is_success() {
+            return false;
+        }
+        match response.bytes().await {
+            Ok(body) if body.len() <= MAX_DETAILS_BYTES => {
+                wire::details_lack_tool_use(&body, &self.model)
+            }
+            _ => false,
+        }
+    }
+}
+
+/// `{root}/api/v0/models/{model}` for a base URL `{root}/v1`, with `model` as one encoded path
+/// segment.
+fn details_url(base_url: &str, model: &str) -> Option<reqwest::Url> {
+    let root = base_url.trim_end_matches('/').strip_suffix("/v1")?;
+    let mut url = reqwest::Url::parse(root).ok()?;
+    url.path_segments_mut()
+        .ok()?
+        .pop_if_empty()
+        .extend(["api", "v0", "models", model]);
+    Some(url)
 }
 
 #[async_trait]
@@ -114,11 +166,39 @@ impl Provider for OpenAiCompatibleProvider {
     ) -> Result<ModelResponse, ProviderError> {
         cancellable(cancel, self.send(&request)).await?
     }
+
+    async fn preflight(&self, cancel: CancellationToken) -> Result<(), ProviderError> {
+        if cancellable(cancel, self.lacks_tool_use()).await? {
+            return Err(ProviderError {
+                kind: ProviderErrorKind::ToolsUnsupported,
+                message: format!(
+                    "model {:?} cannot call tools: LM Studio does not list tool use for it",
+                    self.model
+                ),
+                retryable: false,
+            });
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn details_url_is_derived_from_a_v1_base_url() {
+        let url = |base: &str, model: &str| details_url(base, model).map(String::from);
+        assert_eq!(
+            url("http://127.0.0.1:1234/v1", "qwen/qwen3-vl-8b").as_deref(),
+            Some("http://127.0.0.1:1234/api/v0/models/qwen%2Fqwen3-vl-8b")
+        );
+        assert_eq!(
+            url("http://127.0.0.1:1234/v1/", "m").as_deref(),
+            Some("http://127.0.0.1:1234/api/v0/models/m")
+        );
+        assert_eq!(url("https://api.example.com/openai", "m"), None);
+    }
 
     #[test]
     fn debug_output_never_contains_the_key() -> Result<(), BuildError> {

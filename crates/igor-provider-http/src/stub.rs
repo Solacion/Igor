@@ -168,7 +168,12 @@ async fn read_request(stream: &mut TcpStream) -> Option<Received> {
             .unwrap_or(0);
         let body_start = header_end + 4;
         if data.len() >= body_start + length {
-            let body = serde_json::from_slice(data.get(body_start..body_start + length)?).ok()?;
+            // A request without a body, such as a GET, is recorded with a null body.
+            let body = if length == 0 {
+                serde_json::Value::Null
+            } else {
+                serde_json::from_slice(data.get(body_start..body_start + length)?).ok()?
+            };
             return Some(Received { head, body });
         }
     }
