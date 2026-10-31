@@ -20,6 +20,7 @@
 
 - [Prepare and verify a checkout](user-guides/verification.md).
 - [Foundation verification, 30 October 2026](verification/2026-10-30-foundation-checks.md): actual local results and limitations.
+- [Live LM Studio verification, 31 October 2026](verification/2026-10-31-live-lm-studio.md): deterministic checks plus live CLI demo scenarios with a local model.
 - [Verification record template](verification/run-template.md): separate automated, manual and live-provider evidence.
 
 ## User guides
