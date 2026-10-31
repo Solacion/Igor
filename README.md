@@ -1,8 +1,15 @@
 # IGOR
 
-IGOR is a planned standalone, embeddable, local-first AI agent runtime. It will connect model providers and multiple MCP servers behind a shared permissions and approval system.
+IGOR is a standalone, embeddable, local-first AI agent runtime. It connects model providers and multiple MCP servers behind a shared permissions and approval system.
 
-**Status: specification and planning. No runtime has been implemented.** The agreed stack is a Rust core with a Tauri/Vue desktop application. The first demo targets macOS.
+**Status: interview demo build.** The Rust core, the `igor-cli` command-line harness and the Tauri/Vue desktop application run on macOS against Anthropic Claude or a local LM Studio model. The demo uses fixture-backed MCP servers; no production MCP server ships with this repository.
+
+## Try it
+
+After [preparing the checkout](docs/user-guides/verification.md):
+
+- **Desktop:** `pnpm run desktop:demo`. See the [desktop guide](docs/user-guides/desktop.md).
+- **Command line, no model needed:** the scripted run in the [CLI guide](docs/user-guides/cli.md).
 
 ## Documentation
 

@@ -10,7 +10,7 @@ pub const USAGE: &str =
     "usage: igor-cli [--config <path>] --provider <scripted|ID> [--script <path>] [--export <path>]
                 [REQUEST...]
 
-  --config <path>    configuration file (default: $IGOR_CONFIG, then ~/.config/igor/igor.toml)
+  --config <path>    configuration file (default: $IGOR_CONFIG, then ~/Library/Application Support/igor/config.toml)
   --provider <name>  `scripted` for an offline scripted model (needs --script), or a provider id
                      from the configuration
   --script <path>    JSON script of model turns for the scripted provider

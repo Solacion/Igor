@@ -25,7 +25,7 @@ igor-cli [--config <path>] --provider <scripted|ID> [--script <path>] [--export 
 
 | Option | Meaning |
 | --- | --- |
-| `--config <path>` | Configuration file. Default: `$IGOR_CONFIG`, then `~/.config/igor/igor.toml`. See [Configuration](configuration.md). |
+| `--config <path>` | Configuration file. Default: `$IGOR_CONFIG`, then `~/Library/Application Support/igor/config.toml`. See [Configuration](configuration.md). |
 | `--provider <name>` | `scripted`, or a provider `id` from the configuration, such as `claude` or `lm_studio`. |
 | `--script <path>` | Script of model turns. Required with `--provider scripted`, refused otherwise. |
 | `--export <path>` | Also write every runtime event to this file as JSON Lines, redacted (see below). |
@@ -37,7 +37,7 @@ Exit codes, from the last turn: `0` completed, `1` startup error (configuration,
 
 ## Configured providers
 
-With `--provider claude`, the key is read from the variable named in the configuration (`ANTHROPIC_API_KEY` in the sample). With `--provider lm_studio`, load the model in LM Studio and start its local server first. Neither path has been checked against a live model yet; see [Verification](verification.md).
+With `--provider claude`, the key is read from the variable named in the configuration (`ANTHROPIC_API_KEY` in the sample). With `--provider lm_studio`, load the model in LM Studio and start its local server first. The LM Studio path was checked with `qwen/qwen3-vl-8b` on 31 October 2026; see the [live verification record](../verification/2026-10-31-live-lm-studio.md). The Claude path has not been checked against the live API yet.
 
 ## Script format
 
