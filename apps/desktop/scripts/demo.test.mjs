@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, writeFile, mkdir, rm, access } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { absoluteConfig, buildFixture, prepareDemo, launchDemo, repository } from './demo.mjs'
+import { absoluteConfig, buildFixture, prepareDemo, launchDemo, releaseExecutable, repository } from './demo.mjs'
 
 const sample = await readFile(join(repository, 'examples/igor.toml'), 'utf8')
 test('prepares provider-only setup plus three absolute server entries without modifying the source', async () => {
@@ -71,4 +71,40 @@ test('notes supplies the documented fixture dates and restock policy without wri
   assert.deepEqual(JSON.parse(call.result.content[0].text), call.result.structuredContent)
   const text = JSON.stringify(call.result.structuredContent)
   for (const fact of ['supplier-x', '2026-07-13', '2026-07-06', '2026-07-12', '2026-07-15', 'previous seven days', 'rounding up', 'Draft only']) assert.ok(text.includes(fact))
+})
+
+test('locates the release bundle using Cargo target metadata, including paths with spaces', () => {
+  const env = { CARGO_TARGET_DIR: '/build cache' }
+  const result = releaseExecutable('/repo', env, (program, args, options) => {
+    assert.equal(program, 'cargo'); assert.ok(args.includes('/repo/apps/desktop/src-tauri/Cargo.toml'))
+    assert.equal(options.env, env)
+    return { status: 0, stdout: JSON.stringify({ target_directory: '/build cache' }) }
+  })
+  assert.equal(result, '/build cache/release/bundle/macos/Igor.app/Contents/MacOS/igor-desktop')
+})
+
+test('release demo starts the bundled executable with disposable config, never a dev server', async () => {
+  let cleaned = false
+  let child
+  const started = new Promise(resolve => { child = new EventEmitter(); child.kill = () => {}; resolve() })
+  const task = launchDemo({ release: true, root: '/repo', demo: { config: '/temp/release.toml', cleanup: async () => { cleaned = true } },
+    locate: () => '/release bundle/Igor.app/Contents/MacOS/igor-desktop', check: async () => {}, env: { PATH: '/bin' },
+    run(program, args, options) {
+      assert.equal(program, '/release bundle/Igor.app/Contents/MacOS/igor-desktop')
+      assert.deepEqual(args, []); assert.equal(options.env.IGOR_CONFIG, '/temp/release.toml')
+      assert.equal(options.env.PATH, '/bin'); return child
+    },
+  })
+  await started; await new Promise(resolve => setImmediate(resolve))
+  assert.equal(cleaned, false)
+  child.emit('exit', 0, null); assert.equal(await task, 0); assert.equal(cleaned, true)
+})
+
+test('missing release bundle gives build guidance and cleans the disposable config', async () => {
+  let cleaned = false
+  await assert.rejects(launchDemo({ release: true, demo: { config: '/temp/demo.toml', cleanup: async () => { cleaned = true } },
+    locate: () => '/missing/Igor.app', check: async () => { throw new Error('missing') },
+    run() { assert.fail('must not launch pnpm or fall back to development') },
+  }), /Run pnpm run desktop:release first/)
+  assert.equal(cleaned, true)
 })

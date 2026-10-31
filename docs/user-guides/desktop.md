@@ -100,6 +100,18 @@ Supplier X has a ZAR 1,500 minimum, a two-day lead time and Monday/Wednesday/Fri
 
 Close Igor's window or choose **Quit Igor** before stopping the launcher so normal app shutdown can reap the fixture children. The launcher removes its temporary directory when the desktop command ends. `pnpm run desktop:demo --prepare-only` from the repository root only builds/prepares and prints the config path; it starts no app/model and intentionally leaves that temporary directory for inspection. Delete that printed directory when finished. This preparation check does not count as a manual/live demo pass.
 
+## Interview release bundle
+
+From the repository root, run `pnpm run desktop:release`. This runs a production `tauri build` and embeds the built frontend; it does not use the development server. With the default Cargo target directory, the bundle is **`apps/desktop/src-tauri/target/release/bundle/macos/Igor.app`**. The build reports the exact path. It targets the current Mac's architecture; this command does not produce a universal binary.
+
+The bundle is unsigned and not notarized. For an unsigned app downloaded or copied to another Mac, in Finder **right-click Igor.app → Open**, then confirm **Open** when macOS permits it. If your Mac's policy blocks that option, use the organization's approved process; this launcher does not disable Gatekeeper or remove quarantine. Open only a bundle you trust. A direct Finder launch uses your normal configuration, so quit it before running the disposable demo.
+
+After building, run `pnpm run desktop:demo --release` from the repository root. The launcher still builds the fixture server and creates the same disposable configuration and printed Settings entries, then starts **the release bundle's executable** with `IGOR_CONFIG` pointing at that copy. It waits for Igor to quit and cleans up the temporary config afterwards. There is no Vite/dev server. A missing bundle gives build guidance rather than starting development mode. Keep the repository fixture files available during this demo; the `.app` alone does not contain those fixture servers or configs.
+
+The launcher uses Cargo metadata to honor `CARGO_TARGET_DIR`; use the same environment for build and launch. These commands use the default native target layout. For a custom cross-compiled target, launch its correctly built app with an explicitly prepared config instead. To inspect the disposable setup without launching the app, use `pnpm run desktop:demo --release --prepare-only`; remove the printed temporary directory afterwards.
+
+Follow the same setup, permission, approval, denial and export walkthrough above. Close the window or choose **Quit Igor** for awaited server shutdown. A successful release build or preparation-only run is not a manual/live demo pass.
+
 ## Manage MCP servers
 
 Choose **Settings** in the top bar. Under **MCP servers** you can:

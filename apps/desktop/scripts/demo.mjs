@@ -1,3 +1,4 @@
+import { constants } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
 import { mkdtemp, readFile, writeFile, rm, access, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -74,17 +75,37 @@ export async function prepareDemo(root = repository, executable = buildFixture(r
   return { config, directory, servers, setup, cleanup: () => rm(directory, { recursive: true, force: true }) }
 }
 
-export async function launchDemo({ root = repository, demo, run = spawn, env = process.env }) {
-  const child = run('pnpm', ['--filter', '@igor/desktop', 'tauri', 'dev'], {
-    cwd: root, env: { ...env, IGOR_CONFIG: demo.config }, stdio: 'inherit',
+/** Cargo metadata honors CARGO_TARGET_DIR without assuming a checkout-local build cache. */
+export function releaseExecutable(root = repository, env = process.env, run = spawnSync) {
+  const result = run('cargo', ['metadata', '--no-deps', '--format-version', '1', '--manifest-path', join(root, 'apps/desktop/src-tauri/Cargo.toml')], {
+    cwd: join(root, 'apps/desktop/src-tauri'), env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
   })
-  const interrupt = () => { child.kill('SIGINT') }
-  const terminate = () => { child.kill('SIGTERM') }
-  process.on('SIGINT', interrupt)
-  process.on('SIGTERM', terminate)
+  if (result.error || result.status !== 0) throw new Error('Could not locate the release app. Run pnpm run desktop:release first.')
+  let target
+  try { target = JSON.parse(result.stdout).target_directory } catch { /* Fixed diagnostic below. */ }
+  if (typeof target !== 'string' || !isAbsolute(target)) throw new Error('Cargo did not report an absolute desktop build directory.')
+  return join(target, 'release/bundle/macos/Igor.app/Contents/MacOS/igor-desktop')
+}
+
+export async function launchDemo({ root = repository, demo, run = spawn, env = process.env, release = false, locate = releaseExecutable, check = access }) {
+  let child
+  const interrupt = () => { child?.kill('SIGINT') }
+  const terminate = () => { child?.kill('SIGTERM') }
   try {
+    let program = 'pnpm'
+    let args = ['--filter', '@igor/desktop', 'tauri', 'dev']
+    if (release) {
+      program = locate(root, env)
+      try { await check(program, constants.X_OK) }
+      catch { throw new Error('Release app not found or not executable. Run pnpm run desktop:release first.') }
+      args = []
+    }
+    // Launch the bundle executable directly so it inherits IGOR_CONFIG and is awaited until quit.
+    child = run(program, args, { cwd: root, env: { ...env, IGOR_CONFIG: demo.config }, stdio: 'inherit' })
+    process.on('SIGINT', interrupt)
+    process.on('SIGTERM', terminate)
     return await new Promise((done, reject) => {
-      child.once('error', () => reject(new Error('Could not start pnpm. Install the documented desktop prerequisites.')))
+      child.once('error', () => reject(new Error(release ? 'Could not start the release app. Run pnpm run desktop:release and check macOS permissions.' : 'Could not start pnpm. Install the documented desktop prerequisites.')))
       child.once('exit', (code, signal) => done(code ?? (signal === 'SIGINT' ? 130 : 1)))
     })
   } finally {
@@ -94,7 +115,7 @@ export async function launchDemo({ root = repository, demo, run = spawn, env = p
 }
 
 async function main() {
-  if (process.argv.slice(2).some(arg => arg !== '--prepare-only')) throw new Error('Usage: desktop:demo [--prepare-only]')
+  if (process.argv.slice(2).some(arg => !['--prepare-only', '--release', '--'].includes(arg))) throw new Error('Usage: desktop:demo [--release] [--prepare-only]')
   const demo = await prepareDemo()
   console.log(`Disposable demo config: ${demo.config}`)
   console.log(`Server setup reference: ${demo.setup}`)
@@ -108,8 +129,8 @@ async function main() {
     return
   }
   console.log('Close Igor’s window or choose Quit for awaited server cleanup. The temporary config is removed after the launcher exits.')
-  process.exitCode = await launchDemo({ demo })
+  process.exitCode = await launchDemo({ demo, release: process.argv.includes('--release') })
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  main().catch(() => { console.error('Desktop demo failed. Check the preceding build output and the documented prerequisites.'); process.exitCode = 1 })
+  main().catch(error => { console.error(error instanceof Error ? error.message : 'Desktop demo failed. Check the documented prerequisites.'); process.exitCode = 1 })
 }
