@@ -11,7 +11,8 @@
     "docs:preview": "vitepress preview docs --host 127.0.0.1",
     "desktop": "pnpm --filter @igor/desktop tauri dev",
     "desktop:check": "pnpm --filter @igor/desktop check",
-    "desktop:build": "pnpm --filter @igor/desktop tauri build --debug --ci"
+    "desktop:build": "pnpm --filter @igor/desktop tauri build --debug --ci",
+    "desktop:demo": "pnpm --filter @igor/desktop desktop:demo"
   },
   "devDependencies": {
     "vitepress": "1.6.4"

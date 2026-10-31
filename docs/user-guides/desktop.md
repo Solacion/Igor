@@ -15,6 +15,49 @@ The command starts Vite on loopback port 1420 and opens the native Tauri window.
 
 Opening just the frontend in a browser cannot access native IPC; the UI explains that it needs the native window rather than simulating a successful connection. Close the native window or choose **Quit Igor** for orderly shutdown. Igor keeps the event loop responsive while cancelling the session and awaiting all server connections, including removed/replaced connections still held by session leases. Cleanup runs concurrently with a 15-second total deadline; if the deadline expires, a diagnostic states that cleanup may be incomplete. A forced process kill cannot perform this cleanup.
 
+## One-command fixture demo
+
+Use Node.js 22, pnpm 12.11.2 and the pinned Rust toolchain from the prerequisites guide. Install the locked dependencies from the repository root with `pnpm install --frozen-lockfile`. Before launching the no-cost live option, start LM Studio's OpenAI-compatible server at `http://127.0.0.1:1234/v1` and load **qwen/qwen3-vl-8b**. Then, from the repository root, run:
+
+```sh
+pnpm run desktop:demo
+```
+
+The launcher lives under `apps/desktop`; the root script forwards to that package. The command builds `igor-fixture-server` with Cargo's lockfile, copies `examples/igor.toml` into a fresh temporary directory with absolute executable/fixture paths, and launches the native app with `IGOR_CONFIG` pointing at that copy. Both **sales** and **supplier** should connect. It does not modify the example or your usual config. Each run starts with a fresh copy; Settings edits are discarded when the launcher exits. No provider request occurs until you send a message.
+
+Choose **lm_studio** in Igor for the no-cost live run. Choosing **claude** requires `ANTHROPIC_API_KEY` in the launch environment and can incur provider charges; the key is never written to the demo config. An unavailable LM Studio server or model is a real failed turn, not an offline scripted response.
+
+### Exact demo script — manual live run NOT RUN
+
+1. Choose **New conversation**, then send this clear request:
+
+   > Create a draft order for supplier-x for delivery on 2026-07-15. Use the stock snapshot from 2026-07-13 and sales from 2026-07-06 to 2026-07-12.
+
+   Expect calls to `sales/get_stock_levels`, `sales/get_sales_history` and `supplier/get_catalogue`, followed by a write preview for `sales/create_draft_order`. Before approval, no draft write should have started. Inspect the full arguments and action hash, and **Approve once**. Expect one started/completed draft call and a draft-only response (`draft-0001`, `submitted: false`), with no supplier submission. If the model needs an ordering quantity or policy, it should ask rather than invent a fact.
+
+2. Choose **New conversation**, send the same clear request and **Deny once** when a write preview appears. Expect a denied approval, no started `create_draft_order` for that request and no claim that a draft was created. Any changed proposal must ask for fresh approval; the prior decision is not reused.
+
+3. Choose **New conversation**, then send the vague request:
+
+   > Create an order for supplier X
+
+   Expect a question about missing delivery/stock/sales dates or other required inputs. Answer with `Supplier supplier-x, delivery 2026-07-15, stock 2026-07-13, sales 2026-07-06 to 2026-07-12.` Expect the answer to be acknowledged and the turn to resume. You can **Stop turn** during clarification; cancelled turns must not be presented as a completed answer. Live model behavior is not guaranteed by scripted tests: a silent date assumption is a failed manual check.
+
+4. Finish or stop the active turn, choose **New conversation** to release its old connection leases, then use **Settings → sales → Remove** and confirm. Return home: sales should be absent; supplier should remain connected. Send the clear request again. Expect an explanation that the sales tools/data are unavailable, without invented stock or sales values or a claimed completed draft. Removal is a configuration change, not necessarily a failed-connection event. Restart the demo command to restore both servers. Alternatively choose **Reconnect** on a configured server to replace its connection and verify it becomes connected again; a brief starting state may finish between polls. Edits do not interrupt a snapshot already being used by a running turn.
+
+### Fixture facts to check
+
+| Product | Stock on 2026-07-13 (cases) | Sales 2026-07-06–12 (cases) | Catalogue price per case | Order multiple | Available |
+| --- | ---: | ---: | ---: | ---: | --- |
+| COLA-330-24 | 18 | 59 | ZAR 189 | 2 | yes |
+| WATER-500-24 | 22 | 76 | ZAR 96 | 2 | yes |
+| LEMON-330-24 | 10 | 31 | ZAR 179 | 1 | yes |
+| COCOA-1KG-6 | 9 | 8 | ZAR 540 | 1 | no |
+
+Supplier X has a ZAR 1,500 minimum, a two-day lead time and Monday/Wednesday/Friday delivery. 2026-07-15 is a Wednesday, two days after the stock snapshot. Cocoa must be excluded while unavailable. Quantities must be whole ordering units and respect order multiples/minimum value; a live model may propose a different valid replenishment policy, which must be explained. The recorded example's 12 cola cases total ZAR 2,268; that example is not a mandated live-model quantity.
+
+Close Igor's window or choose **Quit Igor** before stopping the launcher so normal app shutdown can reap the fixture children. The launcher removes its temporary directory when the desktop command ends. `pnpm run desktop:demo --prepare-only` from the repository root only builds/prepares and prints the config path; it starts no app/model and intentionally leaves that temporary directory for inspection. Delete that printed directory when finished. This preparation check does not count as a manual/live demo pass.
+
 ## Manage MCP servers
 
 Choose **Settings** in the top bar. Under **MCP servers** you can:
@@ -38,7 +81,7 @@ Write actions pause on **Review write action**. Read the server, tool, exact arg
 
 When Igor asks a question, enter **Your answer** and choose **Send answer**. The controls wait for core confirmation. **Stop turn** remains available during model work, approval and clarification. Cancelling after a tool starts cannot undo an action that already ran. Only one turn runs at a time; provider selection and **New conversation** are disabled until it ends. Opening Settings keeps the conversation mounted; return home to answer or stop it.
 
-Settings edits apply to the next message. An active turn keeps its original permissions and connection leases, even if its server is edited or removed. Core currently has no API for replacing a session's registry or importing its history: when settings/connections change, the next message starts a **new model conversation**, with an explicit notice. Earlier messages remain on screen but are not sent as model history after that reset. Changing provider also starts a new model conversation. **New conversation** clears the visible conversation. No conversation persistence is provided.
+Settings edits apply to the next message. An active turn keeps its original permissions and connection leases, even if its server is edited or removed. The desktop has not yet wired the new core history-preserving registry replacement API: when settings/connections change, the next message currently starts a **new model conversation**, with an explicit notice. Earlier messages remain on screen but are not sent as model history after that reset. Changing provider also starts a new model conversation. **New conversation** clears the visible conversation. No conversation persistence is provided.
 
 ## Check or build
 
@@ -68,7 +111,7 @@ The separate root `pnpm run verify` and Rust dependency audit cover the core wor
 
 These are pending checks for the native app and a real configured provider. Automated ScriptedProvider/fixture tests do not establish live-provider or visual correctness. Do not mark these checked without running them.
 
-Prepare the fixture server from the repository root with `cargo build --locked -p igor-fixture-server`. Start with a disposable copy of `examples/igor.toml`, correcting its server command and fixture paths for that copy's directory; point `IGOR_CONFIG` at the copy. Export the chosen provider's referenced key variable in the launch environment, or use the configured local LM Studio provider with its server/model running. Never put key values in the config, chat or checklist evidence. Launch with `pnpm run desktop` from that environment.
+Use the one-command disposable fixture demo above and follow its exact prompts and expected results. Never put key values in the config, chat or checklist evidence. Preparation/scripted checks do not count as a manual/live pass.
 
 - [ ] **Scenario, not run:** select the provider and confirm the sales fixture server connects. Ask for supplier-x stock as of 13 July 2026 and sales from 6–12 July 2026, then a proposed replenishment draft. Verify each read appears in activity, returned values match the fixture, and missing dates/quantities cause a clarification. Answer it and confirm the turn resumes. Before approving a draft, compare its server/tool, exact arguments and hash with the requested action; approve once, verify one successful `create_draft_order` call and a draft-only result, with no supplier submission.
 - [ ] **Denied action, not run:** request another draft and choose Deny. Verify the approval resolves as denied, no call starts for that write, and Igor does not claim it created a draft. Change the proposed quantity and verify a fresh approval and hash are shown.
