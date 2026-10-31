@@ -55,6 +55,21 @@ pub async fn connect(config: &Config, out: &mut impl Write) -> io::Result<Connec
             }
         }
     }
+    let registry = build_registry(config, descriptors, out)?;
+    Ok(Connected {
+        registry,
+        backends,
+        unavailable,
+    })
+}
+
+/// Builds the registry from `descriptors` and the configured permissions, reporting excluded,
+/// hidden and approval-gated tools on `out`.
+pub fn build_registry(
+    config: &Config,
+    descriptors: Vec<ToolDescriptor>,
+    out: &mut impl Write,
+) -> io::Result<ToolRegistry> {
     let classes = descriptors
         .iter()
         .map(|d| (d.id.clone(), config.permissions().classify(&d.id)))
@@ -84,11 +99,39 @@ pub async fn connect(config: &Config, out: &mut impl Write) -> io::Result<Connec
             )?;
         }
     }
-    Ok(Connected {
-        registry,
-        backends,
-        unavailable,
-    })
+    Ok(registry)
+}
+
+/// Lists every connected server's tools again and builds a new registry. `stale` names the
+/// servers that reported a change; each is reported on `out`. A server whose listing fails is
+/// reported and its tools are left out.
+pub async fn refresh(
+    config: &Config,
+    backends: &HashMap<ServerId, Arc<dyn ToolBackend>>,
+    stale: &[ServerId],
+    out: &mut impl Write,
+) -> io::Result<ToolRegistry> {
+    let mut servers: Vec<_> = backends.iter().collect();
+    servers.sort_by(|a, b| a.0.cmp(b.0));
+    let mut descriptors = Vec::new();
+    for (id, backend) in servers {
+        match backend.list_tools().await {
+            Ok(tools) => {
+                if stale.contains(id) {
+                    writeln!(out, "[server {id}: tools refreshed, {} tools]", tools.len())?;
+                }
+                descriptors.extend(tools);
+            }
+            Err(error) => {
+                writeln!(
+                    out,
+                    "[server {id}: cannot list tools] {}",
+                    sanitize(&error.to_string())
+                )?;
+            }
+        }
+    }
+    build_registry(config, descriptors, out)
 }
 
 async fn connect_one(

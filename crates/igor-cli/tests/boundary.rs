@@ -470,3 +470,61 @@ fn an_unavailable_server_is_reported_and_the_others_still_work() -> TestResult {
     run.assert_no_server_left_running()?;
     Ok(())
 }
+
+#[test]
+fn a_tool_list_change_is_refreshed_before_the_next_message() -> TestResult {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("igor-cli-boundary-fixtures")
+        .join("list-changed");
+    std::fs::create_dir_all(&dir)?;
+    let fixture = dir.join("notes.json");
+    std::fs::write(
+        &fixture,
+        json!({
+            "server": { "name": "notes", "version": "1" },
+            "tools": [
+                { "name": "save_note", "inputSchema": { "type": "object" } },
+                { "name": "list_notes", "inputSchema": { "type": "object" } }
+            ],
+            "calls": [
+                { "tool": "list_notes", "arguments": "*", "result": { "content": [] },
+                  "fault": { "notify_tools_changed": true } }
+            ]
+        })
+        .to_string(),
+    )?;
+    let servers = [Server {
+        id: "notes",
+        fixture: Some(fixture),
+        permissions: NOTES,
+        call_timeout_ms: None,
+    }];
+    let script = json!({ "turns": [
+        { "tool_calls": [{ "id": "t1", "name": "notes__list_notes", "input": {} }] },
+        { "text": "No notes." },
+        { "tool_calls": [{ "id": "t2", "name": "notes__list_notes", "input": {} }] },
+        { "text": "Still no notes." }
+    ] });
+    let run = run("list-changed", &servers, &script, "again\n")?;
+    assert!(run.output.status.success(), "{}", run.stdout);
+    assert!(
+        run.stdout
+            .contains("[server notes: tools refreshed, 2 tools]"),
+        "{}",
+        run.stdout
+    );
+    assert_eq!(
+        run.stdout.matches("[completed]").count(),
+        2,
+        "{}",
+        run.stdout
+    );
+    let tools: Vec<_> = run
+        .calls("notes")?
+        .into_iter()
+        .map(|(tool, _)| tool)
+        .collect();
+    assert_eq!(tools, ["list_notes", "list_notes"]);
+    run.assert_no_server_left_running()?;
+    Ok(())
+}

@@ -178,6 +178,9 @@ impl ToolBackend for SharedBackend {
     fn is_connected(&self) -> bool {
         self.0.is_connected()
     }
+    fn tool_list_version(&self) -> u64 {
+        self.0.tool_list_version()
+    }
     async fn shutdown(&self) {
         self.0.shutdown().await;
     }

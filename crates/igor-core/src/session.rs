@@ -274,6 +274,10 @@ pub struct Session {
     stopped: HashSet<ServerId>,
     /// Tool calls in the current turn that did not return a successful result.
     unsuccessful_calls: u32,
+    /// Each backend's [`ToolBackend::tool_list_version`] when its tools were registered.
+    tool_versions: HashMap<ServerId, u64>,
+    /// Servers already reported with [`RuntimeEvent::ToolsChanged`] since then.
+    tools_changed_reported: HashSet<ServerId>,
 }
 
 impl Session {
@@ -287,6 +291,7 @@ impl Session {
             events,
         } = parts;
         let tools = tool_specs(&registry, &config);
+        let tool_versions = tool_versions(&backends);
         let (sender, inputs) = mpsc::unbounded_channel();
         let session = Self {
             provider,
@@ -302,6 +307,8 @@ impl Session {
             sequence: 0,
             stopped: HashSet::new(),
             unsuccessful_calls: 0,
+            tool_versions,
+            tools_changed_reported: HashSet::new(),
         };
         (session, SessionHandle { inputs: sender })
     }
@@ -332,6 +339,8 @@ impl Session {
         self.tools = tool_specs(&registry, &self.config);
         self.registry = registry;
         self.stopped.clear();
+        self.tool_versions = tool_versions(&backends);
+        self.tools_changed_reported.clear();
         std::mem::replace(&mut self.backends, backends)
     }
 
@@ -339,6 +348,20 @@ impl Session {
     /// request. Hosts call it with [`Session::replace_tools`] when connections change.
     pub fn set_unavailable_servers(&mut self, servers: Vec<UnavailableServer>) {
         self.config.unavailable_servers = servers;
+    }
+
+    /// Servers that reported a tool list change since their tools were registered, sorted. The
+    /// host should list their tools again and call [`Session::replace_tools`] before the next
+    /// turn; until then, calls to them are refused.
+    pub fn stale_servers(&self) -> Vec<ServerId> {
+        let mut stale: Vec<ServerId> = self
+            .backends
+            .keys()
+            .filter(|server| self.is_stale(server))
+            .cloned()
+            .collect();
+        stale.sort();
+        stale
     }
 
     /// Stops every server and waits until they have stopped. Call it once, after the last turn.
@@ -361,6 +384,9 @@ impl Session {
     ) -> TurnOutcome {
         self.push_user_blocks(vec![ContentBlock::Text { text: text.into() }]);
         self.unsuccessful_calls = 0;
+        for server in self.stale_servers() {
+            self.report_tools_changed(&server);
+        }
         let outcome = match self.run_turn(&cancel).await {
             TurnOutcome::Completed if self.unsuccessful_calls > 0 => {
                 TurnOutcome::CompletedWithGaps {
@@ -541,6 +567,10 @@ impl Session {
             Ok(call) => call,
             Err(rejection) => return self.reject(call_id, name, &rejection),
         };
+        // Refuse before asking for approval: the registered definition may no longer match.
+        if let Some(refused) = self.refuse_if_stale(&call_id, &call.tool().server, cancel) {
+            return refused;
+        }
         let permit = match self.gate.admit(call, call_id.clone()) {
             Ok(Admission::Ready(permit)) => permit,
             Err(error) => {
@@ -681,6 +711,10 @@ impl Session {
             let message = format!("server {} is not connected", permit.tool().server);
             return self.call_failed(call_id, CallFailure::NotExecuted, message, cancel);
         };
+        // Checked again: the server may have changed its tools while approval was pending.
+        if let Some(refused) = self.refuse_if_stale(&call_id, &permit.tool().server, cancel) {
+            return refused;
+        }
         self.emit(RuntimeEvent::ToolCallStarted {
             call_id: call_id.clone(),
         });
@@ -725,6 +759,45 @@ impl Session {
                 self.call_failed(call_id, CallFailure::Unknown, message, cancel)
             }
         }
+    }
+
+    fn is_stale(&self, server: &ServerId) -> bool {
+        self.backends.get(server).is_some_and(|backend| {
+            self.tool_versions.get(server).copied().unwrap_or_default()
+                != backend.tool_list_version()
+        })
+    }
+
+    /// Emits [`RuntimeEvent::ToolsChanged`] once per change.
+    fn report_tools_changed(&mut self, server: &ServerId) {
+        if self.tools_changed_reported.insert(server.clone()) {
+            self.emit(RuntimeEvent::ToolsChanged {
+                server: server.clone(),
+            });
+        }
+    }
+
+    /// Refuses a call to a server whose tools changed since they were registered.
+    fn refuse_if_stale(
+        &mut self,
+        call_id: &str,
+        server: &ServerId,
+        cancel: &CancellationToken,
+    ) -> Option<CallResult> {
+        if !self.is_stale(server) {
+            return None;
+        }
+        self.report_tools_changed(server);
+        let message = format!(
+            "the tool definitions of server {server} changed; they must be refreshed before it \
+is called again"
+        );
+        Some(self.call_failed(
+            call_id.to_owned(),
+            CallFailure::NotExecuted,
+            message,
+            cancel,
+        ))
     }
 
     /// Emits [`RuntimeEvent::ConnectionChanged`] the first time a failed call finds its server
@@ -832,6 +905,14 @@ is missing.",
         self.events.emit(EventEnvelope::new(self.sequence, event));
         self.sequence += 1;
     }
+}
+
+/// Each backend's current tool list version.
+fn tool_versions(backends: &HashMap<ServerId, Arc<dyn ToolBackend>>) -> HashMap<ServerId, u64> {
+    backends
+        .iter()
+        .map(|(server, backend)| (server.clone(), backend.tool_list_version()))
+        .collect()
 }
 
 /// The tools offered to the model: the registry's, plus the host's own when enabled.

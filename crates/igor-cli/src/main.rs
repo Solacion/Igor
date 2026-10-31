@@ -104,6 +104,7 @@ async fn run() -> Result<ExitCode, CliError> {
 
     let mut stdout = std::io::stdout();
     let connected = setup::connect(&config, &mut stdout).await?;
+    let backends = connected.backends.clone();
     let (sink, mut events) = mpsc::unbounded_channel();
     let (mut session, handle) = Session::new(
         SessionParts {
@@ -139,6 +140,12 @@ async fn run() -> Result<ExitCode, CliError> {
     });
     let conversation: Result<TurnOutcome, CliError> = async {
         loop {
+            // A server that reported a tool list change is listed again before the next turn.
+            let stale = session.stale_servers();
+            if !stale.is_empty() {
+                let registry = setup::refresh(&config, &backends, &stale, &mut stdout).await?;
+                session.replace_tools(registry, backends.clone());
+            }
             let cancel = CancellationToken::new();
             if let Ok(mut slot) = current.lock() {
                 *slot = cancel.clone();
