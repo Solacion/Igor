@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { provideVoiceOutput } from './voice/output'
 import { provideSettingsStore } from './stores/settings'
 import { onMounted, ref } from 'vue'
 import SettingsView from './SettingsView.vue'
@@ -6,6 +7,7 @@ import ConversationView from './ConversationView.vue'
 import { readDesktopStatus } from './bridge'
 import type { DesktopStatus, SettingsSection } from './bridge'
 provideSettingsStore()
+provideVoiceOutput()
 const status = ref<DesktopStatus | null>(null)
 const loading = ref(false)
 const error = ref(false)

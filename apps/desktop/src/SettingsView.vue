@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useSettingsStore } from './stores/settings'
+import VoiceSettings from './VoiceSettings.vue'
 import ServerForm from './ServerForm.vue'
 import ProviderSettings from './ProviderSettings.vue'
 import { isCommandError, reconnectServer, removeServer, setPermission } from './bridge'
@@ -108,6 +109,7 @@ onUnmounted(unsubscribe)
       <nav class="settings-nav" aria-label="Settings sections">
         <a href="#mcp-servers" :class="{ 'is-active': section === 'mcp-servers' }" :aria-current="section === 'mcp-servers' ? 'location' : undefined" @click.prevent="focusSection('mcp-servers')">MCP servers</a>
         <a href="#model-providers" :class="{ 'is-active': section === 'model-providers' }" :aria-current="section === 'model-providers' ? 'location' : undefined" @click.prevent="focusSection('model-providers')">Model providers</a>
+        <a href="#voice" :class="{ 'is-active': section === 'voice' }" :aria-current="section === 'voice' ? 'location' : undefined" @click.prevent="focusSection('voice')">Voice</a>
       </nav>
 
       <div class="settings-body">
@@ -196,6 +198,7 @@ onUnmounted(unsubscribe)
           <p v-if="view" class="hint config-path">Saved in {{ view.config_path }}</p>
         </section>
         <ProviderSettings />
+        <VoiceSettings />
       </div>
     </div>
   </section>

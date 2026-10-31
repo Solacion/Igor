@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useVoiceOutput } from './voice/output'
+import { useConversationSpeech } from './composables/useConversationSpeech'
 import { ref } from 'vue'
 import { useConversation } from './composables/useConversation'
 import type { SettingsSection } from './bridge'
@@ -10,14 +12,25 @@ const emit = defineEmits<{
   ]
 }>()
 const confirmingReset = ref(false)
-const { providers, providerId, servers, loaded, busy, text, error, notice, status, toolsUnsupported, exportNotice, exporting, hasSession, timeline, selected, refresh, send, answer, decide, exportActivity, stop, reset } = useConversation()
+const voice = useVoiceOutput()
+const conversation = useConversation()
+const speech = useConversationSpeech(conversation, voice)
+const { providers, providerId, servers, loaded, busy, text, error, notice, status, toolsUnsupported, exportNotice, exporting, hasSession, timeline, selected, refresh, send, answer, decide, exportActivity, stop, reset } = conversation
 function newConversation() {
-  if (timeline.value.length) confirmingReset.value = true
-  else void reset()
+  speech.stopSpeaking()
+  if (timeline.value.length)
+    confirmingReset.value = true
+  else
+    void reset()
 }
 async function confirmReset() {
+  speech.stopSpeaking()
   confirmingReset.value = false
   await reset()
+}
+async function stopTurn() {
+  speech.stopSpeaking()
+  await stop()
 }
 </script>
 <template>
@@ -48,6 +61,8 @@ async function confirmReset() {
     <p v-if="busy" class="thinking" role="status"><span class="thinking-dot" aria-hidden="true"></span>Igor is thinking…</p>
     <p :role="toolsUnsupported ? 'alert' : 'status'" class="turn-status" :data-state="toolsUnsupported ? 'tools_unsupported' : undefined">{{ status }}<template v-if="toolsUnsupported"> Choose a model with tool calling in <a href="#model-providers" @click.prevent="emit('settings', 'model-providers')">Settings → Model providers</a>.</template></p>
     <p v-if="error" role="alert">{{ error }} <button v-if="!loaded" @click="refresh()">Try again</button></p>
-    <Composer v-model:text="text" :busy="busy" :loaded="loaded" :selected="selected" @send="send" @stop="stop" />
+    <button v-if="voice.speaking.value" type="button" class="secondary" @click="speech.stopSpeaking">Stop speaking</button>
+    <p v-if="voice.error.value" role="alert">{{ voice.error.value }}</p>
+    <Composer v-model:text="text" :busy="busy" :loaded="loaded" :selected="selected" @send="send" @stop="stopTurn" />
   </section>
 </template>
