@@ -122,13 +122,17 @@ struct ProvidersView {
 async fn conversation_providers(
     settings: State<'_, Arc<Settings>>,
 ) -> Result<ProvidersView, BridgeError> {
+    provider_options(&settings)
+}
+
+fn provider_options(settings: &Settings) -> Result<ProvidersView, BridgeError> {
     let configured = settings
         .provider_choices()
         .map_err(|_| BridgeError::Configuration)?;
     let providers = configured.iter().map(|p| ProviderView {
         revision: settings::provider_revision(p),
         id: p.id.clone(), model: p.model.clone(),
-        unavailable: p.api_key.as_ref().filter(|key| key.resolve().is_err()).map(|key| format!("Environment variable {} is missing or unavailable. Set it before starting Igor.", key.env_var())),
+        unavailable: p.api_key.as_ref().filter(|key| settings::key_variable_missing(key.env_var())).map(|key| format!("Environment variable {} is missing or unavailable. Set it before starting Igor.", key.env_var())),
     }).collect();
     Ok(ProvidersView { providers })
 }
@@ -324,6 +328,65 @@ mod tests {
         );
         let value = serde_json::to_value(status)?;
         assert_eq!(value.as_object().map(|object| object.len()), Some(2));
+        Ok(())
+    }
+    #[test]
+    fn provider_ipc_never_contains_environment_value() -> Result<(), Box<dyn std::error::Error>> {
+        for mode in ["set", "empty", "missing"] {
+            let mut child = std::process::Command::new(std::env::current_exe()?);
+            child
+                .args(["--exact", "tests::provider_ipc_sentinel_probe"])
+                .env("IGOR_PROVIDER_PROBE_MODE", mode);
+            match mode {
+                "set" => {
+                    child.env(
+                        "IGOR_DESKTOP_SENTINEL_KEY_20261031",
+                        "sk-sentinel-never-return-this-value",
+                    );
+                }
+                "empty" => {
+                    child.env("IGOR_DESKTOP_SENTINEL_KEY_20261031", "");
+                }
+                _ => {
+                    child.env_remove("IGOR_DESKTOP_SENTINEL_KEY_20261031");
+                }
+            }
+            assert!(
+                child.output()?.status.success(),
+                "provider presence/IPC probe failed"
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn provider_ipc_sentinel_probe() -> Result<(), Box<dyn std::error::Error>> {
+        let Ok(mode) = std::env::var("IGOR_PROVIDER_PROBE_MODE") else {
+            return Ok(());
+        };
+        let dir = std::env::temp_dir().join(format!("igor-provider-ipc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("config.toml");
+        let settings = Settings::new(Some(path.clone()));
+        let entry = igor_config::ProviderEntry {
+            id: "cloud".into(),
+            kind: igor_config::ProviderKind::Anthropic,
+            model: "test".into(),
+            base_url: None,
+            api_key_env: Some("IGOR_DESKTOP_SENTINEL_KEY_20261031".into()),
+        };
+        let request = serde_json::json!({"request":{"replacing":null,"entry":entry}});
+        let saved = settings.save_provider(None, entry.clone()).await?;
+        assert_eq!(saved.providers[0].key_missing.is_none(), mode == "set");
+        let read = settings.provider_view()?;
+        let picker = provider_options(&settings)?;
+        let edited = settings.save_provider(Some("cloud"), entry).await?;
+        let removed = settings.remove_provider("cloud").await?;
+        let payloads =
+            serde_json::json!([request, saved, read, picker, edited, removed]).to_string();
+        assert!(!payloads.contains("sk-sentinel-never-return-this-value"));
+        assert!(!std::fs::read_to_string(path)?.contains("sk-sentinel-never-return-this-value"));
+        std::fs::remove_dir_all(dir)?;
         Ok(())
     }
 }

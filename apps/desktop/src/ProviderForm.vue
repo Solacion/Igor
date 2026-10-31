@@ -23,7 +23,6 @@ async function save() {
   const baseUrl = form.baseUrl.trim()
   if (!/^[a-z0-9_-]+$/.test(id)) errors.value.id = 'Use lowercase letters, numbers, underscores or hyphens.'
   if (!model) errors.value.model = 'Enter the model identifier.'
-  if (keyName && !/^[A-Z_][A-Z0-9_]*$/.test(keyName)) errors.value.keyName = 'Enter an environment variable NAME, never an API key value.'
   if (form.kind === 'anthropic' && !keyName) errors.value.keyName = 'Anthropic needs an API key environment variable name.'
   if (!baseUrl && form.kind === 'openai_compatible') errors.value.baseUrl = 'Enter the provider base URL.'
   if (baseUrl) {

@@ -23,6 +23,11 @@ pub struct ProviderRequest {
     pub id: String,
 }
 
+/// Inspect only presence/emptiness; do not resolve a Secret for a Settings response.
+pub fn key_variable_missing(name: &str) -> bool {
+    std::env::var_os(name).is_none_or(|value| value.is_empty())
+}
+
 /// Configuration identity only; never hash or return a resolved credential value.
 pub fn provider_revision(config: &ProviderConfig) -> String {
     use std::hash::{Hash, Hasher};
@@ -62,8 +67,7 @@ impl Settings {
 
     pub fn provider_view(&self) -> Result<ProviderSettingsView, CommandError> {
         let doc = self.document()?;
-        let config = doc
-            .validate()
+        doc.validate()
             .map_err(|_| CommandError::message("Provider configuration could not be loaded."))?;
         let entries = doc
             .providers()
@@ -71,11 +75,11 @@ impl Settings {
         let providers = entries
             .into_iter()
             .map(|entry| {
-                let key_missing = config
-                    .provider(&entry.id)
-                    .and_then(|provider| provider.api_key.as_ref())
-                    .filter(|key| key.resolve().is_err())
-                    .map(|key| key.env_var().to_owned());
+                let key_missing = entry
+                    .api_key_env
+                    .as_deref()
+                    .filter(|name| key_variable_missing(name))
+                    .map(str::to_owned);
                 ProviderRow { entry, key_missing }
             })
             .collect();

@@ -23,13 +23,17 @@ it('requires valid identifiers, a model, a local or HTTPS URL and a key name for
   expect(wrapper.text()).toContain('environment variable name'); expect(wrapper.text()).toContain('Use HTTPS')
   expect(calls).toHaveLength(0); wrapper.unmount()
 })
-it.each(['sk-ant-private-value', '{ env = "IGOR_KEY" }', 'IGOR KEY', 'IGOR_KEY=value'])('rejects a pasted value/expression without crossing IPC: %s', async (key) => {
-  const calls = backend(); const wrapper = mount(ProviderForm, { props: { original: claude } })
+it.each(['sk-ant-private-value', '{ env = "IGOR_KEY" }', 'IGOR KEY', 'IGOR_KEY=value'])('shows the backend key-field rejection: %s', async (key) => {
+  const calls: string[] = []
+  mockIPC((command) => { calls.push(command); throw { field: 'api_key', message: 'Backend rejected the key: enter a variable name, never a value.' } })
+  const wrapper = mount(ProviderForm, { props: { original: claude } })
   await wrapper.get('[name=provider-key-name]').setValue(key)
   await wrapper.get('form').trigger('submit'); await flushPromises()
-  expect(wrapper.text()).toContain('environment variable NAME, never an API key value')
-  expect(calls).toHaveLength(0); wrapper.unmount()
+  expect(wrapper.text()).toContain('Backend rejected the key: enter a variable name, never a value.')
+  expect(wrapper.get('[name=provider-key-name]').attributes('aria-invalid')).toBe('true')
+  expect(calls).toEqual(['settings_save_provider']); expect(wrapper.emitted('saved')).toBeUndefined(); wrapper.unmount()
 })
+
 it('saves only the variable name and preserves the edited provider id', async () => {
   const calls = backend(); const wrapper = mount(ProviderForm, { props: { original: claude } })
   await wrapper.get('form').trigger('submit'); await flushPromises()
@@ -46,7 +50,7 @@ it('LM Studio preset clears the key and supplies a loopback URL', async () => {
 })
 it('lists the missing variable by name and requires confirmation to remove a provider', async () => {
   const calls = backend(); const wrapper = mount(ProviderSettings); await flushPromises()
-  expect(wrapper.text()).toContain('Model providers'); expect(wrapper.text()).toContain('anthropic'); expect(wrapper.text()).toContain('Key variable IGOR_CLAUDE_KEY not set')
+  expect(wrapper.text()).toContain('Model providers'); expect(wrapper.text()).toContain('anthropic'); expect(wrapper.text()).toContain('Key variable IGOR_CLAUDE_KEY is not set')
   await wrapper.findAll('button').find(button => button.text() === 'Remove')!.trigger('click'); await flushPromises()
   expect(calls.some(call => call.command === 'settings_remove_provider')).toBe(false)
   await wrapper.findAll('button').find(button => button.text() === 'Confirm removal')!.trigger('click'); await flushPromises()

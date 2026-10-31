@@ -8,7 +8,8 @@
 
 mod providers;
 pub use providers::{
-    ProviderRequest, ProviderSettingsView, SaveProviderRequest, provider_revision,
+    ProviderRequest, ProviderSettingsView, SaveProviderRequest, key_variable_missing,
+    provider_revision,
 };
 
 use std::collections::BTreeMap;

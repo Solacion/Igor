@@ -32,8 +32,8 @@ onMounted(refresh)
         <ProviderForm v-if="editing === provider.entry.id" :original="provider.entry" @saved="saved" @cancel="editing = null" />
         <template v-else>
           <h3>{{ provider.entry.id }}</h3>
-          <p>{{ provider.entry.kind }} · {{ provider.entry.model }}</p><p class="literal">{{ provider.entry.base_url ?? (provider.entry.kind === 'anthropic' ? 'https://api.anthropic.com' : '') }}</p>
-          <p role="status">{{ provider.key_missing ? `Key variable ${provider.key_missing} not set` : provider.entry.api_key_env ? 'Key variable is set' : 'No key required' }}</p>
+          <p>{{ provider.entry.kind }} · {{ provider.entry.model }}</p><p class="literal">{{ provider.entry.base_url ?? 'default' }}</p>
+          <p role="status">{{ provider.key_missing ? `Key variable ${provider.key_missing} is not set` : provider.entry.api_key_env ? 'Key variable is set' : 'No key required' }}</p>
           <p v-if="provider.entry.api_key_env" class="hint">Variable name: {{ provider.entry.api_key_env }}. Only the variable name is saved, never the value</p>
           <div class="form-actions"><button class="secondary" :disabled="busy || editing !== null" @click="editing = provider.entry.id">Edit</button><button class="secondary danger" :disabled="busy || editing !== null" @click="removing = provider.entry.id">Remove</button></div>
           <div v-if="removing === provider.entry.id" role="group" :aria-label="`Remove provider ${provider.entry.id}`"><p>Remove {{ provider.entry.id }}? The next message will use another selected provider.</p><button class="danger" :disabled="busy" @click="remove(provider.entry.id)">Confirm removal</button> <button class="secondary" :disabled="busy" @click="removing = null">Cancel</button></div>
