@@ -2,7 +2,8 @@
 //!
 //! Loads the configuration, connects the configured MCP servers, runs one request through a
 //! [`Session`], prints the runtime events as plain text, and asks the operator in the terminal
-//! to approve write actions and answer clarification questions. With `--export`, the events are
+//! to approve write actions and answer clarification questions. After each turn it reads a
+//! follow-up message, continuing the conversation until end of input or an empty line. With `--export`, the events are
 //! also written to a file as redacted JSON Lines.
 //!
 //! Exit codes: 0 completed, 1 startup error, 2 the turn failed, 3 a limit stopped the turn,
@@ -17,7 +18,7 @@ mod setup;
 
 use std::io::Write;
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use igor_config::{Config, ConfigError, ProviderConfig, ProviderKind, SecretError};
 use igor_core::CancellationToken;
@@ -103,7 +104,7 @@ async fn run() -> Result<ExitCode, CliError> {
 
     let mut stdout = std::io::stdout();
     let connected = setup::connect(&config, &mut stdout).await?;
-    let (sink, events) = mpsc::unbounded_channel();
+    let (sink, mut events) = mpsc::unbounded_channel();
     let (mut session, handle) = Session::new(
         SessionParts {
             provider,
@@ -116,42 +117,64 @@ async fn run() -> Result<ExitCode, CliError> {
     );
 
     let mut stdin = BufReader::new(tokio::io::stdin());
-    let request = match args.request {
+    let mut request = match args.request {
         Some(request) => request,
-        None => {
-            write!(stdout, "Request: ")?;
-            stdout.flush()?;
-            operator::read_line(&mut stdin)
-                .await?
-                .map(|line| line.trim().to_owned())
-                .filter(|line| !line.is_empty())
-                .ok_or(CliError::EmptyRequest)?
-        }
+        None => read_message(&mut stdin, &mut stdout, "Request: ")
+            .await?
+            .ok_or(CliError::EmptyRequest)?,
     };
 
-    let cancel = CancellationToken::new();
-    let on_interrupt = cancel.clone();
+    // Ctrl-C cancels the turn in progress; the conversation can continue afterwards.
+    let current = Arc::new(Mutex::new(CancellationToken::new()));
+    let on_interrupt = Arc::clone(&current);
     tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            on_interrupt.cancel();
+        while tokio::signal::ctrl_c().await.is_ok() {
+            if let Ok(token) = on_interrupt.lock() {
+                token.cancel();
+            }
         }
     });
-    let (outcome, operated) = tokio::join!(
-        session.send_message(request, cancel.clone()),
-        operator::operate(
-            events,
-            &handle,
-            &mut stdin,
-            &mut stdout,
-            export.as_mut().map(|file| file as &mut dyn Write),
-            &cancel,
-        )
-    );
-    operated?;
+    let outcome = loop {
+        let cancel = CancellationToken::new();
+        if let Ok(mut slot) = current.lock() {
+            *slot = cancel.clone();
+        }
+        let (outcome, operated) = tokio::join!(
+            session.send_message(request, cancel.clone()),
+            operator::operate(
+                &mut events,
+                &handle,
+                &mut stdin,
+                &mut stdout,
+                export.as_mut().map(|file| file as &mut dyn Write),
+                &cancel,
+            )
+        );
+        operated?;
+        // Follow-up messages continue the same conversation until end of input or an empty line.
+        match read_message(&mut stdin, &mut stdout, "\nYou: ").await? {
+            Some(next) => request = next,
+            None => break outcome,
+        }
+    };
     if let Some(Err(error)) = scripted.map(|provider| provider.verify()) {
         eprintln!("igor-cli: the script did not match the run: {error}");
     }
     Ok(exit_code(&outcome))
+}
+
+/// Prompts and reads one message; `None` at end of input or on an empty line.
+async fn read_message(
+    stdin: &mut BufReader<tokio::io::Stdin>,
+    stdout: &mut std::io::Stdout,
+    prompt: &str,
+) -> std::io::Result<Option<String>> {
+    write!(stdout, "{prompt}")?;
+    stdout.flush()?;
+    Ok(operator::read_line(stdin)
+        .await?
+        .map(|line| line.trim().to_owned())
+        .filter(|line| !line.is_empty()))
 }
 
 /// The provider for the session, and the same provider again when it is scripted, so the

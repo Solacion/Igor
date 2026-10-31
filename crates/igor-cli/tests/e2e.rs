@@ -269,6 +269,31 @@ fn clarification_answer_is_used_in_the_next_tool_call() -> TestResult {
 }
 
 #[test]
+fn a_follow_up_message_continues_the_conversation() -> TestResult {
+    // The model asks in its reply instead of with igor_ask_operator; the operator answers in
+    // the next message and the conversation continues with the history.
+    let script = json!({ "turns": [
+        { "text": "Which stock date should I use?" },
+        { "tool_calls": [
+            { "id": "t1", "name": "sales__get_stock_levels",
+              "input": { "supplier_id": "supplier-x", "date": "2026-07-13" } }
+        ] },
+        { "text": "Stock retrieved." }
+    ] });
+    let run = run("follow-up", &script, "2026-07-13\n")?;
+    assert!(run.output.status.success(), "{}", run.stdout);
+    assert!(run.stdout.contains("You: "), "{}", run.stdout);
+    assert_eq!(run.logged_tools(), ["get_stock_levels"]);
+    assert_eq!(
+        run.stdout.matches("[completed]").count(),
+        2,
+        "{}",
+        run.stdout
+    );
+    Ok(())
+}
+
+#[test]
 fn unanswered_clarification_cancels_with_exit_code_4() -> TestResult {
     let script = json!({ "turns": [
         { "tool_calls": [

@@ -83,7 +83,8 @@ pub fn render(event: &RuntimeEvent, out: &mut impl Write) -> io::Result<()> {
             };
             writeln!(out, "[{call_id}] failed, {outcome}: {}", sanitize(message))
         }
-        RuntimeEvent::AssistantText { text } => writeln!(out, "\n{}\n", sanitize(text)),
+        RuntimeEvent::AssistantText { text } if text.trim().is_empty() => Ok(()),
+        RuntimeEvent::AssistantText { text } => writeln!(out, "\n{}\n", sanitize(text.trim())),
         RuntimeEvent::ApprovalRequested { request } => render_approval(request, out),
         RuntimeEvent::ApprovalResolved {
             approval_id,
@@ -150,6 +151,26 @@ pub fn describe(outcome: &TurnOutcome) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_assistant_text_prints_nothing() -> io::Result<()> {
+        let mut out = Vec::new();
+        render(
+            &RuntimeEvent::AssistantText {
+                text: "\n \n".to_owned(),
+            },
+            &mut out,
+        )?;
+        assert!(out.is_empty());
+        render(
+            &RuntimeEvent::AssistantText {
+                text: "\nDone.\n".to_owned(),
+            },
+            &mut out,
+        )?;
+        assert_eq!(String::from_utf8_lossy(&out), "\nDone.\n\n");
+        Ok(())
+    }
 
     #[test]
     fn sanitize_escapes_terminal_control_sequences() {
