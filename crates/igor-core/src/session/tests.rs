@@ -753,6 +753,54 @@ async fn a_server_that_stops_is_reported_once_and_not_called_again() -> TestResu
 }
 
 #[tokio::test]
+async fn replacing_tools_keeps_the_conversation_and_applies_the_new_tools() -> TestResult {
+    let mut h = harness(vec![
+        ScriptedTurn::tool_call("u1", "sales__lookup", json!({})),
+        ScriptedTurn::text("Looked it up."),
+        // Second turn: sales was removed, so its tool is refused; weather still answers.
+        tool_uses(vec![
+            tool_use("u2", "sales__lookup", json!({})),
+            tool_use("u3", "weather__lookup", json!({})),
+        ])
+        .expecting(|request| {
+            let names: Vec<_> = request.tools.iter().map(|t| t.name.as_str()).collect();
+            if names.contains(&"sales__lookup") || !names.contains(&"weather__lookup") {
+                return Err(format!("unexpected tools offered: {names:?}"));
+            }
+            // The first turn is still in the history.
+            if request.messages.len() < 4 {
+                return Err(format!("history lost: {} messages", request.messages.len()));
+            }
+            Ok(())
+        }),
+        ScriptedTurn::text("Sales is no longer available."),
+    ])?;
+    let (outcome, _) = run(&mut h, "first", Operator::default()).await;
+    assert_eq!(outcome, TurnOutcome::Completed);
+    assert_eq!(h.sales.calls().len(), 1);
+
+    let weather_tool = tool("weather", "lookup")?;
+    let registry = ToolRegistry::build(
+        [descriptor(&weather_tool, json!({ "type": "object" }))],
+        &HashMap::from([(weather_tool.clone(), Classification::Read)]),
+    );
+    let backends: HashMap<ServerId, Arc<dyn ToolBackend>> = HashMap::from([(
+        ServerId::new("weather")?,
+        h.weather.clone() as Arc<dyn ToolBackend>,
+    )]);
+    let replaced = h.session.replace_tools(registry, backends);
+    assert_eq!(replaced.len(), 2);
+
+    let (outcome, events) = run(&mut h, "second", Operator::default()).await;
+    assert_eq!(outcome, TurnOutcome::Completed);
+    h.provider.verify()?;
+    assert_eq!(count(&events, "tool_call_rejected"), 1);
+    assert_eq!(h.sales.calls().len(), 1, "removed server is not called");
+    assert_eq!(h.weather.calls().len(), 1);
+    Ok(())
+}
+
+#[tokio::test]
 async fn unknown_names_and_invalid_arguments_are_refused_before_dispatch() -> TestResult {
     let mut h = harness(vec![
         tool_uses(vec![
