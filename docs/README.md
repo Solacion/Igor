@@ -31,6 +31,7 @@
 - [User guide](user-guides/README.md): where to start, the demo workflow and model choices.
 - [Desktop](user-guides/desktop.md): `pnpm run desktop:demo` and the demo script.
 - [Command-line harness](user-guides/cli.md): run a request headlessly, including the offline scripted demo.
+- [Voice](user-guides/voice.md): embedded speech-to-text and spoken replies.
 - [Troubleshooting and cleanup](user-guides/troubleshooting.md).
 
 Specifications describe intended behaviour, not existing capabilities. Update the relevant specification when an approved decision changes scope. Add operational instructions only once they can be verified against a working implementation.

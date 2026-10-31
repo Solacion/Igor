@@ -5,6 +5,7 @@ This guide covers the deterministic checks on the code currently in the workspac
 ## macOS prerequisites
 
 - Xcode Command Line Tools (`xcode-select --install` if not installed).
+- CMake, to build the embedded speech-to-text engine (whisper.cpp): `brew install cmake`. Needed only to build IGOR, not to run it.
 - Rustup with Cargo available on `PATH`. The repository pins Rust **1.99.1**, rustfmt and Clippy in `rust-toolchain.toml`.
 - Node.js **22** and pnpm **12.11.2**, as recorded by `package.json`. Record exact installed patch versions in the verification evidence.
 - Git.
