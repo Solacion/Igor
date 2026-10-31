@@ -340,3 +340,75 @@ async fn preflight_is_skipped_when_the_base_url_does_not_end_in_v1() -> TestResu
     stub.abort();
     Ok(())
 }
+
+// Context check against the window LM Studio loaded the model with.
+
+/// A request of about 10,000 prompt tokens: more than the 8,192 of `details_tool_use.json`.
+fn long_request() -> igor_core::provider::ModelRequest {
+    let mut request = sample_request();
+    request.system = "x".repeat(40_000);
+    request
+}
+
+#[tokio::test]
+async fn a_conversation_too_long_for_the_loaded_context_is_refused() -> TestResult {
+    let stub = Stub::start(vec![
+        ok(DIR, "details_tool_use.json"),
+        ok(DIR, "details_tool_use.json"),
+    ])
+    .await?;
+    let provider = provider(&stub.base_url, Duration::from_secs(5))?;
+    provider.preflight(CancellationToken::new()).await?;
+    let err = provider
+        .complete(long_request(), CancellationToken::new())
+        .await
+        .err()
+        .ok_or("expected the request to be refused")?;
+    assert_eq!(
+        (err.kind, err.retryable),
+        (ProviderErrorKind::InvalidRequest, false)
+    );
+    assert!(err.message.contains("loaded with 8192"), "{err}");
+    assert!(err.message.contains("larger context length"), "{err}");
+    let received = stub.received().await?;
+    assert!(
+        received
+            .iter()
+            .all(|request| !request.head.starts_with("POST")),
+        "the request must not be sent"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_model_reloaded_with_a_larger_context_is_asked_again() -> TestResult {
+    let stub = Stub::start(vec![
+        ok(DIR, "details_tool_use.json"),
+        ok(DIR, "details_large_context.json"),
+        ok(DIR, "text_turn.json"),
+    ])
+    .await?;
+    let provider = provider(&stub.base_url, Duration::from_secs(5))?;
+    provider.preflight(CancellationToken::new()).await?;
+    let response = provider
+        .complete(long_request(), CancellationToken::new())
+        .await?;
+    assert_eq!(response.stop_reason, StopReason::EndTurn);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_conversation_that_fits_is_sent_without_asking_again() -> TestResult {
+    let stub = Stub::start(vec![
+        ok(DIR, "details_tool_use.json"),
+        ok(DIR, "text_turn.json"),
+    ])
+    .await?;
+    let provider = provider(&stub.base_url, Duration::from_secs(5))?;
+    provider.preflight(CancellationToken::new()).await?;
+    provider
+        .complete(sample_request(), CancellationToken::new())
+        .await?;
+    assert_eq!(stub.accepted(), 2);
+    Ok(())
+}

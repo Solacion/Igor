@@ -7,6 +7,7 @@ IGOR reports failures rather than hiding them. This page explains the common one
 - **LM Studio:** open LM Studio, load `qwen/qwen3-vl-8b` and start the local server (Developer tab) on port 1234. Check it answers with `curl http://127.0.0.1:1234/v1/models`. Until it does, each turn fails with a connection error. IGOR never substitutes a scripted reply.
 - **"cannot call tools":** LM Studio does not list tool use for the configured model, so IGOR refused to send the request. Choose a model that LM Studio marks with tool use, such as `qwen/qwen3-vl-8b`.
 - **Wrong model name:** the `model` in the provider entry must match the identifier LM Studio lists, exactly.
+- **"the conversation needs about N tokens of context":** LM Studio loaded the model with a context window too small for the conversation and the tool definitions. LM Studio would cut the conversation, so the model would lose earlier tool results and repeat its calls; IGOR refuses the request instead. In LM Studio, eject the model and load it again with a larger **Context Length**, such as 32768, or run `lms load qwen/qwen3-vl-8b --context-length 32768`. Servers with many tools need more: the 32 tools of `chrome-devtools-mcp` alone take about 7,500 tokens.
 - **Claude:** a turn that fails with an authentication error means the key was refused. The error shows `[REDACTED]` in place of the key.
 
 ## The API key is missing
@@ -33,6 +34,10 @@ A server that fails to start, crashes or exceeds its startup timeout is shown as
 ## A tool is never used
 
 New tools are blocked until classified. In **Settings**, set the tool to **Use it freely (read)** or **Ask me each time (write)**, or add it under `[permissions.<server>]` in the configuration file. Unclassified and denied tools are hidden from the model.
+
+## A read tool still asks for approval
+
+A tool you set to **Use it freely (read)** still needs approval when its server reports that it may modify data or is not read-only. The desktop and `igor-cli` list these tools when the server connects. IGOR only adds approval on such reports and never removes it, so a server's warning always wins. `chrome-devtools-mcp`, for example, reports this for `new_page`, `navigate_page` and the performance trace tools.
 
 ## An answer is marked incomplete
 
