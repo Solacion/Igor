@@ -34,6 +34,30 @@ it('sends messages, renders model text literally and keeps a multi-turn session'
   expect(mock.calls.filter(c => c.command === 'send_message').map(c => c.args.request.text)).toEqual(['Hello', 'Again'])
   expect(wrapper.text()).toContain('Completed'); wrapper.unmount()
 })
+it('exports finished session activity and displays the fixed native destination', async () => {
+  const mock = backend(); const wrapper = mount(ConversationView)
+  const exportButton = () => wrapper.findAll('button').find(button => button.text() === 'Export activity')!
+  expect(exportButton().attributes('disabled')).toBeDefined()
+  await start(wrapper)
+  expect(exportButton().attributes('disabled')).toBeUndefined()
+  await exportButton().trigger('click'); await flushPromises()
+  expect(mock.calls.find(call => call.command === 'export_activity')?.args).toEqual({ request: { session_id: 'one' } })
+  expect(wrapper.text()).toContain('Activity saved to /app-data/activity.jsonl')
+  await wrapper.findAll('button').find(button => button.text() === 'New conversation')!.trigger('click'); await flushPromises()
+  expect(exportButton().attributes('disabled')).toBeDefined()
+  expect(wrapper.text()).not.toContain('Activity saved to'); wrapper.unmount()
+})
+it('keeps export disabled during a turn', async () => {
+  let done: (value: unknown) => void = () => {}
+  const mock = backend({ send: () => new Promise(resolve => { done = resolve }) })
+  const wrapper = mount(ConversationView); await start(wrapper)
+  const button = wrapper.findAll('button').find(button => button.text() === 'Export activity')!
+  expect(button.attributes('disabled')).toBeDefined()
+  await button.trigger('click'); expect(mock.calls.some(call => call.command === 'export_activity')).toBe(false)
+  done({ outcome: 'completed' }); await flushPromises(); wrapper.unmount()
+})
+
+
 it('shows missing environment variable and prevents sending; links empty servers to Settings', async () => {
   const mock = backend({ unavailable: 'Environment variable IGOR_API_KEY is missing.' }); const wrapper = mount(ConversationView)
   await start(wrapper)
@@ -195,27 +219,4 @@ it('queues a status refresh when a connection event arrives during an existing r
   channel?.onmessage({ schema_version: 1, sequence: 1, event: connection }); await flushPromises(); expect(reads).toBe(2)
   finishRead({ servers: [] }); await flushPromises(); expect(reads).toBe(3)
   wrapper.unmount()
-})
-
-it('exports finished session activity and displays the fixed native destination', async () => {
-  const mock = backend(); const wrapper = mount(ConversationView)
-  const exportButton = () => wrapper.findAll('button').find(button => button.text() === 'Export activity')!
-  expect(exportButton().attributes('disabled')).toBeDefined()
-  await start(wrapper)
-  expect(exportButton().attributes('disabled')).toBeUndefined()
-  await exportButton().trigger('click'); await flushPromises()
-  expect(mock.calls.find(call => call.command === 'export_activity')?.args).toEqual({ request: { session_id: 'one' } })
-  expect(wrapper.text()).toContain('Activity saved to /app-data/activity.jsonl')
-  await wrapper.findAll('button').find(button => button.text() === 'New conversation')!.trigger('click'); await flushPromises()
-  expect(exportButton().attributes('disabled')).toBeDefined()
-  expect(wrapper.text()).not.toContain('Activity saved to'); wrapper.unmount()
-})
-it('keeps export disabled during a turn', async () => {
-  let done: (value: unknown) => void = () => {}
-  const mock = backend({ send: () => new Promise(resolve => { done = resolve }) })
-  const wrapper = mount(ConversationView); await start(wrapper)
-  const button = wrapper.findAll('button').find(button => button.text() === 'Export activity')!
-  expect(button.attributes('disabled')).toBeDefined()
-  await button.trigger('click'); expect(mock.calls.some(call => call.command === 'export_activity')).toBe(false)
-  done({ outcome: 'completed' }); await flushPromises(); wrapper.unmount()
 })
