@@ -199,3 +199,7 @@ If any required desktop check remains blocked before the Tuesday 3 November 2026
 ### Answers with gaps
 
 If the model answers after unsuccessful tool calls, the desktop shows “The answer may be incomplete: N tool calls did not succeed.” Unknown future turn outcomes are shown as “Not a full answer”; inspect activity before relying on the response.
+
+### Models without tool calling
+
+When a provider reports that its model cannot call tools, the conversation says “<model> can't call tools. Choose a model with tool calling in Settings → Model providers.” Open **Settings → Model providers**, choose a model with tool calling, then send again. Existing messages remain visible.

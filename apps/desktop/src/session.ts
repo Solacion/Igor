@@ -16,7 +16,7 @@ export type TurnOutcome =
   | { outcome: 'completed' | 'cancelled' }
   | { outcome: 'completed_with_gaps'; unsuccessful_calls: number }
   | { outcome: 'limit_reached'; limit: string }
-  | { outcome: 'failed'; message: string }
+  | { outcome: 'failed' | 'tools_unsupported'; message: string }
 
 /** One channel per session; no global listeners or frontend tool execution. */
 export async function startSession(
