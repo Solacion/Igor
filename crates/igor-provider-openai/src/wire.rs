@@ -134,21 +134,39 @@ fn assistant(content: &[ContentBlock]) -> Value {
     Value::Object(message)
 }
 
-/// Whether `body` is LM Studio's details for `model` and lists no `tool_use` capability. LM
-/// Studio leaves `capabilities` out for models without tool use. Anything else, including
-/// details for another model, is not evidence and gives `false`.
-pub(crate) fn details_lack_tool_use(body: &[u8], model: &str) -> bool {
-    let Ok(details) = serde_json::from_slice::<Value>(body) else {
-        return false;
-    };
+/// What LM Studio's model details say about the configured model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ModelDetails {
+    /// The model lists the `tool_use` capability. LM Studio leaves `capabilities` out for
+    /// models without tool use.
+    pub tool_use: bool,
+    /// Context window the model is loaded with, in tokens, when it is loaded.
+    pub loaded_context: Option<u32>,
+}
+
+/// LM Studio's details for `model`, or `None` when `body` is anything else, including details
+/// for another model: that is not evidence.
+pub(crate) fn parse_details(body: &[u8], model: &str) -> Option<ModelDetails> {
+    let details = serde_json::from_slice::<Value>(body).ok()?;
     let is_details = details.get("object").and_then(Value::as_str) == Some("model")
         && details.get("id").and_then(Value::as_str) == Some(model)
         && details.get("type").and_then(Value::as_str).is_some();
-    let has_tool_use = details
+    if !is_details {
+        return None;
+    }
+    let tool_use = details
         .get("capabilities")
         .and_then(Value::as_array)
         .is_some_and(|caps| caps.iter().any(|cap| cap.as_str() == Some("tool_use")));
-    is_details && !has_tool_use
+    let loaded_context = details
+        .get("loaded_context_length")
+        .and_then(Value::as_u64)
+        .and_then(|tokens| u32::try_from(tokens).ok())
+        .filter(|tokens| *tokens > 0);
+    Some(ModelDetails {
+        tool_use,
+        loaded_context,
+    })
 }
 
 /// Parses a successful chat completions response body.
