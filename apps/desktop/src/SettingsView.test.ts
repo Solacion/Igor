@@ -33,6 +33,7 @@ function backend(handlers: Record<string, (args: any) => unknown>): Calls {
   const calls: Calls = []
   mockIPC((command, args) => {
     calls.push({ command, args })
+    if (command === 'settings_providers') return { providers: [] }
     const handler = handlers[command]
     if (!handler) throw new Error(`unexpected ${command}`)
     return handler(args)
@@ -124,7 +125,7 @@ describe('settings', () => {
     const wrapper = mount(SettingsView)
     await flushPromises()
     expect(wrapper.text()).toContain('No servers yet')
-    await wrapper.get('.section-head button').trigger('click')
+    await wrapper.get('#mcp-servers .section-head button').trigger('click')
     await wrapper.get('input[name="id"]').setValue('pos')
     await wrapper.get('input[name="command"]').setValue('/opt/pos-mcp')
     await wrapper.get('textarea[name="args"]').setValue('--store\nmain\n')
@@ -157,7 +158,7 @@ describe('settings', () => {
     })
     const wrapper = mount(SettingsView)
     await flushPromises()
-    await wrapper.get('.section-head button').trigger('click')
+    await wrapper.get('#mcp-servers .section-head button').trigger('click')
     await wrapper.get('input[name="id"]').setValue('Bad Id')
     await wrapper.get('input[name="command"]').setValue('./x')
     await wrapper.findAll('button').find((b) => b.text() === 'Test connection')?.trigger('click')
@@ -172,13 +173,13 @@ describe('settings', () => {
     const calls = backend({ settings_view: () => view([]) })
     const wrapper = mount(SettingsView)
     await flushPromises()
-    await wrapper.get('.section-head button').trigger('click')
+    await wrapper.get('#mcp-servers .section-head button').trigger('click')
     await wrapper.get('input[name="id"]').setValue('pos')
     await wrapper.get('input[name="command"]').setValue('./x')
     await wrapper.get('textarea[name="env"]').setValue('just-a-value')
     await wrapper.get('form').trigger('submit')
     expect(wrapper.text()).toContain('Write one NAME=IGOR_VARIABLE per line.')
-    expect(calls.map((call) => call.command)).toEqual(['settings_view'])
+    expect(calls.filter(call => call.command !== 'settings_providers').map((call) => call.command)).toEqual(['settings_view'])
     wrapper.unmount()
   })
 
@@ -189,7 +190,7 @@ describe('settings', () => {
     })
     const wrapper = mount(SettingsView)
     await flushPromises()
-    await wrapper.get('.section-head button').trigger('click')
+    await wrapper.get('#mcp-servers .section-head button').trigger('click')
     await wrapper.get('input[name="id"]').setValue('pos')
     await wrapper.get('input[name="command"]').setValue('/opt/pos-mcp')
     await wrapper.findAll('button').find((b) => b.text() === 'Test connection')?.trigger('click')

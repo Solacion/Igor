@@ -25,6 +25,7 @@ let epoch = 0
 const messages = ref<Array<{ role: string; text: string }>>([])
 const selected = computed(() => providers.value.find(p => p.id === providerId.value))
 let session: Awaited<ReturnType<typeof startSession>> | null = null
+let sessionRevision: string | undefined
 let lastSequence = -1
 let timer: ReturnType<typeof setInterval> | undefined
 let disposed = false
@@ -40,7 +41,7 @@ async function refresh(afterEvent = false) {
     if (disposed) return
     providers.value = options.providers
     servers.value = settings.servers
-    if (!providerId.value) providerId.value = options.providers[0]?.id ?? ''
+    if (!options.providers.some(provider => provider.id === providerId.value)) providerId.value = options.providers[0]?.id ?? ''
     loaded.value = true
   } catch {
     if (!disposed) { loaded.value = false; error.value = 'Could not load conversation settings. Check your configuration and try again.' }
@@ -114,11 +115,17 @@ function receive(envelope: CoreEvent) {
   if (event.event === 'turn_finished') finish(event.outcome as TurnOutcome)
 }
 async function prepare() {
-  if (session && session.info.provider_id !== providerId.value) {
+  // Read after a Settings save even when an older background poll is still in flight.
+  const latest = await readProviders()
+  providers.value = latest.providers
+  if (!latest.providers.some(provider => provider.id === providerId.value)) providerId.value = latest.providers[0]?.id ?? ''
+  const chosen = latest.providers.find(provider => provider.id === providerId.value)
+  if (!chosen || chosen.unavailable) throw new Error('Provider unavailable')
+  if (session && (session.info.provider_id !== providerId.value || sessionRevision !== chosen.revision)) {
     await session.close(); session = null
     notice.value = 'Provider changed. A new model conversation starts here; earlier messages remain visible.'
   }
-  if (!session) { epoch++; lastSequence = -1; session = await startSession(providerId.value, receive) }
+  if (!session) { epoch++; lastSequence = -1; session = await startSession(providerId.value, receive); sessionRevision = chosen.revision }
   return session
 }
 async function send() {
@@ -176,8 +183,9 @@ async function reset() {
     hasSession.value = false; exportNotice.value = ''
   } catch { error.value = 'Could not close the conversation. Try again.' }
 }
-onMounted(() => { void refresh(); timer = setInterval(() => { void refresh() }, 3000) })
-onUnmounted(() => { disposed = true; clearInterval(timer); void session?.close().catch(() => {}) })
+const refreshProviders = () => { void refresh(true) }
+onMounted(() => { window.addEventListener('igor:providers-changed', refreshProviders); void refresh(); timer = setInterval(() => { void refresh() }, 3000) })
+onUnmounted(() => { window.removeEventListener('igor:providers-changed', refreshProviders); disposed = true; clearInterval(timer); void session?.close().catch(() => {}) })
 </script>
 
 <template>

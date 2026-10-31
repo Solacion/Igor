@@ -6,6 +6,12 @@
 //! and list tools for the permission editor. Secret values never cross IPC: server entries
 //! carry only the names of the environment variables that hold them.
 
+mod providers;
+pub use providers::{
+    ProviderRequest, ProviderSettingsView, SaveProviderRequest, key_variable_missing,
+    provider_revision,
+};
+
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::ffi::OsString;
