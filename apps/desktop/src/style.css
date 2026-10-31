@@ -145,3 +145,9 @@ button.brand { background: transparent; color: inherit; padding: 0; border-radiu
 .approval-card table { width: 100%; border-collapse: collapse; }
 .approval-card td, .approval-card th { padding: 8px; text-align: left; overflow-wrap: anywhere; border-bottom: 1px solid var(--line); }
 .reset-confirmation { padding: 16px; border: 1px solid var(--line); border-radius: 10px; }
+
+.voice-input { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding-block: 8px; }
+.voice-input p { margin: 0; }
+.voice-input .hint, .voice-input [role="alert"] { flex-basis: 100%; }
+.mic-button { touch-action: none; user-select: none; }
+.mic-button[aria-pressed="true"] { outline: 3px solid var(--focus); }

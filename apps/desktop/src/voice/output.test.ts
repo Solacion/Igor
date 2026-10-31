@@ -49,7 +49,7 @@ it('persists only local voice preferences, accepts async voice lists and plays a
   changed()
   await flushPromises()
   expect(wrapper.findAll('#voice-picker option')).toHaveLength(4)
-  await wrapper.get('input[type=checkbox]').setValue(true)
+  await wrapper.findAll('input[type=checkbox]')[0]!.setValue(true)
   await wrapper.get('#voice-picker').setValue('enhanced')
   await wrapper.get('#voice-rate').setValue('1.3')
   await wrapper.findAll('button').find(button => button.text() === 'Test voice')!.trigger('click')

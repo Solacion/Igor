@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { useVoiceOutput } from './voice/output'
 import { useConversationSpeech } from './composables/useConversationSpeech'
-import { ref } from 'vue'
+import { useVoiceInput } from './composables/useVoiceInput'
+import { computed, nextTick, ref } from 'vue'
 import { useConversation } from './composables/useConversation'
 import type { SettingsSection } from './bridge'
 import MessageList from './components/conversation/MessageList.vue'
@@ -11,12 +12,46 @@ const emit = defineEmits<{
     section?: SettingsSection
   ]
 }>()
+const props = withDefaults(defineProps<{
+  active?: boolean
+}>(), { active: true })
 const confirmingReset = ref(false)
 const voice = useVoiceOutput()
 const conversation = useConversation()
 const speech = useConversationSpeech(conversation, voice)
 const { providers, providerId, servers, loaded, busy, text, error, notice, status, toolsUnsupported, exportNotice, exporting, hasSession, timeline, selected, refresh, send, answer, decide, exportActivity, stop, reset } = conversation
+const voiceInput = useVoiceInput({
+  active: () => props.active,
+  busy: () => busy.value || confirmingReset.value || !loaded.value || !selected.value || !!selected.value.unavailable,
+  onStart: speech.stopSpeaking,
+  onText: async (transcript) => {
+    text.value = transcript
+    if (!voice.preferences.value.reviewBeforeSending)
+      await send()
+    else {
+      await nextTick()
+      document.getElementById('message')?.focus()
+    }
+  },
+  onError: message => voice.speak(message, { interrupt: true }),
+})
+const voiceState = computed(() => voiceInput.state.value !== 'Idle' ? voiceInput.state.value : busy.value ? 'Thinking' : voice.speaking.value ? 'Speaking' : 'Idle')
+function hold(event: PointerEvent) {
+  const button = event.currentTarget
+  if (button instanceof HTMLElement)
+    button.setPointerCapture?.(event.pointerId)
+  void voiceInput.start()
+}
+function lostCapture() {
+  if (voiceInput.state.value === 'Listening')
+    voiceInput.cancel()
+}
+function keyHold(event: KeyboardEvent) {
+  if (!event.repeat)
+    void voiceInput.start()
+}
 function newConversation() {
+  voiceInput.cancel()
   speech.stopSpeaking()
   if (timeline.value.length)
     confirmingReset.value = true
@@ -24,11 +59,13 @@ function newConversation() {
     void reset()
 }
 async function confirmReset() {
+  voiceInput.cancel()
   speech.stopSpeaking()
   confirmingReset.value = false
   await reset()
 }
 async function stopTurn() {
+  voiceInput.cancel()
   speech.stopSpeaking()
   await stop()
 }
@@ -63,6 +100,14 @@ async function stopTurn() {
     <p v-if="error" role="alert">{{ error }} <button v-if="!loaded" @click="refresh()">Try again</button></p>
     <button v-if="voice.speaking.value" type="button" class="secondary" @click="speech.stopSpeaking">Stop speaking</button>
     <p v-if="voice.error.value" role="alert">{{ voice.error.value }}</p>
-    <Composer v-model:text="text" :busy="busy" :loaded="loaded" :selected="selected" @send="send" @stop="stopTurn" />
+    <section class="voice-input" aria-label="Voice input">
+      <p role="status" aria-live="polite">{{ voiceState }}</p>
+      <meter v-if="voiceInput.state.value === 'Listening'" :value="voiceInput.level.value" min="0" max="1" aria-label="Microphone level" />
+      <button type="button" class="secondary mic-button" :disabled="!voiceInput.available || busy || !loaded || !selected || !!selected.unavailable || confirmingReset || voiceInput.state.value === 'Transcribing'" :aria-pressed="voiceInput.state.value === 'Listening'" @pointerdown.prevent="hold" @pointerup.prevent="voiceInput.release" @pointercancel="voiceInput.cancel" @lostpointercapture="lostCapture" @keydown.space.prevent="keyHold" @keyup.space.prevent="voiceInput.release">Hold to talk</button>
+      <p v-if="!voiceInput.available" class="hint">Voice input is not available in this build. You can still type.</p>
+      <p v-else class="hint">Hold the button, or hold Space outside text fields and controls. Release to transcribe.</p>
+      <p v-if="voiceInput.error.value" role="alert">{{ voiceInput.error.value }}</p>
+    </section>
+    <Composer :input-busy="voiceInput.state.value !== 'Idle'" v-model:text="text" :busy="busy" :loaded="loaded" :selected="selected" @send="send" @stop="stopTurn" />
   </section>
 </template>

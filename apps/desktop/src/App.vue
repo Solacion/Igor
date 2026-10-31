@@ -54,7 +54,7 @@ onMounted(checkReadiness)
       <SettingsView :initial-section="settingsSection" @close="page = 'home'" />
     </main>
     <main v-show="page === 'home'" id="main" tabindex="-1" class="wide">
-      <ConversationView @settings="openSettings" />
+      <ConversationView :active="page === 'home'" @settings="openSettings" />
     </main>
     <footer class="app-footer">
       <div class="footer-readiness">
