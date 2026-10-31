@@ -41,7 +41,7 @@ pub(crate) fn request_body(model: &str, request: &ModelRequest) -> Value {
                     "function": {
                         "name": tool.name,
                         "description": tool.description,
-                        "parameters": tool.input_schema,
+                        "parameters": parameters(&tool.input_schema),
                     }
                 })
             })
@@ -49,6 +49,23 @@ pub(crate) fn request_body(model: &str, request: &ModelRequest) -> Value {
         body.insert("tools".into(), tools.into());
     }
     Value::Object(body)
+}
+
+/// The tool's input schema as `parameters`. An object schema without `properties`, common for
+/// MCP tools that take no arguments, gets an empty `properties`: LM Studio rejects the whole
+/// request otherwise. Adding it does not change which arguments the schema accepts.
+fn parameters(schema: &Value) -> Value {
+    match schema {
+        Value::Object(fields)
+            if fields.get("type").and_then(Value::as_str) == Some("object")
+                && !fields.contains_key("properties") =>
+        {
+            let mut fields = fields.clone();
+            fields.insert("properties".into(), Value::Object(Map::new()));
+            Value::Object(fields)
+        }
+        other => other.clone(),
+    }
 }
 
 /// Tool results become `tool` messages, which must directly follow the assistant's calls; any
@@ -213,6 +230,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn object_schemas_without_properties_get_empty_properties() {
+        assert_eq!(
+            parameters(&json!({ "type": "object", "additionalProperties": false })),
+            json!({ "type": "object", "additionalProperties": false, "properties": {} })
+        );
+        let with_properties = json!({
+            "type": "object",
+            "properties": { "date": { "type": "string" } },
+            "required": ["date"]
+        });
+        assert_eq!(parameters(&with_properties), with_properties);
+        assert_eq!(parameters(&json!(true)), json!(true));
+    }
+
+    #[test]
     fn non_array_tool_calls_are_malformed() {
         let body = json!({
             "choices": [{
@@ -292,7 +324,7 @@ mod tests {
                 ],
                 "tools": [{ "type": "function", "function": {
                     "name": "weather__get_forecast", "description": "Forecast",
-                    "parameters": { "type": "object" }
+                    "parameters": { "type": "object", "properties": {} }
                 } }]
             })
         );
