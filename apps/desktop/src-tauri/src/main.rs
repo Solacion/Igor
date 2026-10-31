@@ -1,6 +1,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod settings;
+
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
+use tauri::{Manager, State};
+
+use crate::settings::{
+    CommandError, PermissionRequest, SaveServerRequest, ServerRequest, Settings, SettingsView,
+    ToolView,
+};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -20,7 +30,7 @@ struct DesktopStatus {
     core_event_schema: u32,
 }
 
-// Read-only metadata. No configuration, files, provider calls or tool dispatch are exposed.
+// Read-only metadata.
 #[tauri::command]
 fn desktop_status(request: StatusRequest) -> DesktopStatus {
     match request.scope {
@@ -31,9 +41,75 @@ fn desktop_status(request: StatusRequest) -> DesktopStatus {
     }
 }
 
+#[tauri::command]
+async fn settings_view(settings: State<'_, Arc<Settings>>) -> Result<SettingsView, CommandError> {
+    settings.view().await
+}
+
+#[tauri::command]
+async fn settings_save_server(
+    settings: State<'_, Arc<Settings>>,
+    request: SaveServerRequest,
+) -> Result<SettingsView, CommandError> {
+    settings
+        .save_server(request.replacing.as_deref(), request.entry)
+        .await
+}
+
+#[tauri::command]
+async fn settings_test_server(
+    settings: State<'_, Arc<Settings>>,
+    request: SaveServerRequest,
+) -> Result<Vec<ToolView>, CommandError> {
+    settings
+        .test_server(request.replacing.as_deref(), request.entry)
+        .await
+}
+
+#[tauri::command]
+async fn settings_remove_server(
+    settings: State<'_, Arc<Settings>>,
+    request: ServerRequest,
+) -> Result<SettingsView, CommandError> {
+    settings.remove_server(&request.id).await
+}
+
+#[tauri::command]
+async fn settings_reconnect_server(
+    settings: State<'_, Arc<Settings>>,
+    request: ServerRequest,
+) -> Result<SettingsView, CommandError> {
+    settings.reconnect(&request.id).await
+}
+
+#[tauri::command]
+async fn settings_set_permission(
+    settings: State<'_, Arc<Settings>>,
+    request: PermissionRequest,
+) -> Result<SettingsView, CommandError> {
+    settings
+        .set_permission(&request.server, &request.tool, request.class)
+        .await
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let settings = Arc::new(Settings::new(igor_config::config_path(None)));
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![desktop_status])
+        .manage(settings)
+        .setup(|app| {
+            let settings = Arc::clone(app.state::<Arc<Settings>>().inner());
+            tauri::async_runtime::spawn(async move { settings.connect_all().await });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            desktop_status,
+            settings_view,
+            settings_save_server,
+            settings_test_server,
+            settings_remove_server,
+            settings_reconnect_server,
+            settings_set_permission,
+        ])
         .run(tauri::generate_context!())?;
     Ok(())
 }

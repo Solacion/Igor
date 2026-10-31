@@ -1,7 +1,14 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tauri_build::try_build(
-        tauri_build::Attributes::new()
-            .app_manifest(tauri_build::AppManifest::new().commands(&["desktop_status"])),
-    )?;
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
+            "desktop_status",
+            "settings_view",
+            "settings_save_server",
+            "settings_test_server",
+            "settings_remove_server",
+            "settings_reconnect_server",
+            "settings_set_permission",
+        ]),
+    ))?;
     Ok(())
 }
