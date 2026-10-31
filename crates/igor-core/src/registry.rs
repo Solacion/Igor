@@ -184,6 +184,7 @@ pub enum CallRejection {
 pub struct ValidatedCall {
     tool: ToolId,
     classification: Classification,
+    host_classification: Classification,
     fingerprint: ToolFingerprint,
     arguments: Map<String, Value>,
 }
@@ -193,6 +194,7 @@ impl fmt::Debug for ValidatedCall {
         f.debug_struct("ValidatedCall")
             .field("tool", &self.tool)
             .field("classification", &self.classification)
+            .field("host_classification", &self.host_classification)
             .field("fingerprint", &self.fingerprint)
             .field("arguments", &RedactedArguments(&self.arguments))
             .finish()
@@ -219,6 +221,12 @@ impl ValidatedCall {
     /// Classification at validation time: [`Classification::Read`] or [`Classification::Write`].
     pub fn classification(&self) -> Classification {
         self.classification
+    }
+
+    /// Classification from host configuration at validation time. It differs from
+    /// [`Self::classification`] when the server's hints made the tool stricter.
+    pub fn host_classification(&self) -> Classification {
+        self.host_classification
     }
 
     /// Fingerprint of the tool definition the arguments were validated against.
@@ -385,6 +393,7 @@ impl ToolRegistry {
         Ok(ValidatedCall {
             tool: tool.id.clone(),
             classification: tool.classification,
+            host_classification: tool.host_classification,
             fingerprint: tool.fingerprint,
             arguments,
         })

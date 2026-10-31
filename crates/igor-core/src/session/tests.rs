@@ -1217,3 +1217,51 @@ async fn spoken_replies_add_the_spoken_prompt_until_switched_back() -> TestResul
     h.provider.verify()?;
     Ok(())
 }
+
+#[tokio::test]
+async fn a_tool_approved_for_the_session_is_not_asked_about_again() -> TestResult {
+    let mut h = harness(vec![
+        ScriptedTurn::tool_call("u1", "sales__open_page", json!({ "url": "a" })),
+        ScriptedTurn::tool_call("u2", "sales__open_page", json!({ "url": "b" })),
+        ScriptedTurn::text("Both pages are open."),
+        ScriptedTurn::tool_call("u3", "sales__open_page", json!({ "url": "c" })),
+        ScriptedTurn::text("Opened again."),
+    ])?;
+    // Configured as read by the host; its server says it is not read-only.
+    let page = tool("sales", "open_page")?;
+    let mut hinted = descriptor(&page, json!({ "type": "object" }));
+    hinted.hints.read_only = Some(false);
+    let registry = ToolRegistry::build([hinted], &HashMap::from([(page, Classification::Read)]));
+    let backends: HashMap<ServerId, Arc<dyn ToolBackend>> = HashMap::from([(
+        ServerId::new("sales")?,
+        h.sales.clone() as Arc<dyn ToolBackend>,
+    )]);
+    h.session.replace_tools(registry, backends);
+
+    let operator = Operator::approving([Decision::ApproveForSession]);
+    let (outcome, events) = run(&mut h, "open two pages", operator).await;
+    assert_eq!(outcome, TurnOutcome::Completed);
+    assert_eq!(
+        count(&events, "approval_requested"),
+        1,
+        "{:?}",
+        kinds(&events)
+    );
+    assert!(events.iter().any(|envelope| matches!(
+        envelope.event,
+        RuntimeEvent::ApprovalResolved {
+            outcome: ApprovalOutcome::ApprovedForSession,
+            ..
+        }
+    )));
+    assert_eq!(count(&events, "approved_for_session"), 1);
+
+    // The grant lasts for the session, across turns.
+    let (outcome, events) = run(&mut h, "again", Operator::default()).await;
+    assert_eq!(outcome, TurnOutcome::Completed);
+    assert_eq!(count(&events, "approval_requested"), 0);
+    assert_eq!(count(&events, "approved_for_session"), 1);
+    h.provider.verify()?;
+    assert_eq!(h.sales.calls().len(), 3);
+    Ok(())
+}

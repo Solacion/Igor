@@ -112,6 +112,14 @@ pub enum RuntimeEvent {
         /// What the operator is asked to approve, including the hash to echo.
         request: ApprovalRequest,
     },
+    /// A write call runs without asking, because the operator approved its tool for the
+    /// session.
+    ApprovedForSession {
+        /// Call identifier.
+        call_id: String,
+        /// The tool approved for the session.
+        tool: ToolId,
+    },
     /// A pending approval ended.
     ApprovalResolved {
         /// The approval.
@@ -155,6 +163,9 @@ pub enum RuntimeEvent {
 pub enum ApprovalOutcome {
     /// The operator approved; the call is dispatched.
     Approved,
+    /// The operator approved this call and later calls to the same tool for the session; the
+    /// call is dispatched.
+    ApprovedForSession,
     /// The operator denied; nothing runs.
     Denied,
     /// The turn was cancelled; nothing runs.
