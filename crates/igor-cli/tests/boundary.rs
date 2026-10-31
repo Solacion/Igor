@@ -299,6 +299,40 @@ fn unclassified_and_denied_tools_never_reach_the_server() -> TestResult {
 }
 
 #[test]
+fn arguments_failing_the_input_schema_never_reach_the_server() -> TestResult {
+    let servers = [Server {
+        id: "sales",
+        fixture: Some(sales_fixture()),
+        permissions: SALES_READ,
+        call_timeout_ms: None,
+    }];
+    let script = json!({ "turns": [
+        { "tool_calls": [
+            // Missing the required `date`.
+            { "id": "t1", "name": "sales__get_stock_levels", "input": { "supplier_id": "supplier-x" } },
+            // Wrong type.
+            { "id": "t2", "name": "sales__get_stock_levels",
+              "input": { "supplier_id": 7, "date": "2026-07-13" } },
+            // Extra property; the schema sets additionalProperties: false.
+            { "id": "t3", "name": "sales__get_stock_levels",
+              "input": { "supplier_id": "supplier-x", "date": "2026-07-13", "extra": true } },
+            // Unknown tool.
+            { "id": "t4", "name": "sales__drop_tables", "input": {} }
+        ] },
+        { "text": "None of those calls were valid." }
+    ] });
+    let run = run("schema", &servers, &script, "")?;
+    assert!(run.output.status.success(), "{}", run.stdout);
+    assert_eq!(run.stdout.matches("refused").count(), 4, "{}", run.stdout);
+    assert!(
+        run.calls("sales")?.is_empty(),
+        "invalid calls must not be dispatched"
+    );
+    run.assert_no_server_left_running()?;
+    Ok(())
+}
+
+#[test]
 fn hung_write_is_outcome_unknown_and_never_retried() -> TestResult {
     let servers = [Server {
         id: "notes",
