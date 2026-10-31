@@ -12,7 +12,8 @@
     "desktop": "pnpm --filter @igor/desktop tauri dev",
     "desktop:check": "pnpm --filter @igor/desktop check",
     "desktop:build": "pnpm --filter @igor/desktop tauri build --debug --ci",
-    "desktop:demo": "pnpm --filter @igor/desktop desktop:demo"
+    "desktop:demo": "pnpm --filter @igor/desktop desktop:demo",
+    "desktop:release": "pnpm --filter @igor/desktop desktop:release"
   },
   "devDependencies": {
     "vitepress": "1.6.4"
