@@ -1,10 +1,10 @@
-//! Editing the configuration file: MCP servers and tool permissions.
+//! Editing the configuration file: model providers, MCP servers and tool permissions.
 //!
 //! A [`ConfigDocument`] keeps the file's formatting and comments, changes only the entries it is
 //! asked to change, and validates the whole result with the same rules as [`Config::load`] before
 //! saving. Saving replaces the file atomically, so a failed save leaves the old file intact.
-//! Secrets are written only as references: [`ServerEntry::env`] holds variable names, never
-//! values.
+//! Secrets are written only as references: [`ServerEntry::env`] and
+//! [`ProviderEntry::api_key_env`] hold variable names, never values.
 
 use std::collections::BTreeMap;
 use std::io::{self, Write};
@@ -13,7 +13,26 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use toml_edit::{Array, ArrayOfTables, DocumentMut, InlineTable, Item, Table, Value};
 
-use crate::{Config, ConfigError, Origin, Problem, absolute_dir, validate};
+use crate::{Config, ConfigError, Origin, Problem, ProviderKind, absolute_dir, validate};
+
+/// A model provider entry as written in the configuration file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderEntry {
+    /// Operator-chosen provider id.
+    pub id: String,
+    /// API flavour.
+    pub kind: ProviderKind,
+    /// Model name sent to the provider.
+    pub model: String,
+    /// API base URL. `None` means the kind's default.
+    #[serde(default)]
+    pub base_url: Option<String>,
+    /// Name of the environment variable that holds the API key. Required for
+    /// [`ProviderKind::Anthropic`].
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+}
 
 /// An MCP server entry as written in the configuration file.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,14 +85,28 @@ impl PermissionClass {
     }
 }
 
-/// The server entry as read back from the file. Secret references are read leniently so a
-/// listing never fails on them; validation reports them.
+/// The entries as read back from the file. Secret references and provider kinds are read
+/// leniently so a listing never fails on them; validation reports them.
 #[derive(Deserialize)]
-struct ServersOnly {
+struct Listing {
+    #[serde(default)]
+    providers: Vec<ListedProvider>,
     #[serde(default)]
     servers: Vec<ListedServer>,
     #[serde(default)]
     permissions: BTreeMap<String, BTreeMap<String, String>>,
+}
+
+#[derive(Deserialize)]
+struct ListedProvider {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    model: String,
+    base_url: Option<String>,
+    api_key: Option<toml::Value>,
 }
 
 #[derive(Deserialize)]
@@ -172,7 +205,33 @@ impl ConfigDocument {
             .unwrap_or_default())
     }
 
-    fn listing(&self) -> Result<ServersOnly, ConfigError> {
+    /// The configured providers, in file order. Providers of an unknown kind, and API keys that
+    /// are not `{ env = "NAME" }`, are left out; [`ConfigDocument::validate`] reports them.
+    pub fn providers(&self) -> Result<Vec<ProviderEntry>, ConfigError> {
+        Ok(self
+            .listing()?
+            .providers
+            .into_iter()
+            .filter_map(|provider| {
+                let kind = match provider.kind.as_str() {
+                    "anthropic" => ProviderKind::Anthropic,
+                    "openai_compatible" => ProviderKind::OpenAiCompatible,
+                    _ => return None,
+                };
+                Some(ProviderEntry {
+                    id: provider.id,
+                    kind,
+                    model: provider.model,
+                    base_url: provider.base_url,
+                    api_key_env: provider
+                        .api_key
+                        .and_then(|key| Some(key.get("env")?.as_str()?.to_owned())),
+                })
+            })
+            .collect())
+    }
+
+    fn listing(&self) -> Result<Listing, ConfigError> {
         let source = self.doc.to_string();
         toml::from_str(&source).map_err(|err| {
             let (line, column) = err
@@ -187,6 +246,27 @@ impl ConfigDocument {
         })
     }
 
+    /// Adds `entry`, or replaces the provider with id `replacing`, keeping its place and
+    /// comments. Fails with [`Problem::UnknownProvider`] when `replacing` is not configured.
+    pub fn put_provider(
+        &mut self,
+        replacing: Option<&str>,
+        entry: &ProviderEntry,
+    ) -> Result<(), Problem> {
+        if self.put_entry("providers", replacing, |table| write_provider(table, entry)) {
+            Ok(())
+        } else {
+            Err(Problem::UnknownProvider(
+                replacing.unwrap_or_default().to_owned(),
+            ))
+        }
+    }
+
+    /// Removes the provider with `id`. Returns whether it was configured.
+    pub fn remove_provider(&mut self, id: &str) -> bool {
+        self.remove_entry("providers", id)
+    }
+
     /// Adds `entry`, or replaces the server with id `replacing`, keeping its place and comments.
     /// When the id changes, the server's permissions move to the new id. Fails with
     /// [`Problem::UnknownServer`] when `replacing` is not configured.
@@ -195,23 +275,7 @@ impl ConfigDocument {
         replacing: Option<&str>,
         entry: &ServerEntry,
     ) -> Result<(), Problem> {
-        let mut servers = self.take_servers();
-        let index = match replacing {
-            Some(id) => servers
-                .iter()
-                .position(|table| table.get("id").and_then(Item::as_str) == Some(id)),
-            None => {
-                servers.push(Table::new());
-                Some(servers.len() - 1)
-            }
-        };
-        let table = index.and_then(|index| servers.get_mut(index));
-        let found = table.is_some();
-        if let Some(table) = table {
-            write_server(table, entry);
-        }
-        self.put_servers(servers);
-        if !found {
+        if !self.put_entry("servers", replacing, |table| write_server(table, entry)) {
             return Err(Problem::UnknownServer(
                 replacing.unwrap_or_default().to_owned(),
             ));
@@ -226,11 +290,7 @@ impl ConfigDocument {
 
     /// Removes the server with `id` and its permissions. Returns whether it was configured.
     pub fn remove_server(&mut self, id: &str) -> bool {
-        let mut servers = self.take_servers();
-        let before = servers.len();
-        servers.retain(|table| table.get("id").and_then(Item::as_str) != Some(id));
-        let removed = servers.len() != before;
-        self.put_servers(servers);
+        let removed = self.remove_entry("servers", id);
         if let Some(permissions) = self.doc.get_mut("permissions").and_then(Item::as_table_mut) {
             permissions.remove(id);
         }
@@ -321,19 +381,56 @@ impl ConfigDocument {
         written
     }
 
-    /// Takes the `[[servers]]` tables out of the document; anything else under `servers` is
-    /// dropped, and validation would have rejected it.
-    fn take_servers(&mut self) -> ArrayOfTables {
-        match self.doc.remove("servers") {
-            Some(Item::ArrayOfTables(servers)) => servers,
+    /// Writes a new `[[key]]` table, or the one with id `replacing`. Returns whether that
+    /// table was found.
+    fn put_entry(
+        &mut self,
+        key: &str,
+        replacing: Option<&str>,
+        write: impl FnOnce(&mut Table),
+    ) -> bool {
+        let mut tables = self.take_tables(key);
+        let index = match replacing {
+            Some(id) => tables
+                .iter()
+                .position(|table| table.get("id").and_then(Item::as_str) == Some(id)),
+            None => {
+                tables.push(Table::new());
+                Some(tables.len() - 1)
+            }
+        };
+        let table = index.and_then(|index| tables.get_mut(index));
+        let found = table.is_some();
+        if let Some(table) = table {
+            write(table);
+        }
+        self.put_tables(key, tables);
+        found
+    }
+
+    /// Removes the `[[key]]` table with `id`. Returns whether it was there.
+    fn remove_entry(&mut self, key: &str, id: &str) -> bool {
+        let mut tables = self.take_tables(key);
+        let before = tables.len();
+        tables.retain(|table| table.get("id").and_then(Item::as_str) != Some(id));
+        let removed = tables.len() != before;
+        self.put_tables(key, tables);
+        removed
+    }
+
+    /// Takes the `[[key]]` tables out of the document; anything else under `key` is dropped,
+    /// and validation would have rejected it.
+    fn take_tables(&mut self, key: &str) -> ArrayOfTables {
+        match self.doc.remove(key) {
+            Some(Item::ArrayOfTables(tables)) => tables,
             _ => ArrayOfTables::new(),
         }
     }
 
     /// Puts the tables back. Each keeps its document position, so the file order is unchanged.
-    fn put_servers(&mut self, servers: ArrayOfTables) {
-        if !servers.is_empty() {
-            self.doc.insert("servers", Item::ArrayOfTables(servers));
+    fn put_tables(&mut self, key: &str, tables: ArrayOfTables) {
+        if !tables.is_empty() {
+            self.doc.insert(key, Item::ArrayOfTables(tables));
         }
     }
 
@@ -345,6 +442,29 @@ impl ConfigDocument {
             permissions.insert(new, tools);
         }
     }
+}
+
+/// Writes `entry` into `table`, changing only keys whose value differs, so comments on
+/// unchanged keys survive.
+fn write_provider(table: &mut Table, entry: &ProviderEntry) {
+    let kind = match entry.kind {
+        ProviderKind::Anthropic => "anthropic",
+        ProviderKind::OpenAiCompatible => "openai_compatible",
+    };
+    set(table, "id", Some(Value::from(entry.id.as_str())));
+    set(table, "kind", Some(Value::from(kind)));
+    set(table, "model", Some(Value::from(entry.model.as_str())));
+    set(
+        table,
+        "base_url",
+        entry.base_url.as_deref().map(Value::from),
+    );
+    let api_key = entry.api_key_env.as_deref().map(|var| {
+        let mut reference = InlineTable::new();
+        reference.insert("env", Value::from(var));
+        Value::InlineTable(reference)
+    });
+    set(table, "api_key", api_key);
 }
 
 /// Writes `entry` into `table`, changing only keys whose value differs, so comments on
@@ -616,6 +736,131 @@ get_stock_levels = "read" # safe
         let err = doc.validate().err().ok_or("accepted a bad reference")?;
         assert_eq!(err.field(), Some("servers[0].env.TOKEN"));
         assert!(!err.to_string().contains("not a name"));
+        Ok(())
+    }
+
+    const PROVIDERS: &str = r#"# Providers.
+[[providers]]
+id = "lm_studio" # local
+kind = "openai_compatible"
+base_url = "http://127.0.0.1:1234/v1"
+model = "qwen/qwen3-vl-8b"
+
+[[providers]]
+id = "claude"
+kind = "anthropic"
+model = "claude-haiku-5-5"
+api_key = { env = "ANTHROPIC_API_KEY" }
+
+[[servers]]
+id = "sales"
+transport = "stdio"
+command = "./sales-server"
+"#;
+
+    fn claude(id: &str) -> ProviderEntry {
+        ProviderEntry {
+            id: id.to_owned(),
+            kind: ProviderKind::Anthropic,
+            model: "claude-sonnet-5-5".to_owned(),
+            base_url: None,
+            api_key_env: Some("IGOR_CLAUDE_KEY".to_owned()),
+        }
+    }
+
+    #[test]
+    fn lists_providers_with_key_references_only() -> TestResult {
+        let doc = document("providers-list", PROVIDERS)?;
+        let providers = doc.providers()?;
+        assert_eq!(
+            providers,
+            [
+                ProviderEntry {
+                    id: "lm_studio".to_owned(),
+                    kind: ProviderKind::OpenAiCompatible,
+                    model: "qwen/qwen3-vl-8b".to_owned(),
+                    base_url: Some("http://127.0.0.1:1234/v1".to_owned()),
+                    api_key_env: None,
+                },
+                ProviderEntry {
+                    model: "claude-haiku-5-5".to_owned(),
+                    api_key_env: Some("ANTHROPIC_API_KEY".to_owned()),
+                    ..claude("claude")
+                },
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn provider_edits_keep_comments_and_write_keys_as_references() -> TestResult {
+        let mut doc = document("providers-edit", PROVIDERS)?;
+        doc.put_provider(Some("claude"), &claude("claude"))?;
+        doc.put_provider(None, &claude("claude_big"))?;
+        let config = doc.save()?;
+        let text = std::fs::read_to_string(doc.path())?;
+        assert!(text.contains("# Providers."), "{text}");
+        assert!(text.contains(r#"id = "lm_studio" # local"#), "{text}");
+        assert!(
+            text.contains(r#"api_key = { env = "IGOR_CLAUDE_KEY" }"#),
+            "{text}"
+        );
+        assert_eq!(config.providers().len(), 3);
+        assert_eq!(
+            config.provider("claude").map(|p| p.model.as_str()),
+            Some("claude-sonnet-5-5")
+        );
+        let reread = ConfigDocument::open(doc.path())?.providers()?;
+        assert_eq!(reread[1], claude("claude"));
+        assert_eq!(reread[2], claude("claude_big"));
+        assert_eq!(ConfigDocument::open(doc.path())?.servers()?.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn remove_and_replace_unknown_provider() -> TestResult {
+        let mut doc = document("providers-remove", PROVIDERS)?;
+        assert_eq!(
+            doc.put_provider(Some("nope"), &claude("x")),
+            Err(Problem::UnknownProvider("nope".to_owned()))
+        );
+        assert!(doc.remove_provider("lm_studio"));
+        assert!(!doc.remove_provider("lm_studio"));
+        let ids: Vec<_> = doc.providers()?.into_iter().map(|p| p.id).collect();
+        assert_eq!(ids, ["claude"]);
+        assert_eq!(doc.validate()?.providers().len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_provider_edits_are_reported_with_their_field() -> TestResult {
+        let mut doc = document("providers-invalid", PROVIDERS)?;
+        let mut keyless = claude("claude");
+        keyless.api_key_env = None;
+        doc.put_provider(Some("claude"), &keyless)?;
+        let err = doc
+            .validate()
+            .err()
+            .ok_or("accepted anthropic without a key")?;
+        assert_eq!(err.field(), Some("providers[1].api_key"));
+
+        let mut doc = document("providers-bad-key", PROVIDERS)?;
+        let mut bad = claude("claude");
+        bad.api_key_env = Some("sk-ant-secret value".to_owned());
+        doc.put_provider(Some("claude"), &bad)?;
+        let err = doc.validate().err().ok_or("accepted a bad key reference")?;
+        assert_eq!(err.field(), Some("providers[1].api_key"));
+        assert!(!err.to_string().contains("sk-ant-secret"));
+
+        let mut doc = document("providers-bad-url", PROVIDERS)?;
+        let mut remote_http = claude("claude");
+        remote_http.base_url = Some("http://example.com/v1".to_owned());
+        doc.put_provider(Some("claude"), &remote_http)?;
+        let err = doc
+            .validate()
+            .err()
+            .ok_or("accepted plain http to a remote host")?;
+        assert_eq!(err.field(), Some("providers[1].base_url"));
         Ok(())
     }
 }
