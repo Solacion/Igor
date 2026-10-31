@@ -7,8 +7,11 @@
 //! carry only the names of the environment variables that hold them.
 
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::ffi::OsString;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use igor_config::{ConfigDocument, ConfigError, PermissionClass, ServerConfig, ServerEntry};
 use igor_core::tools::{ServerId, ToolBackend, ToolDescriptor};
@@ -124,9 +127,10 @@ impl CommandError {
 }
 
 struct Connection {
-    backend: Option<McpBackend>,
+    backend: Option<Arc<SharedBackend>>,
     status: Status,
     tools: Vec<ToolView>,
+    descriptors: Vec<ToolDescriptor>,
 }
 
 impl Connection {
@@ -135,6 +139,7 @@ impl Connection {
             backend: None,
             status,
             tools: Vec::new(),
+            descriptors: Vec::new(),
         }
     }
 }
@@ -151,12 +156,42 @@ impl Connection {
     }
 }
 
-impl Drop for Connection {
-    fn drop(&mut self) {
-        if let Some(backend) = &self.backend {
-            backend.disconnect();
-        }
+/// The final owner disconnects a server; an in-flight turn keeps its lease after a Settings edit.
+pub struct SharedBackend(pub McpBackend);
+impl std::ops::Deref for SharedBackend {
+    type Target = McpBackend;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
+}
+impl Drop for SharedBackend {
+    fn drop(&mut self) {
+        self.0.disconnect();
+    }
+}
+#[async_trait::async_trait]
+impl ToolBackend for SharedBackend {
+    fn server_id(&self) -> &ServerId {
+        self.0.server_id()
+    }
+    async fn list_tools(&self) -> Result<Vec<ToolDescriptor>, igor_core::tools::BackendError> {
+        self.0.list_tools().await
+    }
+    async fn call_tool(
+        &self,
+        name: &str,
+        arguments: serde_json::Map<String, serde_json::Value>,
+        cancel: igor_core::CancellationToken,
+    ) -> Result<igor_core::tools::ToolOutput, igor_core::tools::BackendError> {
+        self.0.call_tool(name, arguments, cancel).await
+    }
+}
+pub struct Snapshot {
+    pub config: igor_config::Config,
+    pub descriptors: Vec<ToolDescriptor>,
+    pub backends: HashMap<ServerId, Arc<dyn ToolBackend>>,
+    pub servers: Vec<Arc<SharedBackend>>,
+    pub revision: u64,
 }
 
 /// Settings state: the configuration file and live server connections.
@@ -182,6 +217,41 @@ impl Settings {
             CommandError::message("no configuration location: set IGOR_CONFIG or HOME")
         })?;
         ConfigDocument::open(path).map_err(|error| CommandError::config(&error, None))
+    }
+
+    pub async fn snapshot(&self) -> Result<Snapshot, CommandError> {
+        let _edit = self.edits.lock().await;
+        let doc = self.document()?;
+        let config = doc
+            .validate()
+            .map_err(|_| CommandError::message("Configuration could not be loaded"))?;
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        std::fs::read(doc.path())
+            .unwrap_or_default()
+            .hash(&mut hash);
+        let connections = self.connections.lock().await;
+        let mut descriptors = Vec::new();
+        let mut backends = HashMap::new();
+        let mut servers = Vec::new();
+        for server in config.servers() {
+            if let Some(connection) = connections.get(server.id.as_str())
+                && let Some(backend) = &connection.backend
+            {
+                (Arc::as_ptr(backend) as usize).hash(&mut hash);
+                if backend.is_connected() {
+                    descriptors.extend(connection.descriptors.clone());
+                    backends.insert(server.id.clone(), backend.clone() as Arc<dyn ToolBackend>);
+                    servers.push(backend.clone());
+                }
+            }
+        }
+        Ok(Snapshot {
+            config,
+            descriptors,
+            backends,
+            servers,
+            revision: hash.finish(),
+        })
     }
 
     /// The current settings.
@@ -330,9 +400,10 @@ impl Settings {
             .insert(id.clone(), Connection::new(Status::Starting));
         let connection = match start(server).await {
             Ok((backend, tools)) => Connection {
-                backend: Some(backend),
+                backend: Some(Arc::new(SharedBackend(backend))),
                 status: Status::Connected,
                 tools: tools.iter().map(ToolView::from).collect(),
+                descriptors: tools,
             },
             Err(detail) => Connection::new(Status::Failed { detail }),
         };
