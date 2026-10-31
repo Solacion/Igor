@@ -18,8 +18,6 @@ const MAX_ID_BYTES: usize = 128;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, thiserror::Error)]
 #[serde(tag = "code", rename_all = "snake_case")]
 pub enum BridgeError {
-    #[error("Settings changed; start a new conversation")]
-    SettingsChanged,
     #[error("Invalid request")]
     InvalidRequest,
     #[error("A session or turn is already active")]
@@ -116,8 +114,8 @@ struct Active {
     lifetime: CancellationToken,
     turn: Option<CancellationToken>,
     sensitive_output: Arc<AtomicBool>,
+    secrets: Arc<Mutex<Vec<igor_config::Secret>>>,
     _servers: Vec<Arc<crate::settings::SharedBackend>>,
-    revision: u64,
 }
 
 impl Drop for Active {
@@ -216,9 +214,10 @@ impl DesktopRuntime {
             return Err(BridgeError::Cancelled);
         }
         let sensitive_output = Arc::new(AtomicBool::new(false));
+        let secrets = Arc::new(Mutex::new(prepared.secrets));
         prepared.parts.events = Arc::new(CredentialGuard {
             next: sink,
-            secrets: prepared.secrets,
+            secrets: secrets.clone(),
             cancel: cancel.clone(),
             blocked: sensitive_output.clone(),
         });
@@ -230,8 +229,8 @@ impl DesktopRuntime {
             lifetime: cancel,
             turn: None,
             sensitive_output,
+            secrets,
             _servers: prepared.servers,
-            revision: prepared.revision,
         });
         state.starting = None;
         Ok(SessionInfo {
@@ -252,21 +251,23 @@ impl DesktopRuntime {
             .snapshot()
             .await
             .map_err(|_| BridgeError::Configuration)?;
-        {
-            let mut state = self.lock()?;
-            let active = active_mut(&mut state, &request.session_id)?;
-            if active.revision != snapshot.revision {
-                return Err(BridgeError::SettingsChanged);
-            }
-        }
-        self.send(request).await
+        self.send_with_snapshot(request, Some(snapshot)).await
     }
 
+    #[cfg(test)]
     pub async fn send(&self, request: MessageRequest) -> Result<TurnOutcome, BridgeError> {
+        self.send_with_snapshot(request, None).await
+    }
+
+    async fn send_with_snapshot(
+        &self,
+        request: MessageRequest,
+        snapshot: Option<crate::settings::Snapshot>,
+    ) -> Result<TurnOutcome, BridgeError> {
         if !valid_text(&request.text) {
             return Err(BridgeError::InvalidRequest);
         }
-        let (session, cancel, blocked) = {
+        let (session, cancel, blocked, secrets) = {
             let mut state = self.lock()?;
             let active = active_mut(&mut state, &request.session_id)?;
             if active.turn.is_some() {
@@ -278,6 +279,7 @@ impl DesktopRuntime {
                 active.session.clone(),
                 cancel,
                 active.sensitive_output.clone(),
+                active.secrets.clone(),
             )
         };
         let _lease = TurnLease {
@@ -286,11 +288,51 @@ impl DesktopRuntime {
             cancel: cancel.clone(),
         };
         // This async lock serializes only the core conversation, not approvals or cancellation.
-        let outcome = session
-            .lock()
-            .await
-            .send_message(request.text, cancel)
-            .await;
+        let mut session = session.lock().await;
+        if let Some(snapshot) = snapshot {
+            // The turn reservation prevents another send from racing this replacement.
+            // Keep prior credentials guarded too: earlier messages remain in history.
+            let mut added_secrets = Vec::new();
+            for server in snapshot.config.servers() {
+                for reference in server.env.values() {
+                    if let Ok(secret) = reference.resolve() {
+                        added_secrets.push(secret);
+                    }
+                }
+            }
+            {
+                let mut guarded = secrets.lock().map_err(|_| BridgeError::Unavailable)?;
+                for secret in added_secrets {
+                    if !guarded.iter().any(|old| old.expose() == secret.expose()) {
+                        guarded.push(secret);
+                    }
+                }
+            }
+            let classes = snapshot
+                .descriptors
+                .iter()
+                .map(|tool| {
+                    (
+                        tool.id.clone(),
+                        snapshot.config.permissions().classify(&tool.id),
+                    )
+                })
+                .collect();
+            // Release old leases; Settings retains current connections and owns exit cleanup.
+            let replaced = session.replace_tools(
+                igor_core::registry::ToolRegistry::build(snapshot.descriptors, &classes),
+                snapshot.backends,
+            );
+            session.set_unavailable_servers(snapshot.unavailable_servers);
+            {
+                let mut state = self.lock()?;
+                let active = active_mut(&mut state, &request.session_id)?;
+                active._servers = snapshot.servers;
+            }
+            drop(replaced);
+        }
+        let outcome = session.send_message(request.text, cancel).await;
+        drop(session);
         let mut state = self.lock()?;
         if state
             .active
@@ -430,7 +472,7 @@ impl Drop for DesktopRuntime {
 /// Never rewrite approval arguments: block the event/turn if a resolved credential appears.
 struct CredentialGuard {
     next: Arc<dyn EventSink>,
-    secrets: Vec<igor_config::Secret>,
+    secrets: Arc<Mutex<Vec<igor_config::Secret>>>,
     cancel: CancellationToken,
     blocked: Arc<AtomicBool>,
 }
@@ -441,10 +483,11 @@ impl EventSink for CredentialGuard {
             return;
         }
         let safe = serde_json::to_value(&event).is_ok_and(|value| {
-            !self
-                .secrets
-                .iter()
-                .any(|secret| contains_secret(&value, secret.expose()))
+            self.secrets.lock().is_ok_and(|secrets| {
+                !secrets
+                    .iter()
+                    .any(|secret| contains_secret(&value, secret.expose()))
+            })
         });
         if safe {
             self.next.emit(event);

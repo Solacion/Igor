@@ -199,6 +199,7 @@ pub struct Snapshot {
     pub backends: HashMap<ServerId, Arc<dyn ToolBackend>>,
     pub servers: Vec<Arc<SharedBackend>>,
     pub revision: u64,
+    pub unavailable_servers: Vec<igor_core::session::UnavailableServer>,
 }
 
 /// Settings state: the configuration file and live server connections.
@@ -285,7 +286,18 @@ impl Settings {
         let mut descriptors = Vec::new();
         let mut backends = HashMap::new();
         let mut servers = Vec::new();
+        let mut unavailable_servers = Vec::new();
         for server in config.servers() {
+            if let Some(connection) = connections.get(server.id.as_str())
+                && let Status::Failed { detail } = connection.current_status()
+            {
+                server.id.hash(&mut hash);
+                detail.hash(&mut hash);
+                unavailable_servers.push(igor_core::session::UnavailableServer {
+                    id: server.id.clone(),
+                    reason: detail,
+                });
+            }
             if let Some(connection) = connections.get(server.id.as_str())
                 && let Some(backend) = &connection.backend
             {
@@ -304,6 +316,7 @@ impl Settings {
             backends,
             servers,
             revision: hash.finish(),
+            unavailable_servers,
         })
     }
 
@@ -641,6 +654,10 @@ mod tests {
         let view = settings.view().await?;
         assert_ne!(settings.snapshot().await?.revision, connected_revision);
         assert!(settings.snapshot().await?.descriptors.is_empty());
+        let unavailable = settings.snapshot().await?.unavailable_servers;
+        assert_eq!(unavailable.len(), 1);
+        assert_eq!(unavailable[0].id.as_str(), "pos");
+        assert_eq!(unavailable[0].reason, "the server stopped");
         assert_eq!(
             view.servers[0].status,
             Status::Failed {

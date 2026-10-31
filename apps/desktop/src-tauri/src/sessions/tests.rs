@@ -469,6 +469,8 @@ async fn real_fixture_approve_once_deny_never_and_settings_snapshot_is_leased() 
                 json!({"supplier_id":"supplier-x", "delivery_date":"2026-11-03", "lines":[{"sku":"COCOA-1KG-6", "quantity":1, "rationale":"Test"}]}),
             ),
             ScriptedTurn::text("Finished"),
+            ScriptedTurn::tool_call("removed", "sales__create_draft_order", json!({})),
+            ScriptedTurn::text("Removed tool refused"),
         ]));
         let classes = snapshot
             .descriptors
@@ -532,10 +534,77 @@ async fn real_fixture_approve_once_deny_never_and_settings_snapshot_is_leased() 
         assert_eq!(completed, expected);
         assert_eq!(
             runtime.send_configured(message(&id), &settings).await,
-            Err(BridgeError::SettingsChanged)
+            Ok(TurnOutcome::CompletedWithGaps {
+                unsuccessful_calls: 1
+            })
+        );
+        assert_eq!(backend.calls.load(Ordering::SeqCst), expected);
+        let requests = provider.requests();
+        assert!(requests[2].messages.len() > requests[0].messages.len());
+        assert!(
+            !requests[2]
+                .tools
+                .iter()
+                .any(|tool| tool.name == "sales__create_draft_order")
         );
         provider.verify()?;
         runtime.shutdown();
+        settings.shutdown().await;
+        std::fs::remove_dir_all(dir)?;
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn configured_failed_servers_reach_initial_and_updated_sessions() -> TestResult {
+    use crate::settings::Settings;
+    let dir = std::env::temp_dir().join(format!("igor-unavailable-{}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("config.toml");
+    std::fs::write(
+        &path,
+        r#"
+[[providers]]
+id = "local"
+kind = "openai_compatible"
+base_url = "http://127.0.0.1:1234/v1"
+model = "test"
+[[servers]]
+id = "missing"
+transport = "stdio"
+command = "/nonexistent/igor-missing-server"
+env = { TOKEN = { env = "IGOR_DESKTOP_TEST_UNAVAILABLE_CREDENTIAL_20261031" } }
+"#,
+    )?;
+    let settings = Settings::new(Some(path));
+    settings.connect_all().await;
+    let prepared = prepare(
+        StartRequest {
+            provider_id: "local".into(),
+        },
+        &CancellationToken::new(),
+        &settings,
+    )
+    .await?;
+    assert_eq!(prepared.config.unavailable_servers.len(), 1);
+    assert_eq!(
+        prepared.config.unavailable_servers[0].id.as_str(),
+        "missing"
+    );
+    let h = harness(
+        vec![
+            ScriptedTurn::text("First"),
+            ScriptedTurn::text("Missing server"),
+        ],
+        vec![],
+    )?;
+    h.runtime.send(message(&h.id)).await?;
+    h.runtime.send_configured(message(&h.id), &settings).await?;
+    let requests = h.provider.requests();
+    assert!(requests[1].system.contains("missing"));
+    assert!(requests[1].system.contains("unavailable"));
+    assert!(requests[1].messages.len() > requests[0].messages.len());
+    settings.shutdown().await;
+    std::fs::remove_dir_all(dir)?;
     Ok(())
 }

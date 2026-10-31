@@ -117,16 +117,7 @@ async function send() {
     const active = session
     if (!active) return
     messages.value.push({ role: 'You', text: message }); text.value = ''
-    let outcome: TurnOutcome
-    try { outcome = await active.send(message) }
-    catch (failure) {
-      if ((failure as { code?: string })?.code !== 'settings_changed') throw failure
-      await active.close(); session = null
-      notice.value = 'Settings changed. A new model conversation starts here; earlier messages remain visible.'
-      await refresh(); const replacement = await prepare()
-      if (!replacement || stopRequested || disposed) { status.value = 'Cancelled'; return }
-      outcome = await replacement.send(message)
-    }
+    const outcome = await active.send(message)
     finish(outcome)
   } catch {
     error.value = 'The turn could not finish. Check the provider and server settings before sending another message.'

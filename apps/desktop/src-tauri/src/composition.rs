@@ -46,11 +46,11 @@ pub async fn prepare(
     let provider = provider(configured, &mut secrets)?;
     for server in config.servers() {
         for reference in server.env.values() {
-            secrets.push(
-                reference
-                    .resolve()
-                    .map_err(|_| BridgeError::Configuration)?,
-            );
+            // Missing server credentials are a connection failure, not a reason to lose
+            // the conversation. Only resolved values can appear in output.
+            if let Ok(secret) = reference.resolve() {
+                secrets.push(secret);
+            }
         }
     }
     let descriptors = snapshot.descriptors;
@@ -83,6 +83,7 @@ pub async fn prepare(
             events: Arc::new(events),
         },
         config: SessionConfig {
+            unavailable_servers: snapshot.unavailable_servers,
             max_model_requests: limits.max_iterations,
             tool_timeout: limits.tool_call_timeout,
             model_timeout: Duration::from_secs(120),
