@@ -14,7 +14,7 @@ igor-core = { path = "../igor-core" }
 rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["macros", "process", "time"] }
+tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "time"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process", "time"] }

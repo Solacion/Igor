@@ -41,13 +41,20 @@ pub async fn connect(config: &Config, out: &mut impl Write) -> io::Result<Connec
                 descriptors.extend(tools);
                 backends.insert(server.id.clone(), backend);
             }
-            Err(message) => {
+            Err(Failed { message, stderr }) => {
                 writeln!(
                     out,
                     "[server {}: unavailable] {}",
                     server.id,
                     sanitize(&message)
                 )?;
+                // Server output, shown to the operator only: the model gets just the reason.
+                if !stderr.is_empty() {
+                    writeln!(out, "  last server output:")?;
+                }
+                for line in &stderr {
+                    writeln!(out, "  | {}", sanitize(line))?;
+                }
                 unavailable.push(UnavailableServer {
                     id: server.id.clone(),
                     reason: message,
@@ -134,9 +141,24 @@ pub async fn refresh(
     build_registry(config, descriptors, out)
 }
 
+/// Why a server could not be used, with its last stderr lines when it started.
+struct Failed {
+    message: String,
+    stderr: Vec<String>,
+}
+
+impl From<String> for Failed {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            stderr: Vec::new(),
+        }
+    }
+}
+
 async fn connect_one(
     server: &ServerConfig,
-) -> Result<(Arc<dyn ToolBackend>, Vec<ToolDescriptor>), String> {
+) -> Result<(Arc<dyn ToolBackend>, Vec<ToolDescriptor>), Failed> {
     let mut stdio = StdioServerConfig::new(&server.command);
     stdio.args = server.args.iter().map(OsString::from).collect();
     stdio.cwd = Some(server.cwd.clone());
@@ -144,14 +166,25 @@ async fn connect_one(
     stdio.startup_timeout = server.startup_timeout;
     stdio.call_timeout = server.call_timeout;
     for (name, secret) in &server.env {
-        let value = secret.resolve().map_err(|e| e.to_string())?;
+        let value = secret.resolve().map_err(|e| Failed::from(e.to_string()))?;
         stdio
             .env
             .push((name.clone(), OsString::from(value.expose())));
     }
     let backend = McpBackend::connect(server.id.clone(), &stdio)
         .await
-        .map_err(|e| e.to_string())?;
-    let tools = backend.list_tools().await.map_err(|e| e.to_string())?;
+        .map_err(|e| Failed {
+            message: e.to_string(),
+            stderr: e.stderr().to_vec(),
+        })?;
+    let tools = match backend.list_tools().await {
+        Ok(tools) => tools,
+        Err(e) => {
+            return Err(Failed {
+                message: e.to_string(),
+                stderr: backend.recent_stderr(),
+            });
+        }
+    };
     Ok((Arc::new(backend), tools))
 }

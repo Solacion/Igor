@@ -24,6 +24,7 @@ If the variable is unset, choosing that provider fails with a message naming the
 
 A server that fails to start, crashes or exceeds its startup timeout is shown as **Not connected** (desktop) or reported as unavailable (CLI). The rest of the session continues without it, and the model is told which servers are unavailable.
 
+- Read the server's own output. IGOR keeps the last 50 lines it wrote to stderr, each cut to 500 characters, with the values of its secrets replaced by `[REDACTED]`. `igor-cli` prints them under the unavailable message. Redaction matches each secret's exact text, so a server that prints a secret encoded or split is not caught.
 - Check `command` is an absolute path, or a relative path with a directory part such as `./bin/server`, which resolves against the configuration file's directory.
 - For the fixture servers, build them first: `cargo build -p igor-fixture-server`. `pnpm run desktop:demo` does this for you.
 - A server inherits only the variables in `env_allowlist`. A server that needs `PATH` or `HOME` must list it.

@@ -179,3 +179,58 @@ list_notes = "read"
     }
     Ok(())
 }
+
+#[test]
+fn a_server_secret_printed_to_stderr_is_redacted() -> TestResult {
+    const SERVER_SECRET: &str = "IGOR-TEST-SECRET-server-91c2";
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("igor-cli-stderr-secret");
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir)?;
+    }
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(
+        dir.join("script.json"),
+        json!({ "turns": [{ "text": "The broken server is unavailable." }] }).to_string(),
+    )?;
+    std::fs::write(
+        dir.join("igor.toml"),
+        r#"[[servers]]
+id = "broken"
+transport = "stdio"
+command = "/bin/sh"
+args = ["-c", "echo \"auth with $TOKEN failed\" >&2; exit 1"]
+env = { TOKEN = { env = "IGOR_TEST_SERVER_TOKEN" } }
+"#,
+    )?;
+    let output = Command::new(env!("CARGO_BIN_EXE_igor-cli"))
+        .arg("--config")
+        .arg(dir.join("igor.toml"))
+        .args(["--provider", "scripted", "--script"])
+        .arg(dir.join("script.json"))
+        .arg("--export")
+        .arg(dir.join("activity.jsonl"))
+        .arg("Anything?")
+        .env_remove("IGOR_CONFIG")
+        .env("IGOR_TEST_SERVER_TOKEN", SERVER_SECRET)
+        .stdin(Stdio::null())
+        .output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("[server broken: unavailable]"), "{stdout}");
+    assert!(
+        stdout.contains("  | auth with [REDACTED] failed"),
+        "{stdout}"
+    );
+    let export = std::fs::read_to_string(dir.join("activity.jsonl"))?;
+    for (name, text) in [
+        ("stdout", &*stdout),
+        ("stderr", &*stderr),
+        ("export", &export),
+    ] {
+        assert!(
+            !text.contains(SERVER_SECRET),
+            "{name} leaks the server secret:\n{text}"
+        );
+    }
+    Ok(())
+}
