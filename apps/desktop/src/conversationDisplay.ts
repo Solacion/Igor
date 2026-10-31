@@ -1,4 +1,4 @@
-import { isRecord } from './events'
+import { isRecord, type ToolId } from './events'
 import type { Activity } from './activity'
 import type { ApprovalPreview } from './session'
 import type { ApprovalItem, QuestionItem } from './composables/useConversation'
@@ -9,6 +9,7 @@ export type TimelineEntry =
   | { kind: 'tool'; key: string; call: Activity }
   | { kind: 'connection'; key: string; connection: Connection }
   | { kind: 'approval'; key: string; item: ApprovalItem }
+  | { kind: 'session-grant'; key: string; tool: ToolId }
   | { kind: 'question'; key: string; item: QuestionItem }
 
 /** Display-only parsing: preserve number lexemes, including integers above JS's safe range. */

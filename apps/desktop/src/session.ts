@@ -2,6 +2,7 @@ import { Channel, invoke } from '@tauri-apps/api/core'
 
 export type { EventEnvelope as CoreEvent } from './events'
 import type { EventEnvelope as CoreEvent } from './events'
+export type ApprovalDecision = 'approve' | 'deny' | 'approve_for_session'
 export interface SessionInfo {
   session_id: string
   provider_id: string
@@ -35,7 +36,7 @@ export async function startSession(
   return {
     info,
     send: (text: string) => invoke<TurnOutcome>('send_message', { request: { ...request, text } }),
-    approve: (approvalId: string, actionHash: string, decision: 'approve' | 'deny') =>
+    approve: (approvalId: string, actionHash: string, decision: ApprovalDecision) =>
       invoke<void>('resolve_approval', { request: { ...request, approval_id: approvalId, action_hash: actionHash, decision } }),
     answer: (requestId: string, answer: string) =>
       invoke<void>('answer_clarification', { request: { ...request, request_id: requestId, answer } }),
@@ -59,4 +60,5 @@ export interface ApprovalPreview {
   tool: { server: string; name: string }
   canonical_arguments: string
   action_hash: string
+  session_grant_allowed?: boolean
 }

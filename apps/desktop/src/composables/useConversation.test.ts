@@ -45,7 +45,7 @@ it('keeps lifecycle/reducer state scoped to each instance and ignores events aft
   second.wrapper.unmount()
 })
 it('has a guard for every schema variant, rejecting arrays, nulls and incomplete payloads', () => {
-  expect(eventGuards).toHaveLength(14)
+  expect(eventGuards).toHaveLength(15)
   for (const guard of eventGuards) {
     expect(guard(null)).toBe(false)
     expect(guard([])).toBe(false)

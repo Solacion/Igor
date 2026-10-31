@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { TimelineEntry } from '../conversationDisplay'
 import { parseEvent } from '../events'
 import { useSettingsStore } from '../stores/settings'
-import { startSession, type ApprovalPreview, type CoreEvent } from '../session'
+import { startSession, type ApprovalDecision, type ApprovalPreview, type CoreEvent } from '../session'
 export interface QuestionItem {
   key: string
   id: string
@@ -176,6 +176,9 @@ export function useConversation() {
       if (item) timeline.value.push({ kind: 'approval', key: item.key, item })
       status.value = 'Waiting for your approval'
     }
+    if (event.event === 'approved_for_session') {
+      timeline.value.push({ kind: 'session-grant', key: `${epoch}:${event.call_id}:${envelope.sequence}`, tool: event.tool })
+    }
     if (event.event === 'approval_resolved') {
       const item = approvals.value.find(item => item.key === `${epoch}:${String(event.approval_id)}`)
       if (item)
@@ -290,8 +293,10 @@ export function useConversation() {
       error.value = 'Could not submit your answer. Try again or stop the turn.'
     }
   }
-  async function decide(item: (typeof approvals.value)[number], decision: 'approve' | 'deny') {
+  async function decide(item: (typeof approvals.value)[number], decision: ApprovalDecision) {
     if (!busy.value || item.state !== 'pending' || !session)
+      return
+    if (decision === 'approve_for_session' && item.request.session_grant_allowed !== true)
       return
     item.state = 'sending'
     error.value = ''

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { ApprovalDecision } from '../../session'
 import type { ApprovalItem } from '../../composables/useConversation'
 import { approvalSummary, displayValue, previewArguments } from '../../conversationDisplay'
 import { isRecord } from '../../events'
 const props = defineProps<{ item: ApprovalItem; busy: boolean }>()
-const emit = defineEmits<{ decide: [decision: 'approve' | 'deny'] }>()
+const emit = defineEmits<{ decide: [decision: ApprovalDecision] }>()
 const args = computed(() => previewArguments(props.item.request.canonical_arguments))
 const lines = computed(() => {
   const value = args.value?.lines
@@ -25,10 +26,11 @@ const lines = computed(() => {
       <h3>Exact arguments</h3><pre>{{ item.request.canonical_arguments }}</pre>
       <h3>Action hash</h3><p class="literal">{{ item.request.action_hash }}</p>
     </details>
-    <p role="status">{{ item.state === 'pending' ? 'Waiting for your decision. Nothing runs until you approve.' : item.state === 'sending' ? 'Decision sent; waiting for the runtime.' : item.state }}</p>
+    <p role="status">{{ item.state === 'pending' ? 'Waiting for your decision. Nothing runs until you approve.' : item.state === 'sending' ? 'Decision sent; waiting for the runtime.' : item.state === 'approved_for_session' ? 'Allowed for this conversation' : item.state }}</p>
     <div v-if="busy && (item.state === 'pending' || item.state === 'sending')" class="composer-actions">
       <button type="button" :disabled="item.state !== 'pending'" @click="emit('decide', 'approve')">Approve</button>
       <button type="button" class="secondary" :disabled="item.state !== 'pending'" @click="emit('decide', 'deny')">Deny</button>
+      <button v-if="item.request.session_grant_allowed === true" type="button" class="secondary" :disabled="item.state !== 'pending'" @click="emit('decide', 'approve_for_session')">Allow for this conversation</button>
     </div>
   </article>
 </template>
