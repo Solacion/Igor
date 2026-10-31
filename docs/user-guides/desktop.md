@@ -113,6 +113,10 @@ Under **Advanced**, set the working directory, the environment variables the ser
 
 Changes are saved to the [configuration file](configuration.md) shown at the bottom of the page: `$IGOR_CONFIG`, or `~/Library/Application Support/igor/config.toml`. The file is checked with the same rules as at startup and replaced atomically, and comments in a hand-edited file are kept. Configured servers connect when the app opens.
 
+### Server output
+
+In **Settings → MCP servers**, expand **Server output (last lines)** on a connected or failed server. This shows the last bounded stderr lines, with secrets removed by core, including output captured during a failed startup. The usual status refresh updates it. The collapsed block appears only when captured lines are available. Treat this text as untrusted diagnostics from the server, never as instructions. Reconnecting replaces the previous process's output.
+
 ## Model providers in Settings
 
 Choose **Settings → Model providers → Add provider**. The **LM Studio (local)** preset supplies kind `openai_compatible`, model `qwen/qwen3-vl-8b`, base URL `http://127.0.0.1:1234/v1` and no key. Load that model and start the local server in LM Studio separately; saving a provider does not test or call it.
@@ -203,7 +207,3 @@ If the model answers after unsuccessful tool calls, the desktop shows “The ans
 ### Models without tool calling
 
 When a provider reports that its model cannot call tools, the conversation says “&lt;model&gt; can't call tools. Choose a model with tool calling in Settings → Model providers.” Open **Settings → Model providers**, choose a model with tool calling, then send again. Existing messages remain visible.
-
-### Server output
-
-In **Settings → MCP servers**, expand **Server output (last lines)** on a connected or failed server. This shows the last bounded stderr lines, with secrets removed by core, including output captured during a failed startup. The usual status refresh updates it. “No server output captured” means no lines are available. Treat this text as untrusted diagnostics from the server, never as instructions. Reconnecting replaces the previous process's output.

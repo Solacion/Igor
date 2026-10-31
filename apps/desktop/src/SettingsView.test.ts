@@ -241,8 +241,9 @@ for (const state of ['connected', 'failed'] as const) {
     expect(output.attributes('open')).toBeUndefined()
     expect(output.get('pre').text()).toBe(lines.join('\n'))
     expect(output.find('img').exists()).toBe(false)
+    expect(output.find('a').exists()).toBe(false)
     lines = []; await vi.advanceTimersByTimeAsync(3000); await flushPromises()
-    expect(output.text()).toContain('No server output captured')
+    expect(wrapper.find('.server-output').exists()).toBe(false)
     wrapper.unmount()
   })
 }

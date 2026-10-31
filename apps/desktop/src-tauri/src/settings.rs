@@ -732,6 +732,44 @@ mod tests {
         }
     }
 
+    #[test]
+    fn failed_start_view_never_exposes_secret_value() -> TestResult {
+        let output = Command::new(std::env::current_exe()?)
+            .args(["--exact", "settings::tests::stderr_secret_probe"])
+            .env("IGOR_STDERR_PROBE", "1")
+            .env("IGOR_STDERR_SECRET", "desktop-stderr-sentinel-83fa")
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("desktop-stderr-sentinel-83fa"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn stderr_secret_probe() -> TestResult {
+        if std::env::var_os("IGOR_STDERR_PROBE").is_none() {
+            return Ok(());
+        }
+        let settings = Settings::new(Some(temp_config("stderr-secret")?));
+        let entry = ServerEntry {
+            id: "secret-output".into(),
+            command: "/bin/sh".into(),
+            args: vec!["-c".into(), r#"echo "x $TOKEN" >&2; exit 1"#.into()],
+            env: [("TOKEN".into(), "IGOR_STDERR_SECRET".into())].into(),
+            ..ServerEntry::default()
+        };
+        let view = settings.save_server(None, entry).await?;
+        assert!(matches!(view.servers[0].status, Status::Failed { .. }));
+        assert_eq!(view.servers[0].recent_stderr, ["x [REDACTED]"]);
+        let payload = serde_json::to_string(&view)?;
+        assert!(!payload.contains("desktop-stderr-sentinel-83fa"));
+        settings.shutdown().await;
+        Ok(())
+    }
+
     #[tokio::test]
     async fn stderr_survives_start_failure_and_shared_backend_forwarding() -> TestResult {
         let binary = fixture_server()?;

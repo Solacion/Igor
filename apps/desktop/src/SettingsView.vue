@@ -148,10 +148,9 @@ onUnmounted(() => clearInterval(timer))
                 </div>
                 <p v-if="server.status.state === 'failed'" class="status-detail">{{ server.status.detail }}</p>
 
-                <details v-if="server.status.state === 'connected' || server.status.state === 'failed'" class="server-output">
+                <details v-if="server.recent_stderr?.length" class="server-output">
                   <summary>Server output (last lines)</summary>
-                  <pre v-if="server.recent_stderr?.length" style="white-space: pre-wrap; overflow-wrap: anywhere">{{ server.recent_stderr.join('\n') }}</pre>
-                  <p v-else class="hint">No server output captured.</p>
+                  <pre>{{ server.recent_stderr.join('\n') }}</pre>
                 </details>
 
                 <details v-if="tools(server).length" class="tools">
@@ -206,3 +205,7 @@ onUnmounted(() => clearInterval(timer))
     </div>
   </section>
 </template>
+
+<style scoped>
+.server-output pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+</style>
