@@ -33,7 +33,7 @@ igor-cli [--config <path>] --provider <scripted|ID> [--script <path>] [--export 
 
 After each turn, `igor-cli` shows `You:` and reads a follow-up message, which continues the same conversation; use it to answer a question the model asked in its reply. An empty line or end of input ends the session. Press Ctrl-C to cancel the turn in progress; the conversation can continue afterwards.
 
-Exit codes, from the last turn: `0` completed, `1` startup error (configuration, provider or arguments), `2` the turn failed, `3` a limit stopped the turn, `4` cancelled.
+Exit codes, from the last turn: `0` completed, `1` startup error (configuration, provider or arguments), `2` the turn failed, `3` a limit stopped the turn, `4` cancelled, `5` completed with gaps: the model answered, but some tool calls failed, were refused or returned an error such as missing data.
 
 ## Configured providers
 

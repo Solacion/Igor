@@ -7,7 +7,7 @@
 //! also written to a file as redacted JSON Lines.
 //!
 //! Exit codes: 0 completed, 1 startup error, 2 the turn failed, 3 a limit stopped the turn,
-//! 4 cancelled.
+//! 4 cancelled, 5 completed with gaps (some tool calls did not succeed).
 
 mod args;
 mod operator;
@@ -39,6 +39,7 @@ const EXIT_STARTUP: u8 = 1;
 const EXIT_FAILED: u8 = 2;
 const EXIT_LIMIT: u8 = 3;
 const EXIT_CANCELLED: u8 = 4;
+const EXIT_GAPS: u8 = 5;
 
 #[derive(Debug, Error)]
 enum CliError {
@@ -241,6 +242,7 @@ fn session_config(config: &Config) -> Result<SessionConfig, LimitTooSmall> {
 fn exit_code(outcome: &TurnOutcome) -> ExitCode {
     match outcome {
         TurnOutcome::Completed => ExitCode::SUCCESS,
+        TurnOutcome::CompletedWithGaps { .. } => ExitCode::from(EXIT_GAPS),
         TurnOutcome::Failed { .. } => ExitCode::from(EXIT_FAILED),
         TurnOutcome::LimitReached { .. } => ExitCode::from(EXIT_LIMIT),
         TurnOutcome::Cancelled => ExitCode::from(EXIT_CANCELLED),

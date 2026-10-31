@@ -290,7 +290,12 @@ fn unclassified_and_denied_tools_never_reach_the_server() -> TestResult {
         { "text": "Could not do it." }
     ] });
     let run = run("unclassified", &servers, &script, "")?;
-    assert!(run.output.status.success(), "{}", run.stdout);
+    assert_eq!(run.output.status.code(), Some(5), "{}", run.stdout);
+    assert!(
+        run.stdout.contains("[completed with gaps: "),
+        "{}",
+        run.stdout
+    );
     assert_eq!(run.stdout.matches("refused").count(), 2, "{}", run.stdout);
     assert!(!run.stdout.contains("Approval required"));
     assert!(run.calls("sales")?.is_empty());
@@ -322,7 +327,12 @@ fn arguments_failing_the_input_schema_never_reach_the_server() -> TestResult {
         { "text": "None of those calls were valid." }
     ] });
     let run = run("schema", &servers, &script, "")?;
-    assert!(run.output.status.success(), "{}", run.stdout);
+    assert_eq!(run.output.status.code(), Some(5), "{}", run.stdout);
+    assert!(
+        run.stdout.contains("[completed with gaps: "),
+        "{}",
+        run.stdout
+    );
     assert_eq!(run.stdout.matches("refused").count(), 4, "{}", run.stdout);
     assert!(
         run.calls("sales")?.is_empty(),
@@ -345,7 +355,12 @@ fn hung_write_is_outcome_unknown_and_never_retried() -> TestResult {
         { "text": "The save may or may not have happened." }
     ] });
     let run = run("hang", &servers, &script, "y\n")?;
-    assert!(run.output.status.success(), "{}", run.stdout);
+    assert_eq!(run.output.status.code(), Some(5), "{}", run.stdout);
+    assert!(
+        run.stdout.contains("[completed with gaps: "),
+        "{}",
+        run.stdout
+    );
     assert!(
         run.stdout.contains("[call-1] failed, OUTCOME UNKNOWN"),
         "{}",
@@ -378,7 +393,12 @@ fn server_crash_after_a_write_is_reported_and_later_calls_are_not_executed() -> 
         { "text": "The notes server stopped." }
     ] });
     let run = run("crash", &servers, &script, "y\n")?;
-    assert!(run.output.status.success(), "{}", run.stdout);
+    assert_eq!(run.output.status.code(), Some(5), "{}", run.stdout);
+    assert!(
+        run.stdout.contains("[completed with gaps: "),
+        "{}",
+        run.stdout
+    );
     assert!(
         run.stdout.contains("[call-1] failed, OUTCOME UNKNOWN"),
         "{}",
@@ -434,7 +454,12 @@ fn an_unavailable_server_is_reported_and_the_others_still_work() -> TestResult {
         { "text": "The broken server is unavailable; stock was read from sales." }
     ] });
     let run = run("unavailable", &servers, &script, "")?;
-    assert!(run.output.status.success(), "{}", run.stdout);
+    assert_eq!(run.output.status.code(), Some(5), "{}", run.stdout);
+    assert!(
+        run.stdout.contains("[completed with gaps: "),
+        "{}",
+        run.stdout
+    );
     assert!(
         run.stdout.contains("[server broken: unavailable]"),
         "{}",

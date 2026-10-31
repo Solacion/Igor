@@ -255,6 +255,8 @@ pub struct Session {
     sequence: u64,
     /// Servers already reported as stopped, so each is reported once.
     stopped: HashSet<ServerId>,
+    /// Tool calls in the current turn that did not return a successful result.
+    unsuccessful_calls: u32,
 }
 
 impl Session {
@@ -282,6 +284,7 @@ impl Session {
             inputs,
             sequence: 0,
             stopped: HashSet::new(),
+            unsuccessful_calls: 0,
         };
         (session, SessionHandle { inputs: sender })
     }
@@ -334,7 +337,15 @@ impl Session {
         cancel: CancellationToken,
     ) -> TurnOutcome {
         self.push_user_blocks(vec![ContentBlock::Text { text: text.into() }]);
-        let outcome = self.run_turn(&cancel).await;
+        self.unsuccessful_calls = 0;
+        let outcome = match self.run_turn(&cancel).await {
+            TurnOutcome::Completed if self.unsuccessful_calls > 0 => {
+                TurnOutcome::CompletedWithGaps {
+                    unsuccessful_calls: self.unsuccessful_calls,
+                }
+            }
+            outcome => outcome,
+        };
         for closed in self.gate.cancel_all() {
             self.emit_approval_closed(closed, ApprovalOutcome::Cancelled);
         }
@@ -760,6 +771,14 @@ impl Session {
     }
 
     fn emit(&mut self, event: RuntimeEvent) {
+        if matches!(
+            event,
+            RuntimeEvent::ToolCallFailed { .. }
+                | RuntimeEvent::ToolCallRejected { .. }
+                | RuntimeEvent::ToolCallCompleted { is_error: true, .. }
+        ) {
+            self.unsuccessful_calls = self.unsuccessful_calls.saturating_add(1);
+        }
         self.events.emit(EventEnvelope::new(self.sequence, event));
         self.sequence += 1;
     }

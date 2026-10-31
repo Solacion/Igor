@@ -161,8 +161,15 @@ pub enum ApprovalOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum TurnOutcome {
-    /// The model finished its answer.
+    /// The model finished its answer, and every tool call in the turn succeeded.
     Completed,
+    /// The model finished its answer, but some tool calls did not succeed: they failed, were
+    /// refused, or returned an error result such as missing data. The answer may rest on
+    /// incomplete data. Calls the operator denied are not counted.
+    CompletedWithGaps {
+        /// Tool calls in the turn that did not return a successful result.
+        unsuccessful_calls: u32,
+    },
     /// A limit stopped the turn before the model finished.
     LimitReached {
         /// The limit hit.
