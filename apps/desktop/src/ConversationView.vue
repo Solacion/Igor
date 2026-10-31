@@ -14,6 +14,7 @@ const text = ref('')
 const error = ref('')
 const notice = ref('')
 const status = ref('Ready for a message')
+const toolsUnsupported = ref(false)
 const exportNotice = ref('')
 const exporting = ref(false)
 const hasSession = ref(false)
@@ -54,6 +55,7 @@ function finish(value: unknown) {
   const outcome = value && typeof value === 'object' ? value as Record<string, unknown> : {}
   for (const item of questions.value) if (item.state === 'pending' || item.state === 'sending') item.state = 'Turn ended'
   for (const item of approvals.value) if (item.state === 'pending' || item.state === 'sending') item.state = 'Turn ended'
+  toolsUnsupported.value = outcome.outcome === 'tools_unsupported'
   switch (outcome.outcome) {
     case 'completed': status.value = 'Completed'; break
     case 'completed_with_gaps':
@@ -64,7 +66,10 @@ function finish(value: unknown) {
     case 'cancelled': status.value = 'Cancelled — the answer may be incomplete'; break
     case 'limit_reached': status.value = `Stopped at limit: ${outcome.limit}. The answer may be incomplete.`; break
     case 'tools_unsupported':
-      status.value = `${session?.info.model ?? selected.value?.model ?? 'This model'} can't call tools. Choose a model with tool calling in Settings → Model providers.`
+      {
+        const message = typeof outcome.message === 'string' ? outcome.message.trim() : 'The model cannot call tools'
+        status.value = /[.!?]$/.test(message) ? message : `${message}.`
+      }
       break
     case 'failed': status.value = `Turn failed: ${outcome.message}`; break
     default: status.value = 'Not a full answer — the runtime returned an unrecognized outcome.'; break
@@ -134,7 +139,7 @@ async function prepare() {
 async function send() {
   const message = text.value.trim()
   if (!message || busy.value || !loaded.value || !selected.value || selected.value.unavailable) return
-  busy.value = true; error.value = ''; stopRequested = false; status.value = 'Working…'
+  busy.value = true; toolsUnsupported.value = false; error.value = ''; stopRequested = false; status.value = 'Working…'
   try {
     await prepare()
     if (stopRequested || disposed) { await session?.close(); session = null; status.value = 'Cancelled'; return }
@@ -182,7 +187,7 @@ async function stop() {
 async function reset() {
   if (busy.value) return
   try {
-    await session?.close(); session = null; messages.value = []; activity.value = {}; connections.value = []; approvals.value = []; questions.value = []; notice.value = ''; error.value = ''; status.value = 'Ready for a message'
+    await session?.close(); session = null; messages.value = []; activity.value = {}; connections.value = []; approvals.value = []; questions.value = []; notice.value = ''; error.value = ''; status.value = 'Ready for a message'; toolsUnsupported.value = false
     hasSession.value = false; exportNotice.value = ''
   } catch { error.value = 'Could not close the conversation. Try again.' }
 }
@@ -250,7 +255,7 @@ onUnmounted(() => { window.removeEventListener('igor:providers-changed', refresh
         <p role="status">{{ item.state === 'sending' ? 'Answer sent; waiting for the runtime.' : item.state === 'pending' ? 'Waiting for your answer. You can stop the turn.' : item.state }}</p>
       </article>
     </section>
-    <p role="status" class="turn-status">{{ status }}</p>
+    <p :role="toolsUnsupported ? 'alert' : 'status'" class="turn-status" :data-state="toolsUnsupported ? 'tools_unsupported' : undefined">{{ status }}<template v-if="toolsUnsupported"> Choose a model with tool calling in <a href="#model-providers" @click.prevent="emit('settings', 'model-providers')">Settings → Model providers</a>.</template></p>
     <p v-if="error" role="alert">{{ error }} <button v-if="!loaded" @click="refresh()">Try again</button></p>
     <form class="composer" @submit.prevent="send">
       <label for="message">Message Igor</label>
