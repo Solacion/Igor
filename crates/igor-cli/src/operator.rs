@@ -29,7 +29,7 @@ where
     while let Some(envelope) = events.recv().await {
         crate::render::render(&envelope.event, out)?;
         if let Some(export) = export.as_deref_mut() {
-            crate::export::write_event(&envelope, export)?;
+            igor_core::export::write_event(&envelope, export)?;
         }
         match envelope.event {
             RuntimeEvent::ApprovalRequested { request } => {

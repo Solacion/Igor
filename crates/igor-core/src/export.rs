@@ -1,4 +1,5 @@
-//! Redacted activity export: one JSON line per runtime event.
+//! Redacted activity export: one JSON line per runtime event, for any client that offers an
+//! activity export (the CLI's `--export`, the desktop).
 //!
 //! Fields that carry business data or model text are redacted by name wherever they appear, so
 //! event variants added later are covered too. Tool arguments keep their keys; the other fields
@@ -6,8 +7,9 @@
 
 use std::io::{self, Write};
 
-use igor_core::events::EventEnvelope;
 use serde_json::{Map, Value};
+
+use crate::events::EventEnvelope;
 
 /// Replacement for a redacted value.
 pub const REDACTED: &str = "<redacted>";
@@ -18,11 +20,16 @@ const REDACT_VALUES: &[&str] = &["arguments"];
 /// Strings replaced by their length.
 const REDACT_TEXT: &[&str] = &["canonical_arguments", "text", "question"];
 
-/// Writes `envelope` as one redacted JSON line.
-pub fn write_event(envelope: &EventEnvelope, out: &mut dyn Write) -> io::Result<()> {
+/// `envelope` as JSON with business data and model text redacted.
+pub fn redacted(envelope: &EventEnvelope) -> serde_json::Result<Value> {
     let mut value = serde_json::to_value(envelope)?;
     redact(&mut value);
-    serde_json::to_writer(&mut *out, &value)?;
+    Ok(value)
+}
+
+/// Writes `envelope` as one redacted JSON line.
+pub fn write_event(envelope: &EventEnvelope, out: &mut dyn Write) -> io::Result<()> {
+    serde_json::to_writer(&mut *out, &redacted(envelope)?)?;
     writeln!(out)
 }
 
@@ -60,9 +67,10 @@ fn redact_values(value: &Value) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use igor_core::events::RuntimeEvent;
-    use igor_core::tools::{ServerId, ToolId};
     use serde_json::json;
+
+    use crate::events::RuntimeEvent;
+    use crate::tools::{ServerId, ToolId};
 
     use super::*;
 
