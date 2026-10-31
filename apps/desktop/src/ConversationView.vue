@@ -35,7 +35,7 @@ const voiceInput = useVoiceInput({
   },
   onError: message => voice.speak(message, { interrupt: true }),
 })
-const voiceState = computed(() => voiceInput.state.value !== 'Idle' ? voiceInput.state.value : busy.value ? 'Thinking' : voice.speaking.value ? 'Speaking' : 'Idle')
+const voiceState = computed(() => voiceInput.state.value !== 'Idle' ? voiceInput.state.value : voice.speaking.value ? 'Speaking' : busy.value ? 'Thinking' : 'Idle')
 function hold(event: PointerEvent) {
   const button = event.currentTarget
   if (button instanceof HTMLElement)
@@ -108,6 +108,6 @@ async function stopTurn() {
       <p v-else class="hint">Hold the button, or hold Space outside text fields and controls. Release to transcribe.</p>
       <p v-if="voiceInput.error.value" role="alert">{{ voiceInput.error.value }}</p>
     </section>
-    <Composer :input-busy="voiceInput.state.value !== 'Idle'" v-model:text="text" :busy="busy" :loaded="loaded" :selected="selected" @send="send" @stop="stopTurn" />
+    <Composer :input-busy="voiceInput.state.value !== 'Idle' || confirmingReset" v-model:text="text" :busy="busy" :loaded="loaded" :selected="selected" @send="send" @stop="stopTurn" />
   </section>
 </template>

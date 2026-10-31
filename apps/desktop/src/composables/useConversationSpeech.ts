@@ -6,10 +6,12 @@ export function useConversationSpeech(conversation: ReturnType<typeof useConvers
   let firstMessage = 0
   let completed = false
   function flushReplies() {
-    if (!completed || suppressed) return
+    if (!completed || suppressed)
+      return
     const messages = conversation.messages.value
     for (const message of messages.slice(firstMessage)) {
-      if (message.role === 'Igor') voice.speak(message.text)
+      if (message.role === 'Igor')
+        voice.speak(message.text)
     }
     firstMessage = messages.length
   }

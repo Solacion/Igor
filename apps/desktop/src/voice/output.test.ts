@@ -127,6 +127,7 @@ it('speaks an approval summary but never accepts spoken approval, and suppresses
   await flushPromises()
   expect(engine.speak.mock.calls.at(-1)?.[0].text).toMatch(/Approve on screen\?$/)
   expect(backend.calls).not.toContain('resolve_approval')
+  expect(wrapper.get('.voice-input [role=status]').text()).toBe('Speaking')
   await wrapper.findAll('button').find(button => button.text() === 'Stop turn')!.trigger('click')
   const count = engine.speak.mock.calls.length
   backend.emit({ event: 'assistant_text', text: 'Late text' })

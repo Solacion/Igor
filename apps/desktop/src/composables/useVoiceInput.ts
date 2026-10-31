@@ -113,13 +113,18 @@ export function useVoiceInput(options: {
         const rms = Math.sqrt(power / Math.max(1, chunk.length))
         recording.peak = Math.max(recording.peak, rms)
         level.value = Math.min(1, rms * 4)
-        if (!remaining || chunk.length < frame.length)
-          { cancel(); report('Recording reached the one-minute limit. Try a shorter message.') }
+        if (!remaining || chunk.length < frame.length) {
+          cancel()
+          report('Recording reached the one-minute limit. Try a shorter message.')
+        }
       }
       source.connect(processor)
       processor.connect(mute)
       mute.connect(context.destination)
-      limit = setTimeout(() => { cancel(); report('Recording reached the one-minute limit. Try a shorter message.') }, 60000)
+      limit = setTimeout(() => {
+        cancel()
+        report('Recording reached the one-minute limit. Try a shorter message.')
+      }, 60000)
     }
     catch (cause) {
       stream?.getTracks().forEach(track => track.stop())
@@ -201,8 +206,10 @@ export function useVoiceInput(options: {
     window.addEventListener('keyup', keyup)
     window.addEventListener('blur', cancel)
   })
-  watch(options.active, active => { if (!active)
-    cancel(); })
+  watch(options.active, active => {
+    if (!active)
+      cancel()
+  })
   onScopeDispose(() => {
     window.removeEventListener('keydown', keydown)
     window.removeEventListener('keyup', keyup)
