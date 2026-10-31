@@ -41,6 +41,18 @@ function backend(handlers: Record<string, (args: any) => unknown>): Calls {
 }
 
 describe('settings', () => {
+  it('shows newly discovered tools on refresh with permission still blocked', async () => {
+    vi.useFakeTimers()
+    let changed = false
+    backend({ settings_view: () => view([{ ...pos, tools: changed ? [...pos.tools, { name: 'new_tool', description: null, read_only_hint: true, destructive_hint: null }] : pos.tools }]) })
+    const wrapper = mount(SettingsView); await flushPromises()
+    changed = true; await vi.advanceTimersByTimeAsync(3000); await flushPromises()
+    const row = wrapper.findAll('tbody tr').find(row => row.text().includes('new_tool'))!
+    expect(row.exists()).toBe(true)
+    expect((row.get('select').element as HTMLSelectElement).value).toBe('')
+    wrapper.unmount()
+  })
+
   it('opens from the top bar and closes with Done', async () => {
     backend({
       desktop_status: () => ({ app_version: '0.1.0', core_event_schema: 1 }),

@@ -675,3 +675,143 @@ env = { TOKEN = { env = "IGOR_DESKTOP_TEST_UNAVAILABLE_CREDENTIAL_20261031" } }
     std::fs::remove_dir_all(dir)?;
     Ok(())
 }
+
+#[tokio::test]
+async fn list_changed_refreshes_real_fixture_before_next_turn_and_keeps_new_tools_blocked()
+-> TestResult {
+    use crate::settings::Settings;
+    use igor_config::{PermissionClass, ServerEntry};
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    assert!(
+        std::process::Command::new(env!("CARGO"))
+            .args(["build", "--locked", "-q", "-p", "igor-fixture-server"])
+            .current_dir(&root)
+            .status()?
+            .success()
+    );
+    let dir = std::env::temp_dir().join(format!("igor-desktop-tools-{}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    let fixture = dir.join("notes.json");
+    let log = dir.join("calls.jsonl");
+    std::fs::write(
+        &fixture,
+        serde_json::to_vec(&json!({
+            "server":{"name":"notes", "version":"1"},
+            "tools":[
+                {"name":"list_notes", "inputSchema":{"type":"object"}},
+                {"name":"save_note", "inputSchema":{"type":"object"}}
+            ],
+            "calls":[{"tool":"list_notes", "arguments":"*", "result":{"content":[]}, "fault":{"notify_tools_changed":true}}]
+        }))?,
+    )?;
+    let path = dir.join("config.toml");
+    if path.exists() {
+        std::fs::remove_file(&path)?;
+    }
+    let settings = Settings::new(Some(path));
+    settings
+        .save_server(
+            None,
+            ServerEntry {
+                id: "notes".into(),
+                command: root
+                    .join("target/debug/igor-fixture-server")
+                    .display()
+                    .to_string(),
+                args: vec![
+                    "--fixture".into(),
+                    fixture.display().to_string(),
+                    "--call-log".into(),
+                    log.display().to_string(),
+                ],
+                ..ServerEntry::default()
+            },
+        )
+        .await?;
+    settings
+        .set_permission("notes", "list_notes", Some(PermissionClass::Read))
+        .await?;
+    let snapshot = settings.snapshot().await?;
+    let revision = snapshot.revision;
+    let classes = snapshot
+        .descriptors
+        .iter()
+        .map(|tool| {
+            (
+                tool.id.clone(),
+                snapshot.config.permissions().classify(&tool.id),
+            )
+        })
+        .collect();
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        ScriptedTurn::tool_call("one", "notes__list_notes", json!({})),
+        ScriptedTurn::tool_call("stale", "notes__list_notes", json!({})),
+        ScriptedTurn::text("Tools changed"),
+        ScriptedTurn::tool_call("two", "notes__list_notes", json!({})),
+        ScriptedTurn::text("Refreshed"),
+        ScriptedTurn::tool_call("blocked", "notes__save_note", json!({})),
+        ScriptedTurn::text("Not allowed"),
+    ]));
+    let (sink, mut events) = mpsc::unbounded_channel();
+    let runtime = DesktopRuntime::default();
+    let (id, cancel) = runtime.reserve()?;
+    runtime.install(
+        id.clone(),
+        cancel,
+        Prepared {
+            parts: SessionParts {
+                provider: provider.clone(),
+                registry: ToolRegistry::build(snapshot.descriptors, &classes),
+                backends: snapshot.backends,
+                ids: Arc::new(SequentialIds::new("changed")),
+                events: Arc::new(sink.clone()),
+            },
+            config: SessionConfig::default(),
+            servers: snapshot.servers,
+            statuses: vec![],
+            provider_id: "fake".into(),
+            model: "scripted".into(),
+            secrets: vec![],
+            revision,
+        },
+        Arc::new(sink),
+    )?;
+    assert_eq!(
+        runtime.send_configured(message(&id), &settings).await?,
+        TurnOutcome::CompletedWithGaps {
+            unsuccessful_calls: 1
+        }
+    );
+    assert!(
+        std::iter::from_fn(|| events.try_recv().ok())
+            .any(|event| matches!(event.event, RuntimeEvent::ToolsChanged { .. }))
+    );
+    // No Settings poll between the notification and next send: the send path must re-list.
+    assert_eq!(
+        runtime.send_configured(message(&id), &settings).await?,
+        TurnOutcome::Completed
+    );
+    let view = settings.view().await?;
+    assert_eq!(view.servers[0].tools.len(), 2);
+    assert!(!view.servers[0].permissions.contains_key("save_note"));
+    assert_ne!(settings.snapshot().await?.revision, revision);
+    assert_eq!(
+        runtime.send_configured(message(&id), &settings).await?,
+        TurnOutcome::CompletedWithGaps {
+            unsuccessful_calls: 1
+        }
+    );
+    let records = std::fs::read_to_string(log)?;
+    assert_eq!(
+        records.lines().count(),
+        2,
+        "stale and unclassified calls never reach server"
+    );
+    assert!(!records.contains("save_note"));
+    assert!(provider.requests()[3].messages.len() > provider.requests()[0].messages.len());
+    provider.verify()?;
+    runtime.shutdown();
+    settings.shutdown().await;
+    std::fs::remove_dir_all(dir)?;
+    Ok(())
+}

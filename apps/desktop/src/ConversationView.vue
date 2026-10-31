@@ -80,6 +80,10 @@ function receive(envelope: CoreEvent) {
     connections.value.push({ key: `${epoch}:${envelope.sequence}`, server: event.server, state: event.state, detail: typeof event.detail === 'string' ? event.detail : '' })
     void refresh(true)
   }
+  if (event.event === 'tools_changed' && typeof event.server === 'string') {
+    connections.value.push({ key: `${epoch}:${envelope.sequence}`, server: event.server, state: 'tools_changed', detail: '' })
+    void refresh(true)
+  }
   if (event.event === 'approval_requested') {
     const request = event.request as unknown as ApprovalPreview
     approvals.value.push({ key: `${epoch}:${request.approval_id}`, request, state: 'pending' })
@@ -200,8 +204,9 @@ onUnmounted(() => { disposed = true; clearInterval(timer); void session?.close()
     <section v-if="Object.keys(activity).length || connections.length" class="tool-activity" aria-labelledby="activity-title">
       <h2 id="activity-title">Tool activity</h2>
       <ol class="connection-events"><li v-for="connection in connections" :key="connection.key" class="activity-row">
-        <strong>{{ connection.server }}</strong>
-        <p>{{ connection.state === 'failed' ? 'Server stopped; later calls are not executed.' : connection.state === 'disconnected' ? 'Server disconnected.' : connection.state === 'connecting' ? 'Server connecting…' : connection.state === 'connected' ? 'Server connected.' : connection.state }}</p>
+        <strong v-if="connection.state !== 'tools_changed'">{{ connection.server }}</strong>
+        <p v-if="connection.state === 'tools_changed'">{{ connection.server }} changed its tools; Igor refreshed them before continuing</p>
+        <p v-else>{{ connection.state === 'failed' ? 'Server stopped; later calls are not executed.' : connection.state === 'disconnected' ? 'Server disconnected.' : connection.state === 'connecting' ? 'Server connecting…' : connection.state === 'connected' ? 'Server connected.' : connection.state }}</p>
         <p v-if="connection.detail" class="literal">{{ connection.detail }}</p>
       </li></ol>
       <ol><li v-for="(call, key) in activity" :key="key" class="activity-row">

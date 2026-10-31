@@ -256,22 +256,18 @@ impl DesktopRuntime {
         request: MessageRequest,
         settings: &crate::settings::Settings,
     ) -> Result<TurnOutcome, BridgeError> {
-        let snapshot = settings
-            .snapshot()
-            .await
-            .map_err(|_| BridgeError::Configuration)?;
-        self.send_with_snapshot(request, Some(snapshot)).await
+        self.send_with_settings(request, Some(settings)).await
     }
 
     #[cfg(test)]
     pub async fn send(&self, request: MessageRequest) -> Result<TurnOutcome, BridgeError> {
-        self.send_with_snapshot(request, None).await
+        self.send_with_settings(request, None).await
     }
 
-    async fn send_with_snapshot(
+    async fn send_with_settings(
         &self,
         request: MessageRequest,
-        snapshot: Option<crate::settings::Snapshot>,
+        settings: Option<&crate::settings::Settings>,
     ) -> Result<TurnOutcome, BridgeError> {
         if !valid_text(&request.text) {
             return Err(BridgeError::InvalidRequest);
@@ -298,7 +294,18 @@ impl DesktopRuntime {
         };
         // This async lock serializes only the core conversation, not approvals or cancellation.
         let mut session = session.lock().await;
-        if let Some(snapshot) = snapshot {
+        if let Some(settings) = settings {
+            let stale = session.stale_servers();
+            let snapshot = tokio::select! {
+                biased;
+                () = cancel.cancelled() => return Err(BridgeError::Cancelled),
+                result = async {
+                    if !stale.is_empty() {
+                        settings.refresh_tools(&stale).await.map_err(|_| BridgeError::Configuration)?;
+                    }
+                    settings.snapshot().await.map_err(|_| BridgeError::Configuration)
+                } => result?,
+            };
             // The turn reservation prevents another send from racing this replacement.
             // Keep prior credentials guarded too: earlier messages remain in history.
             let mut added_secrets = Vec::new();
