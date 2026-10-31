@@ -267,10 +267,7 @@ impl Session {
             ids,
             events,
         } = parts;
-        let mut tools = registry.tool_specs();
-        if config.ask_operator {
-            tools.push(ask_operator_spec());
-        }
+        let tools = tool_specs(&registry, &config);
         let (sender, inputs) = mpsc::unbounded_channel();
         let session = Self {
             provider,
@@ -297,6 +294,25 @@ impl Session {
     /// The tool registry the session routes through.
     pub fn registry(&self) -> &ToolRegistry {
         &self.registry
+    }
+
+    /// Replaces the tools the session offers and the servers it routes to, keeping the
+    /// conversation. Use it when the operator changes servers or permissions between turns; the
+    /// next turn offers only the new tools and enforces only the new classifications.
+    ///
+    /// It takes `&mut self`, so it cannot run during a turn, and no approval is pending between
+    /// turns. Earlier tool calls stay in the history as they happened. A tool that is no longer
+    /// offered is refused as unknown if the model calls it again. Returns the backends that were
+    /// replaced, so the host can shut down the ones it no longer uses.
+    pub fn replace_tools(
+        &mut self,
+        registry: ToolRegistry,
+        backends: HashMap<ServerId, Arc<dyn ToolBackend>>,
+    ) -> HashMap<ServerId, Arc<dyn ToolBackend>> {
+        self.tools = tool_specs(&registry, &self.config);
+        self.registry = registry;
+        self.stopped.clear();
+        std::mem::replace(&mut self.backends, backends)
     }
 
     /// Stops every server and waits until they have stopped. Call it once, after the last turn.
@@ -747,6 +763,15 @@ impl Session {
         self.events.emit(EventEnvelope::new(self.sequence, event));
         self.sequence += 1;
     }
+}
+
+/// The tools offered to the model: the registry's, plus the host's own when enabled.
+fn tool_specs(registry: &ToolRegistry, config: &SessionConfig) -> Vec<ToolSpec> {
+    let mut tools = registry.tool_specs();
+    if config.ask_operator {
+        tools.push(ask_operator_spec());
+    }
+    tools
 }
 
 /// Tool definition of the [`ASK_OPERATOR_TOOL`] host tool.
