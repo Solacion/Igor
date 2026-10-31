@@ -253,7 +253,9 @@ fn exit_code(outcome: &TurnOutcome) -> ExitCode {
     match outcome {
         TurnOutcome::Completed => ExitCode::SUCCESS,
         TurnOutcome::CompletedWithGaps { .. } => ExitCode::from(EXIT_GAPS),
-        TurnOutcome::Failed { .. } => ExitCode::from(EXIT_FAILED),
+        TurnOutcome::Failed { .. } | TurnOutcome::ToolsUnsupported { .. } => {
+            ExitCode::from(EXIT_FAILED)
+        }
         TurnOutcome::LimitReached { .. } => ExitCode::from(EXIT_LIMIT),
         TurnOutcome::Cancelled => ExitCode::from(EXIT_CANCELLED),
     }

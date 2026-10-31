@@ -131,6 +131,10 @@ pub enum ProviderErrorKind {
     /// The request was cancelled.
     #[error("cancelled")]
     Cancelled,
+    /// The configured model cannot call tools. The runtime never falls back to reading tool
+    /// calls out of free text.
+    #[error("model cannot call tools")]
+    ToolsUnsupported,
 }
 
 /// A provider call failed.
@@ -157,4 +161,12 @@ pub trait Provider: Send + Sync {
         request: ModelRequest,
         cancel: CancellationToken,
     ) -> Result<ModelResponse, ProviderError>;
+
+    /// Checks, before the first model request that offers tools, that the model can call
+    /// them. Fails with [`ProviderErrorKind::ToolsUnsupported`] only when the provider knows
+    /// the model cannot; any other result lets the session go ahead. The default knows nothing
+    /// and succeeds.
+    async fn preflight(&self, _cancel: CancellationToken) -> Result<(), ProviderError> {
+        Ok(())
+    }
 }

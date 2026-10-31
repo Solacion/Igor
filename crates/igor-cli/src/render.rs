@@ -159,6 +159,10 @@ pub fn describe(outcome: &TurnOutcome) -> String {
         }
         TurnOutcome::Cancelled => "cancelled".to_owned(),
         TurnOutcome::Failed { message } => format!("failed: {}", sanitize(message)),
+        TurnOutcome::ToolsUnsupported { message } => format!(
+            "failed: {}. Choose a model with tool calling.",
+            sanitize(message)
+        ),
     }
 }
 
@@ -206,5 +210,16 @@ mod tests {
         assert!(!text.contains('\u{1b}'));
         assert!(text.contains("hi"));
         Ok(())
+    }
+
+    #[test]
+    fn a_model_that_cannot_call_tools_says_what_to_do() {
+        let text = describe(&TurnOutcome::ToolsUnsupported {
+            message: "model \"tiny\" cannot call tools".to_owned(),
+        });
+        assert_eq!(
+            text,
+            "failed: model \"tiny\" cannot call tools. Choose a model with tool calling."
+        );
     }
 }

@@ -278,6 +278,8 @@ pub struct Session {
     tool_versions: HashMap<ServerId, u64>,
     /// Servers already reported with [`RuntimeEvent::ToolsChanged`] since then.
     tools_changed_reported: HashSet<ServerId>,
+    /// The provider's [`Provider::preflight`] has succeeded.
+    preflight_passed: bool,
 }
 
 impl Session {
@@ -309,6 +311,7 @@ impl Session {
             unsuccessful_calls: 0,
             tool_versions,
             tools_changed_reported: HashSet::new(),
+            preflight_passed: false,
         };
         (session, SessionHandle { inputs: sender })
     }
@@ -405,6 +408,9 @@ impl Session {
     }
 
     async fn run_turn(&mut self, cancel: &CancellationToken) -> TurnOutcome {
+        if let Some(outcome) = self.preflight(cancel).await {
+            return outcome;
+        }
         let mut tool_calls: u32 = 0;
         for _ in 0..self.config.max_model_requests {
             let response = match self.request_model(cancel).await {
@@ -461,6 +467,41 @@ impl Session {
         }
         TurnOutcome::LimitReached {
             limit: LimitKind::ModelRequests,
+        }
+    }
+
+    /// Runs [`Provider::preflight`] until it first succeeds, while tools are offered. Returns
+    /// the outcome when the turn must not be sent. A preflight that fails for any other reason
+    /// than [`ProviderErrorKind::ToolsUnsupported`] lets the turn go ahead, so the model request
+    /// itself reports the problem.
+    async fn preflight(&mut self, cancel: &CancellationToken) -> Option<TurnOutcome> {
+        if self.preflight_passed || self.tools.is_empty() {
+            return None;
+        }
+        let child = cancel.child_token();
+        let result = tokio::time::timeout(
+            self.config.model_timeout,
+            self.provider.preflight(child.clone()),
+        )
+        .await;
+        match result {
+            Ok(Ok(())) => {
+                self.preflight_passed = true;
+                None
+            }
+            Ok(Err(error)) if error.kind == ProviderErrorKind::ToolsUnsupported => {
+                Some(TurnOutcome::ToolsUnsupported {
+                    message: error.message,
+                })
+            }
+            Ok(Err(error)) if error.kind == ProviderErrorKind::Cancelled => {
+                Some(TurnOutcome::Cancelled)
+            }
+            Ok(Err(_)) => None,
+            Err(_elapsed) => {
+                child.cancel();
+                None
+            }
         }
     }
 

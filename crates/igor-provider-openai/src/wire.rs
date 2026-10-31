@@ -134,6 +134,23 @@ fn assistant(content: &[ContentBlock]) -> Value {
     Value::Object(message)
 }
 
+/// Whether `body` is LM Studio's details for `model` and lists no `tool_use` capability. LM
+/// Studio leaves `capabilities` out for models without tool use. Anything else, including
+/// details for another model, is not evidence and gives `false`.
+pub(crate) fn details_lack_tool_use(body: &[u8], model: &str) -> bool {
+    let Ok(details) = serde_json::from_slice::<Value>(body) else {
+        return false;
+    };
+    let is_details = details.get("object").and_then(Value::as_str) == Some("model")
+        && details.get("id").and_then(Value::as_str) == Some(model)
+        && details.get("type").and_then(Value::as_str).is_some();
+    let has_tool_use = details
+        .get("capabilities")
+        .and_then(Value::as_array)
+        .is_some_and(|caps| caps.iter().any(|cap| cap.as_str() == Some("tool_use")));
+    is_details && !has_tool_use
+}
+
 /// Parses a successful chat completions response body.
 pub(crate) fn parse_response(body: &[u8]) -> Result<ModelResponse, ProviderError> {
     let value: Value = serde_json::from_slice(body)

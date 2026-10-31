@@ -1131,3 +1131,63 @@ async fn a_tool_list_change_while_approval_is_pending_refuses_the_write() -> Tes
     );
     Ok(())
 }
+
+fn preflight_error(kind: ProviderErrorKind) -> crate::provider::ProviderError {
+    crate::provider::ProviderError {
+        kind,
+        message: "model tiny-1b cannot call tools".to_owned(),
+        retryable: false,
+    }
+}
+
+#[tokio::test]
+async fn a_model_that_cannot_call_tools_is_reported_and_nothing_is_sent() -> TestResult {
+    let mut h = harness(Vec::new())?;
+    h.provider
+        .set_preflight_error(Some(preflight_error(ProviderErrorKind::ToolsUnsupported)));
+    let outcome = h
+        .session
+        .send_message("Order stock", CancellationToken::new())
+        .await;
+    assert_eq!(
+        outcome,
+        TurnOutcome::ToolsUnsupported {
+            message: "model tiny-1b cannot call tools".to_owned()
+        }
+    );
+    assert!(h.provider.requests().is_empty());
+    let mut events = Vec::new();
+    while let Ok(event) = h.events.try_recv() {
+        events.push(event);
+    }
+    assert_eq!(kinds(&events), ["turn_finished"]);
+    h.provider.verify()?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn preflight_runs_until_it_first_passes() -> TestResult {
+    let h = harness(vec![
+        ScriptedTurn::text("one"),
+        ScriptedTurn::text("two"),
+        ScriptedTurn::text("three"),
+    ])?;
+    let Harness {
+        mut session,
+        provider,
+        ..
+    } = h;
+    provider.set_preflight_error(Some(preflight_error(ProviderErrorKind::Unavailable)));
+    let first = session.send_message("a", CancellationToken::new()).await;
+    assert_eq!(
+        first,
+        TurnOutcome::Completed,
+        "other preflight errors do not block"
+    );
+    provider.set_preflight_error(None);
+    session.send_message("b", CancellationToken::new()).await;
+    session.send_message("c", CancellationToken::new()).await;
+    assert_eq!(provider.preflights(), 2, "skipped after the first pass");
+    provider.verify()?;
+    Ok(())
+}
