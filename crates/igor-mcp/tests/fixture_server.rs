@@ -316,10 +316,18 @@ async fn startup_failures_are_reported() -> TestResult {
 /// A fixture with one tool per protocol-level fault.
 fn fault_fixture(dir: &Path) -> std::io::Result<PathBuf> {
     let path = dir.join("faults.json");
-    let tools: Vec<Value> = ["hang", "early", "crash", "malformed", "oversized", "fast"]
-        .iter()
-        .map(|name| json!({ "name": name, "inputSchema": { "type": "object" } }))
-        .collect();
+    let tools: Vec<Value> = [
+        "hang",
+        "early",
+        "crash",
+        "malformed",
+        "oversized",
+        "fast",
+        "changes",
+    ]
+    .iter()
+    .map(|name| json!({ "name": name, "inputSchema": { "type": "object" } }))
+    .collect();
     let fixture = json!({
         "server": { "name": "faults", "version": "1" },
         "tools": tools,
@@ -329,7 +337,9 @@ fn fault_fixture(dir: &Path) -> std::io::Result<PathBuf> {
             { "tool": "crash", "arguments": {}, "fault": { "crash_after_record": true } },
             { "tool": "malformed", "arguments": {}, "fault": { "malformed_response": true } },
             { "tool": "oversized", "arguments": {}, "fault": { "oversized_result": 1_048_576 } },
-            { "tool": "fast", "arguments": {}, "result": { "content": [] } }
+            { "tool": "fast", "arguments": {}, "result": { "content": [] } },
+            { "tool": "changes", "arguments": {}, "result": { "content": [] },
+              "fault": { "notify_tools_changed": true } }
         ]
     });
     std::fs::write(&path, fixture.to_string())?;
@@ -428,5 +438,29 @@ async fn oversized_result_is_returned_unbounded() -> TestResult {
         [ToolContent::Text { text }] => assert_eq!(text.len(), 1_048_576),
         other => return Err(format!("unexpected content {other:?}").into()),
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn tool_list_changed_notifications_bump_the_version() -> TestResult {
+    let (backend, _log) = fault_backend("changes", Duration::from_secs(10)).await?;
+    assert_eq!(backend.tool_list_version(), 0);
+    backend
+        .call_tool("fast", Map::new(), CancellationToken::new())
+        .await?;
+    assert_eq!(
+        backend.tool_list_version(),
+        0,
+        "an ordinary call changes nothing"
+    );
+    backend
+        .call_tool("changes", Map::new(), CancellationToken::new())
+        .await?;
+    // The notification is handled on the client's own task; allow it to arrive.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while backend.tool_list_version() == 0 && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(backend.tool_list_version(), 1);
     Ok(())
 }

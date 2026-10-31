@@ -13,7 +13,8 @@ use std::ffi::OsString;
 use std::fmt;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -22,9 +23,10 @@ use igor_core::tools::{
     BackendError, ServerId, ToolBackend, ToolContent, ToolDescriptor, ToolHints, ToolId, ToolOutput,
 };
 use rmcp::model::{CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Tool};
+use rmcp::service::NotificationContext;
 use rmcp::service::{Peer, RunningService, ServiceError};
 use rmcp::transport::TokioChildProcess;
-use rmcp::{RoleClient, ServiceExt};
+use rmcp::{ClientHandler, RoleClient, ServiceExt};
 use serde_json::{Map, Value};
 use thiserror::Error;
 use tokio::process::Command;
@@ -131,6 +133,18 @@ pub enum ConnectError {
     },
 }
 
+/// The MCP client side: records `notifications/tools/list_changed` so the session can tell when
+/// a server's tool definitions may have changed.
+struct Client {
+    tool_list_version: Arc<AtomicU64>,
+}
+
+impl ClientHandler for Client {
+    async fn on_tool_list_changed(&self, _context: NotificationContext<RoleClient>) {
+        self.tool_list_version.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
 /// Bound on [`McpBackend::shutdown`]: how long the server gets to exit after its input closes
 /// before it is killed, plus the wait for the kill.
 pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -144,7 +158,9 @@ pub struct McpBackend {
     server_id: ServerId,
     peer: Peer<RoleClient>,
     /// `None` once shut down.
-    service: Mutex<Option<RunningService<RoleClient, ()>>>,
+    service: Mutex<Option<RunningService<RoleClient, Client>>>,
+    /// Count of `notifications/tools/list_changed` received.
+    tool_list_version: Arc<AtomicU64>,
     call_timeout: Duration,
 }
 
@@ -173,7 +189,11 @@ impl McpBackend {
                 server: server_id.clone(),
                 source,
             })?;
-        let service = tokio::time::timeout(config.startup_timeout, ().serve(transport))
+        let tool_list_version = Arc::new(AtomicU64::new(0));
+        let client = Client {
+            tool_list_version: Arc::clone(&tool_list_version),
+        };
+        let service = tokio::time::timeout(config.startup_timeout, client.serve(transport))
             .await
             .map_err(|_| ConnectError::Timeout {
                 server: server_id.clone(),
@@ -187,11 +207,12 @@ impl McpBackend {
             server_id,
             peer: service.peer().clone(),
             service: Mutex::new(Some(service)),
+            tool_list_version,
             call_timeout: config.call_timeout,
         })
     }
 
-    fn service(&self) -> MutexGuard<'_, Option<RunningService<RoleClient, ()>>> {
+    fn service(&self) -> MutexGuard<'_, Option<RunningService<RoleClient, Client>>> {
         self.service.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -246,6 +267,10 @@ impl ToolBackend for McpBackend {
 
     async fn shutdown(&self) {
         McpBackend::shutdown(self).await;
+    }
+
+    fn tool_list_version(&self) -> u64 {
+        self.tool_list_version.load(Ordering::SeqCst)
     }
 
     async fn list_tools(&self) -> Result<Vec<ToolDescriptor>, BackendError> {

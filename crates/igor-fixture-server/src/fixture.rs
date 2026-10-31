@@ -96,6 +96,9 @@ pub(crate) struct Recorded {
     pub response: Response,
     /// Delay before the response (`delay_ms` fault).
     pub delay: Option<Duration>,
+    /// Send `notifications/tools/list_changed` before the response (`notify_tools_changed`
+    /// fault).
+    pub notify_tools_changed: bool,
 }
 
 /// Outcome of looking up a call.
@@ -166,6 +169,8 @@ enum Arguments {
 #[serde(deny_unknown_fields)]
 struct Fault {
     delay_ms: Option<u64>,
+    #[serde(default)]
+    notify_tools_changed: bool,
     tool_error: Option<String>,
     oversized_result: Option<usize>,
     #[serde(default)]
@@ -333,6 +338,7 @@ or fault.malformed_response"
     Ok(Recorded {
         response,
         delay: fault.delay_ms.map(Duration::from_millis),
+        notify_tools_changed: fault.notify_tools_changed,
     })
 }
 

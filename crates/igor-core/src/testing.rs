@@ -11,7 +11,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::SystemTime;
 
@@ -282,6 +282,9 @@ pub enum FakeReply {
     /// Wait until cancelled, then fail with [`BackendError::OutcomeUnknown`], like a request
     /// that reached a server which never answered.
     Hang,
+    /// Record the call, report a tool list change, and return an empty success, like a server
+    /// that changed its tools while answering.
+    ChangeTools,
     /// Record the call, then stop the backend and fail with [`BackendError::OutcomeUnknown`],
     /// like a server that exited after receiving the request. Later calls fail with
     /// [`BackendError::NotConnected`] and are not recorded.
@@ -308,6 +311,7 @@ pub struct RecordingBackend {
     replies: HashMap<String, FakeReply>,
     calls: Mutex<Vec<RecordedCall>>,
     connected: AtomicBool,
+    tool_list_version: AtomicU64,
 }
 
 impl RecordingBackend {
@@ -319,6 +323,7 @@ impl RecordingBackend {
             replies: HashMap::new(),
             calls: Mutex::new(Vec::new()),
             connected: AtomicBool::new(true),
+            tool_list_version: AtomicU64::new(0),
         }
     }
 
@@ -332,6 +337,11 @@ impl RecordingBackend {
     pub fn with_reply(mut self, name: impl Into<String>, reply: FakeReply) -> Self {
         self.replies.insert(name.into(), reply);
         self
+    }
+
+    /// Simulates the server reporting that its tool list changed.
+    pub fn change_tools(&self) {
+        self.tool_list_version.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Every call received so far, in order.
@@ -351,6 +361,10 @@ impl ToolBackend for RecordingBackend {
 
     fn is_connected(&self) -> bool {
         self.connected.load(Ordering::SeqCst)
+    }
+
+    fn tool_list_version(&self) -> u64 {
+        self.tool_list_version.load(Ordering::SeqCst)
     }
 
     async fn list_tools(&self) -> Result<Vec<ToolDescriptor>, BackendError> {
@@ -379,6 +393,14 @@ impl ToolBackend for RecordingBackend {
         match self.replies.get(name) {
             Some(FakeReply::Output(output)) => Ok(output.clone()),
             Some(FakeReply::Error(error)) => Err(error.clone()),
+            Some(FakeReply::ChangeTools) => {
+                self.change_tools();
+                Ok(ToolOutput {
+                    content: Vec::new(),
+                    structured: None,
+                    is_error: false,
+                })
+            }
             Some(FakeReply::Crash) => {
                 self.connected.store(false, Ordering::SeqCst);
                 Err(BackendError::OutcomeUnknown("server exited".to_owned()))

@@ -62,6 +62,7 @@ Unknown fields are rejected, so a typo cannot silently change behaviour. The ser
 | Fault | Effect | Status |
 | --- | --- | --- |
 | `"delay_ms": <n>` | Waits `n` milliseconds before returning the result. Combines with `result` or `tool_error`. If the client cancels the request during the wait, the server stops waiting and returns an error. | Implemented |
+| `"notify_tools_changed": true` | Sends `notifications/tools/list_changed` before the response. Combines with any result or fault. The tool list itself does not change. | Implemented |
 | `"tool_error": "<message>"` | Returns `isError: true` with `message` as text, in place of `result`. | Implemented |
 | `"oversized_result": <bytes>` | Returns a successful result with one text block of `bytes` characters, in place of `result`. At most 64 MiB. | Implemented |
 | `"hang": true` | Logs the call, then never responds. | Implemented |

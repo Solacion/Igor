@@ -50,6 +50,12 @@ pub enum RuntimeEvent {
         /// Reason for a failure or disconnect, when known. Diagnostic text without secrets.
         detail: Option<String>,
     },
+    /// A server reported that its tool list changed. Calls to it are refused until the host
+    /// refreshes its tools with [`crate::session::Session::replace_tools`].
+    ToolsChanged {
+        /// Server concerned.
+        server: ServerId,
+    },
     /// The model proposed a tool call.
     ToolCallProposed {
         /// Session-unique call identifier.

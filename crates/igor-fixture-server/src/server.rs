@@ -39,12 +39,17 @@ impl FixtureServer {
 
 impl ServerHandler for FixtureServer {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_protocol_version(PROTOCOL_VERSION)
-            .with_server_info(Implementation::new(
-                self.fixture.server_name.clone(),
-                self.fixture.server_version.clone(),
-            ))
+        ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_tool_list_changed()
+                .build(),
+        )
+        .with_protocol_version(PROTOCOL_VERSION)
+        .with_server_info(Implementation::new(
+            self.fixture.server_name.clone(),
+            self.fixture.server_version.clone(),
+        ))
     }
 
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
@@ -81,6 +86,13 @@ impl ServerHandler for FixtureServer {
                 None,
             )),
             (_, Some(recorded)) => {
+                if recorded.notify_tools_changed {
+                    context
+                        .peer
+                        .notify_tool_list_changed()
+                        .await
+                        .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+                }
                 if let Some(delay) = recorded.delay {
                     // Behave like a live server: stop waiting once the client cancels the request.
                     tokio::select! {

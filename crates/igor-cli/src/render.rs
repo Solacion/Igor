@@ -33,6 +33,12 @@ pub fn render(event: &RuntimeEvent, out: &mut impl Write) -> io::Result<()> {
             let detail = detail.as_deref().map(sanitize).unwrap_or_default();
             writeln!(out, "[server {server}: {state:?}] {detail}")
         }
+        RuntimeEvent::ToolsChanged { server } => {
+            writeln!(
+                out,
+                "[server {server}: tool list changed; refreshed before the next message]"
+            )
+        }
         RuntimeEvent::ToolCallProposed {
             call_id,
             tool,

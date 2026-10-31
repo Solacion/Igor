@@ -37,13 +37,9 @@ fn descriptor(id: &ToolId, schema: Value) -> ToolDescriptor {
     }
 }
 
-/// `sales/lookup` and `weather/lookup` (read, same name), `sales/create_order` (write).
-fn harness_with(
-    turns: Vec<ScriptedTurn>,
-    config: SessionConfig,
-    sales_replies: Vec<(&str, FakeReply)>,
-    weather_replies: Vec<(&str, FakeReply)>,
-) -> Result<Harness, InvalidServerId> {
+/// The harness tools: `sales/lookup` and `weather/lookup` (read, same name), and
+/// `sales/create_order` (write).
+fn harness_registry() -> Result<ToolRegistry, InvalidServerId> {
     let lookup = json!({ "type": "object" });
     let order = json!({
         "type": "object",
@@ -69,6 +65,17 @@ fn harness_with(
             .map(|(id, _, schema)| descriptor(id, schema.clone())),
         &classes,
     );
+    Ok(registry)
+}
+
+/// A session over [`harness_registry`].
+fn harness_with(
+    turns: Vec<ScriptedTurn>,
+    config: SessionConfig,
+    sales_replies: Vec<(&str, FakeReply)>,
+    weather_replies: Vec<(&str, FakeReply)>,
+) -> Result<Harness, InvalidServerId> {
+    let registry = harness_registry()?;
 
     let mut sales = RecordingBackend::new(ServerId::new("sales")?);
     for (name, reply) in sales_replies {
@@ -170,6 +177,8 @@ struct Operator {
     answers: VecDeque<&'static str>,
     cancel_on: Option<&'static str>,
     cancel_at_start: bool,
+    /// Runs when an approval is requested, before the decision is sent.
+    before_decision: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl Operator {
@@ -193,6 +202,17 @@ impl Operator {
         while let Some(envelope) = events.recv().await {
             match &envelope.event {
                 RuntimeEvent::ApprovalRequested { request } => match self.decisions.pop_front() {
+                    Some(decision) if self.before_decision.is_some() => {
+                        if let Some(hook) = &self.before_decision {
+                            hook();
+                        }
+                        let sent = handle.resolve_approval(
+                            request.approval_id.clone(),
+                            request.action_hash,
+                            decision,
+                        );
+                        assert!(sent.is_ok());
+                    }
                     Some(decision) => {
                         let sent = handle.resolve_approval(
                             request.approval_id.clone(),
@@ -993,5 +1013,121 @@ cannot be retrieved: supplier (cannot start server supplier: No such file).";
     h.session.set_unavailable_servers(Vec::new());
     run(&mut h, "again", Operator::default()).await;
     h.provider.verify()?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_tool_list_change_refuses_calls_until_the_host_refreshes() -> TestResult {
+    let mut h = harness(vec![
+        ScriptedTurn::tool_call("u1", "sales__lookup", json!({})),
+        ScriptedTurn::text("Looked it up."),
+        ScriptedTurn::tool_call("u2", "sales__lookup", json!({})),
+        ScriptedTurn::text("Sales tools changed."),
+        ScriptedTurn::tool_call("u3", "sales__lookup", json!({})),
+        ScriptedTurn::text("Looked it up again."),
+    ])?;
+    run(&mut h, "first", Operator::default()).await;
+    assert!(h.session.stale_servers().is_empty());
+
+    h.sales.change_tools();
+    assert_eq!(h.session.stale_servers(), [ServerId::new("sales")?]);
+    let (outcome, events) = run(&mut h, "second", Operator::default()).await;
+    assert_eq!(
+        outcome,
+        TurnOutcome::CompletedWithGaps {
+            unsuccessful_calls: 1
+        }
+    );
+    assert_eq!(count(&events, "tools_changed"), 1, "{:?}", kinds(&events));
+    assert_eq!(
+        kinds(&events)[0],
+        "tools_changed",
+        "reported when the turn starts"
+    );
+    assert_eq!(h.sales.calls().len(), 1, "nothing sent after the change");
+
+    // The host refreshes: same tools, new registration.
+    let registry = harness_registry()?;
+    let backends: HashMap<ServerId, Arc<dyn ToolBackend>> = HashMap::from([
+        (
+            ServerId::new("sales")?,
+            h.sales.clone() as Arc<dyn ToolBackend>,
+        ),
+        (
+            ServerId::new("weather")?,
+            h.weather.clone() as Arc<dyn ToolBackend>,
+        ),
+    ]);
+    h.session.replace_tools(registry, backends);
+    assert!(h.session.stale_servers().is_empty());
+    let (outcome, _) = run(&mut h, "third", Operator::default()).await;
+    assert_eq!(outcome, TurnOutcome::Completed);
+    h.provider.verify()?;
+    assert_eq!(h.sales.calls().len(), 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_tool_list_change_mid_turn_refuses_a_write_before_approval() -> TestResult {
+    let mut h = harness_with(
+        vec![
+            tool_uses(vec![
+                tool_use("u1", "sales__lookup", json!({})),
+                tool_use("u2", "sales__create_order", json!({ "supplier": "x" })),
+            ]),
+            ScriptedTurn::text("The order was not placed."),
+        ],
+        SessionConfig::default(),
+        vec![("lookup", FakeReply::ChangeTools)],
+        Vec::new(),
+    )?;
+    let (outcome, events) = run(&mut h, "order", Operator::approving([Decision::Approve])).await;
+    h.provider.verify()?;
+    assert_eq!(
+        outcome,
+        TurnOutcome::CompletedWithGaps {
+            unsuccessful_calls: 1
+        }
+    );
+    assert_eq!(
+        count(&events, "approval_requested"),
+        0,
+        "{:?}",
+        kinds(&events)
+    );
+    assert_eq!(count(&events, "tools_changed"), 1);
+    assert_eq!(
+        h.sales.calls().len(),
+        1,
+        "the write never reached the server"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_tool_list_change_while_approval_is_pending_refuses_the_write() -> TestResult {
+    let mut h = harness(vec![
+        ScriptedTurn::tool_call("u1", "sales__create_order", json!({ "supplier": "x" })),
+        ScriptedTurn::text("The order was not placed."),
+    ])?;
+    let sales = h.sales.clone();
+    let operator = Operator {
+        before_decision: Some(Arc::new(move || sales.change_tools())),
+        ..Operator::approving([Decision::Approve])
+    };
+    let (outcome, events) = run(&mut h, "order", operator).await;
+    h.provider.verify()?;
+    assert_eq!(
+        outcome,
+        TurnOutcome::CompletedWithGaps {
+            unsuccessful_calls: 1
+        }
+    );
+    assert_eq!(count(&events, "approval_resolved"), 1);
+    assert_eq!(count(&events, "tools_changed"), 1);
+    assert!(
+        h.sales.calls().is_empty(),
+        "approved, but refused at dispatch"
+    );
     Ok(())
 }

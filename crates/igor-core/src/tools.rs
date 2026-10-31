@@ -175,6 +175,13 @@ pub trait ToolBackend: Send + Sync {
         true
     }
 
+    /// A number that changes whenever the server reports that its tool list changed. The
+    /// session refuses calls to a server whose number differs from when its tools were
+    /// registered, until the host refreshes them. The default never changes.
+    fn tool_list_version(&self) -> u64 {
+        0
+    }
+
     /// Stops the server and waits until it has stopped. Called once when the host shuts down;
     /// later calls fail with [`BackendError::NotConnected`]. The default does nothing.
     async fn shutdown(&self) {}
