@@ -13,6 +13,7 @@ use std::ffi::OsString;
 use std::fmt;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -21,7 +22,7 @@ use igor_core::tools::{
     BackendError, ServerId, ToolBackend, ToolContent, ToolDescriptor, ToolHints, ToolId, ToolOutput,
 };
 use rmcp::model::{CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Tool};
-use rmcp::service::{RunningService, ServiceError};
+use rmcp::service::{Peer, RunningService, ServiceError};
 use rmcp::transport::TokioChildProcess;
 use rmcp::{RoleClient, ServiceExt};
 use serde_json::{Map, Value};
@@ -130,12 +131,20 @@ pub enum ConnectError {
     },
 }
 
+/// Bound on [`McpBackend::shutdown`]: how long the server gets to exit after its input closes
+/// before it is killed, plus the wait for the kill.
+pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// One connected stdio MCP server.
 ///
-/// Dropping the backend stops the session and kills the child process.
+/// [`McpBackend::shutdown`] stops the server and waits until its process has exited. Dropping
+/// the backend also stops it, but in the background: a process that is exiting may not wait for
+/// that, so call `shutdown` before exit.
 pub struct McpBackend {
     server_id: ServerId,
-    service: RunningService<RoleClient, ()>,
+    peer: Peer<RoleClient>,
+    /// `None` once shut down.
+    service: Mutex<Option<RunningService<RoleClient, ()>>>,
     call_timeout: Duration,
 }
 
@@ -176,20 +185,40 @@ impl McpBackend {
             })?;
         Ok(Self {
             server_id,
-            service,
+            peer: service.peer().clone(),
+            service: Mutex::new(Some(service)),
             call_timeout: config.call_timeout,
         })
     }
 
-    /// True while the session is running and the transport is open.
-    pub fn is_connected(&self) -> bool {
-        !self.service.is_closed() && !self.service.peer().is_transport_closed()
+    fn service(&self) -> MutexGuard<'_, Option<RunningService<RoleClient, ()>>> {
+        self.service.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Stops the session. The child process is killed and later requests fail with
-    /// [`BackendError::NotConnected`].
+    /// True while the session is running and the transport is open.
+    pub fn is_connected(&self) -> bool {
+        self.service()
+            .as_ref()
+            .is_some_and(|service| !service.is_closed())
+            && !self.peer.is_transport_closed()
+    }
+
+    /// Stops the session without waiting. The child process is killed in the background and
+    /// later requests fail with [`BackendError::NotConnected`].
     pub fn disconnect(&self) {
-        self.service.cancellation_token().cancel();
+        if let Some(service) = self.service().as_ref() {
+            service.cancellation_token().cancel();
+        }
+    }
+
+    /// Stops the session and waits, up to [`SHUTDOWN_TIMEOUT`], until the server process has
+    /// exited: its input is closed, and it is killed if it does not exit in time. Later requests
+    /// fail with [`BackendError::NotConnected`].
+    pub async fn shutdown(&self) {
+        let service = self.service().take();
+        if let Some(mut service) = service {
+            let _ = service.close_with_timeout(SHUTDOWN_TIMEOUT).await;
+        }
     }
 
     fn ensure_connected(&self) -> Result<(), BackendError> {
@@ -211,9 +240,17 @@ impl ToolBackend for McpBackend {
         &self.server_id
     }
 
+    fn is_connected(&self) -> bool {
+        McpBackend::is_connected(self)
+    }
+
+    async fn shutdown(&self) {
+        McpBackend::shutdown(self).await;
+    }
+
     async fn list_tools(&self) -> Result<Vec<ToolDescriptor>, BackendError> {
         self.ensure_connected()?;
-        let tools = tokio::time::timeout(self.call_timeout, self.service.peer().list_all_tools())
+        let tools = tokio::time::timeout(self.call_timeout, self.peer.list_all_tools())
             .await
             .map_err(|_| self.timed_out("tools/list"))?
             .map_err(map_service_error)?;
@@ -236,10 +273,7 @@ impl ToolBackend for McpBackend {
         let params = CallToolRequestParams::new(name.to_owned()).with_arguments(arguments);
         // From here the request may have been sent, so every failure has an unknown outcome.
         // Dropping the request future on timeout or cancellation sends `notifications/cancelled`.
-        let request = tokio::time::timeout(
-            self.call_timeout,
-            self.service.peer().call_tool_once(params),
-        );
+        let request = tokio::time::timeout(self.call_timeout, self.peer.call_tool_once(params));
         let response = tokio::select! {
             biased;
             () = cancel.cancelled() => {

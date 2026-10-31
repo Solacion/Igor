@@ -713,6 +713,46 @@ async fn write_with_unknown_outcome_is_not_retried_without_new_approval() -> Tes
 }
 
 #[tokio::test]
+async fn a_server_that_stops_is_reported_once_and_not_called_again() -> TestResult {
+    let order = json!({ "supplier": "x" });
+    let mut h = harness_with(
+        vec![
+            ScriptedTurn::tool_call("u1", "sales__create_order", order),
+            tool_uses(vec![
+                tool_use("u2", "sales__lookup", json!({})),
+                tool_use("u3", "sales__lookup", json!({})),
+            ]),
+            ScriptedTurn::text("The sales server stopped."),
+        ],
+        SessionConfig::default(),
+        vec![("create_order", FakeReply::Crash)],
+        Vec::new(),
+    )?;
+    let operator = Operator::approving([Decision::Approve]);
+    let (outcome, events) = run(&mut h, "order", operator).await;
+    assert_eq!(outcome, TurnOutcome::Completed);
+    h.provider.verify()?;
+    assert_eq!(
+        count(&events, "connection_changed"),
+        1,
+        "{:?}",
+        kinds(&events)
+    );
+    assert!(events.iter().any(|e| matches!(
+        &e.event,
+        RuntimeEvent::ConnectionChanged { server, state: ConnectionState::Failed, .. }
+            if server.as_str() == "sales"
+    )));
+    assert_eq!(count(&events, "tool_call_failed"), 3);
+    assert_eq!(
+        h.sales.calls().len(),
+        1,
+        "nothing reached the server after it stopped"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn unknown_names_and_invalid_arguments_are_refused_before_dispatch() -> TestResult {
     let mut h = harness(vec![
         tool_uses(vec![

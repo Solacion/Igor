@@ -10,7 +10,7 @@
 //! approval and clarification requests through a [`SessionHandle`], which can be used while
 //! [`Session::send_message`] is running.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,7 +24,8 @@ use crate::approval::{
     DispatchPermit, Resolution,
 };
 use crate::events::{
-    ApprovalOutcome, CallFailure, EventEnvelope, LimitKind, RuntimeEvent, TurnOutcome,
+    ApprovalOutcome, CallFailure, ConnectionState, EventEnvelope, LimitKind, RuntimeEvent,
+    TurnOutcome,
 };
 use crate::ids::IdGenerator;
 use crate::limits::ResultSizeLimit;
@@ -250,6 +251,8 @@ pub struct Session {
     gate: ApprovalGate,
     inputs: mpsc::UnboundedReceiver<SessionInput>,
     sequence: u64,
+    /// Servers already reported as stopped, so each is reported once.
+    stopped: HashSet<ServerId>,
 }
 
 impl Session {
@@ -279,6 +282,7 @@ impl Session {
             gate: ApprovalGate::new(),
             inputs,
             sequence: 0,
+            stopped: HashSet::new(),
         };
         (session, SessionHandle { inputs: sender })
     }
@@ -291,6 +295,13 @@ impl Session {
     /// The tool registry the session routes through.
     pub fn registry(&self) -> &ToolRegistry {
         &self.registry
+    }
+
+    /// Stops every server and waits until they have stopped. Call it once, after the last turn.
+    pub async fn shutdown(&self) {
+        for backend in self.backends.values() {
+            backend.shutdown().await;
+        }
     }
 
     /// Runs one turn: sends `text` and works with the model and tools until the model finishes,
@@ -627,6 +638,9 @@ impl Session {
             permit.dispatch(backend.as_ref(), child.clone()),
         )
         .await;
+        if !matches!(result, Ok(Ok(_))) {
+            self.report_if_stopped(backend.as_ref());
+        }
         match result {
             Ok(Ok(output)) => {
                 let is_error = output.is_error;
@@ -659,6 +673,20 @@ impl Session {
                 self.call_failed(call_id, CallFailure::Unknown, message, cancel)
             }
         }
+    }
+
+    /// Emits [`RuntimeEvent::ConnectionChanged`] the first time a failed call finds its server
+    /// stopped.
+    fn report_if_stopped(&mut self, backend: &dyn ToolBackend) {
+        let server = backend.server_id().clone();
+        if backend.is_connected() || !self.stopped.insert(server.clone()) {
+            return;
+        }
+        self.emit(RuntimeEvent::ConnectionChanged {
+            server,
+            state: ConnectionState::Failed,
+            detail: Some("the server stopped; later calls to it are not executed".to_owned()),
+        });
     }
 
     fn call_failed(

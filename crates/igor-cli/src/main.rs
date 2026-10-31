@@ -148,6 +148,7 @@ async fn run() -> Result<ExitCode, CliError> {
         )
     );
     operated?;
+    session.shutdown().await;
     if let Some(Err(error)) = scripted.map(|provider| provider.verify()) {
         eprintln!("igor-cli: the script did not match the run: {error}");
     }

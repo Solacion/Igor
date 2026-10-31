@@ -169,6 +169,16 @@ pub trait ToolBackend: Send + Sync {
     /// Host-assigned identifier of this server.
     fn server_id(&self) -> &ServerId;
 
+    /// True while the server can take calls. A backend that cannot tell returns `true`; the
+    /// session uses this to report a server that stopped.
+    fn is_connected(&self) -> bool {
+        true
+    }
+
+    /// Stops the server and waits until it has stopped. Called once when the host shuts down;
+    /// later calls fail with [`BackendError::NotConnected`]. The default does nothing.
+    async fn shutdown(&self) {}
+
     /// Lists the tools the server currently exposes.
     async fn list_tools(&self) -> Result<Vec<ToolDescriptor>, BackendError>;
 

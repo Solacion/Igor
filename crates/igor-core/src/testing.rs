@@ -11,6 +11,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::SystemTime;
 
@@ -281,6 +282,10 @@ pub enum FakeReply {
     /// Wait until cancelled, then fail with [`BackendError::OutcomeUnknown`], like a request
     /// that reached a server which never answered.
     Hang,
+    /// Record the call, then stop the backend and fail with [`BackendError::OutcomeUnknown`],
+    /// like a server that exited after receiving the request. Later calls fail with
+    /// [`BackendError::NotConnected`] and are not recorded.
+    Crash,
 }
 
 /// One call received by a [`RecordingBackend`].
@@ -302,6 +307,7 @@ pub struct RecordingBackend {
     tools: Vec<ToolDescriptor>,
     replies: HashMap<String, FakeReply>,
     calls: Mutex<Vec<RecordedCall>>,
+    connected: AtomicBool,
 }
 
 impl RecordingBackend {
@@ -312,6 +318,7 @@ impl RecordingBackend {
             tools: Vec::new(),
             replies: HashMap::new(),
             calls: Mutex::new(Vec::new()),
+            connected: AtomicBool::new(true),
         }
     }
 
@@ -342,6 +349,10 @@ impl ToolBackend for RecordingBackend {
         &self.server
     }
 
+    fn is_connected(&self) -> bool {
+        self.connected.load(Ordering::SeqCst)
+    }
+
     async fn list_tools(&self) -> Result<Vec<ToolDescriptor>, BackendError> {
         Ok(self.tools.clone())
     }
@@ -355,6 +366,9 @@ impl ToolBackend for RecordingBackend {
         if cancel.is_cancelled() {
             return Err(BackendError::CancelledBeforeSend);
         }
+        if !self.is_connected() {
+            return Err(BackendError::NotConnected);
+        }
         self.calls
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -365,6 +379,10 @@ impl ToolBackend for RecordingBackend {
         match self.replies.get(name) {
             Some(FakeReply::Output(output)) => Ok(output.clone()),
             Some(FakeReply::Error(error)) => Err(error.clone()),
+            Some(FakeReply::Crash) => {
+                self.connected.store(false, Ordering::SeqCst);
+                Err(BackendError::OutcomeUnknown("server exited".to_owned()))
+            }
             Some(FakeReply::Hang) => {
                 cancel.cancelled().await;
                 Err(BackendError::OutcomeUnknown(

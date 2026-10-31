@@ -63,6 +63,20 @@ struct Run {
 }
 
 impl Run {
+    /// Fails if a fixture server started for this run is still running after `igor-cli` exited.
+    fn assert_no_server_left_running(&self) -> TestResult {
+        let output = Command::new("pgrep")
+            .arg("-f")
+            .arg(self.dir.display().to_string())
+            .output()?;
+        let pids = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            pids.trim().is_empty(),
+            "server processes left running: {pids}"
+        );
+        Ok(())
+    }
+
     /// Calls logged by server `id`, as `(tool, arguments)`.
     fn calls(&self, id: &str) -> BoxResult<Vec<(String, Value)>> {
         let path = self.dir.join(format!("{id}.jsonl"));
@@ -222,6 +236,7 @@ fn same_tool_name_on_two_servers_reaches_only_the_named_server() -> TestResult {
     assert!(run.output.status.success(), "{}", run.stdout);
     assert_eq!(run.calls("south")?.len(), 1);
     assert!(run.calls("north")?.is_empty(), "north must not be called");
+    run.assert_no_server_left_running()?;
     Ok(())
 }
 
@@ -254,6 +269,7 @@ fn approval_binds_the_exact_arguments() -> TestResult {
     let calls = run.calls("sales")?;
     assert_eq!(calls.len(), 1, "only the approved proposal runs");
     assert_eq!(calls[0].1["lines"][0]["quantity"], json!(14));
+    run.assert_no_server_left_running()?;
     Ok(())
 }
 
@@ -278,6 +294,7 @@ fn unclassified_and_denied_tools_never_reach_the_server() -> TestResult {
     assert_eq!(run.stdout.matches("refused").count(), 2, "{}", run.stdout);
     assert!(!run.stdout.contains("Approval required"));
     assert!(run.calls("sales")?.is_empty());
+    run.assert_no_server_left_running()?;
     Ok(())
 }
 
@@ -306,6 +323,7 @@ fn hung_write_is_outcome_unknown_and_never_retried() -> TestResult {
         1,
         "a write with unknown outcome must not be retried"
     );
+    run.assert_no_server_left_running()?;
     Ok(())
 }
 
@@ -332,6 +350,12 @@ fn server_crash_after_a_write_is_reported_and_later_calls_are_not_executed() -> 
         "{}",
         run.stdout
     );
+    assert_eq!(
+        run.stdout.matches("[server notes: Failed]").count(),
+        1,
+        "{}",
+        run.stdout
+    );
     assert!(
         run.stdout.contains("[call-2] failed, not executed"),
         "{}",
@@ -347,6 +371,7 @@ fn server_crash_after_a_write_is_reported_and_later_calls_are_not_executed() -> 
         ["save_note"],
         "the write was recorded once; nothing after the crash"
     );
+    run.assert_no_server_left_running()?;
     Ok(())
 }
 
@@ -383,5 +408,6 @@ fn an_unavailable_server_is_reported_and_the_others_still_work() -> TestResult {
     );
     assert!(run.stdout.contains("[call-1] refused"), "{}", run.stdout);
     assert_eq!(run.calls("sales")?.len(), 1);
+    run.assert_no_server_left_running()?;
     Ok(())
 }
