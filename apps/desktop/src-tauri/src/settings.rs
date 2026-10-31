@@ -132,6 +132,7 @@ struct Connection {
     status: Status,
     tools: Vec<ToolView>,
     descriptors: Vec<ToolDescriptor>,
+    tool_list_version: u64,
 }
 
 impl Connection {
@@ -141,6 +142,7 @@ impl Connection {
             status,
             tools: Vec::new(),
             descriptors: Vec::new(),
+            tool_list_version: 0,
         }
     }
 }
@@ -211,6 +213,7 @@ pub struct Settings {
     connections: Mutex<BTreeMap<String, Connection>>,
     /// Serialises edits, so two saves cannot interleave read and write.
     edits: Mutex<()>,
+    tool_lists: Mutex<()>,
     /// Retain native handles even after a connection/lease drops and requests background stop.
     /// Exit must still await their transport/process cleanup before the runtime disappears.
     owned: Mutex<Vec<Arc<McpBackend>>>,
@@ -225,6 +228,7 @@ impl Settings {
             path,
             connections: Mutex::new(BTreeMap::new()),
             edits: Mutex::new(()),
+            tool_lists: Mutex::new(()),
             owned: Mutex::new(Vec::new()),
             starts: RwLock::new(()),
             closing: AtomicBool::new(false),
@@ -275,7 +279,64 @@ impl Settings {
         ConfigDocument::open(path).map_err(|error| CommandError::config(&error, None))
     }
 
+    /// Refresh changed discovery without replacing the process or the operator's permissions.
+    /// A concurrent remove/reconnect wins over a late listing result.
+    pub async fn refresh_tools(&self, stale: &[ServerId]) -> Result<(), CommandError> {
+        let _refresh = self.tool_lists.lock().await;
+        if self.closing.load(Ordering::Acquire) {
+            return Err(CommandError::message("Desktop is closing"));
+        }
+        let candidates: Vec<_> = self
+            .connections
+            .lock()
+            .await
+            .iter()
+            .filter_map(|(id, connection)| {
+                let backend = connection.backend.as_ref()?;
+                (backend.is_connected()
+                    && (connection.tool_list_version != backend.tool_list_version()
+                        || matches!(connection.status, Status::Failed { .. })
+                        || stale.iter().any(|server| server.as_str() == id)))
+                .then(|| (id.clone(), backend.clone()))
+            })
+            .collect();
+        for (id, backend) in candidates {
+            // If another notification arrives during listing, keep this generation stale and
+            // omit its tools until a stable re-list succeeds on a later read.
+            let version = backend.tool_list_version();
+            let result =
+                tokio::time::timeout(std::time::Duration::from_secs(10), backend.list_tools())
+                    .await;
+            let mut connections = self.connections.lock().await;
+            let Some(connection) = connections.get_mut(&id).filter(|connection| {
+                connection
+                    .backend
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &backend))
+            }) else {
+                continue;
+            };
+            match result {
+                Ok(Ok(tools)) if version == backend.tool_list_version() => {
+                    connection.tools = tools.iter().map(ToolView::from).collect();
+                    connection.descriptors = tools;
+                    connection.tool_list_version = version;
+                    connection.status = Status::Connected;
+                }
+                _ => {
+                    connection.tools.clear();
+                    connection.descriptors.clear();
+                    connection.status = Status::Failed {
+                        detail: "Could not refresh the changed tool list; retry or reconnect this server.".into(),
+                    };
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn snapshot(&self) -> Result<Snapshot, CommandError> {
+        self.refresh_tools(&[]).await?;
         let _edit = self.edits.lock().await;
         let doc = self.document()?;
         let config = doc
@@ -306,7 +367,8 @@ impl Settings {
             {
                 (Arc::as_ptr(backend) as usize).hash(&mut hash);
                 backend.is_connected().hash(&mut hash);
-                if backend.is_connected() {
+                connection.tool_list_version.hash(&mut hash);
+                if backend.is_connected() && matches!(connection.status, Status::Connected) {
                     descriptors.extend(connection.descriptors.clone());
                     backends.insert(server.id.clone(), backend.clone() as Arc<dyn ToolBackend>);
                     servers.push(backend.clone());
@@ -325,6 +387,7 @@ impl Settings {
 
     /// The current settings.
     pub async fn view(&self) -> Result<SettingsView, CommandError> {
+        self.refresh_tools(&[]).await?;
         let doc = self.document()?;
         let entries = doc
             .servers()
@@ -472,6 +535,7 @@ impl Settings {
             .insert(id.clone(), Connection::new(Status::Starting));
         let connection = match self.start(server).await {
             Ok((backend, tools)) => Connection {
+                tool_list_version: backend.tool_list_version(),
                 backend: Some(Arc::new(SharedBackend(backend))),
                 status: Status::Connected,
                 tools: tools.iter().map(ToolView::from).collect(),

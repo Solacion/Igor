@@ -58,6 +58,16 @@ it('keeps export disabled during a turn', async () => {
 })
 
 
+it('renders ToolsChanged literally and refreshes Settings immediately', async () => {
+  const mock = backend(); const wrapper = mount(ConversationView); await start(wrapper)
+  const before = mock.calls.filter(call => call.command === 'settings_view').length
+  mock.emit({ event: 'tools_changed', server: '<sales>' }); await flushPromises()
+  expect(wrapper.text()).toContain('<sales> changed its tools; Igor refreshed them before continuing')
+  expect(wrapper.find('sales').exists()).toBe(false)
+  expect(mock.calls.filter(call => call.command === 'settings_view')).toHaveLength(before + 1)
+  wrapper.unmount()
+})
+
 it('shows missing environment variable and prevents sending; links empty servers to Settings', async () => {
   const mock = backend({ unavailable: 'Environment variable IGOR_API_KEY is missing.' }); const wrapper = mount(ConversationView)
   await start(wrapper)
