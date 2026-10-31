@@ -127,6 +127,17 @@ pub enum Problem {
         "secret reference must name an environment variable matching [A-Z_][A-Z0-9_]* (value not shown)"
     )]
     InvalidSecretReference,
+    /// A Keychain reference does not name a valid item. The value is not shown.
+    #[error(
+        "Keychain reference must be 1 to 64 letters, digits, '.', '_' or '-' (value not shown)"
+    )]
+    InvalidKeychainReference,
+    /// A Keychain reference is used where only environment variables are supported.
+    #[error("Keychain references are supported only for provider API keys")]
+    KeychainNotAllowed,
+    /// A provider entry names both an environment variable and a Keychain item for its key.
+    #[error("give the API key either as an environment variable or as a Keychain item, not both")]
+    TwoKeySources,
     /// An environment variable name is malformed.
     #[error("invalid environment variable name {0:?}: expected [A-Z_][A-Z0-9_]*")]
     InvalidEnvName(String),

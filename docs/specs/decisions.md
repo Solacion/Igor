@@ -22,7 +22,7 @@
 | Model providers | Anthropic Claude (remote) and LM Studio (local), both behind the provider abstraction. |
 | Demo default models | Claude: `claude-haiku-5-5` (cheapest). LM Studio: `qwen/qwen3-vl-8b` (8B, fast, native tool calling). |
 | MCP transport and library | stdio only for the demo. [`rmcp`](https://crates.io/crates/rmcp), the official Rust MCP SDK (Apache-2.0, compatible with GPL-3.0-only). |
-| Credentials | Environment-variable secret references only for now. macOS Keychain is deferred. |
+| Credentials | Secret references only, never values in the file: environment variables, or the macOS Keychain for provider API keys pasted in Settings. |
 | Session persistence | In memory only, plus a redacted activity export. |
 | Headless harness | An `igor-cli` harness proves the core API before the desktop and is the fallback demo. |
 | Core and desktop stack | Rust core; Tauri/Vue desktop UI |
@@ -37,15 +37,14 @@
 
 ## Cut order if time runs short
 
-Items 2 to 4 are already outside the accepted demo scope; they are listed so they stay out if scope grows.
+Items 2 and 3 are already outside the accepted demo scope; they are listed so they stay out if scope grows.
 
 1. Issue and pull request templates
-2. macOS Keychain
-3. Persistence
-4. HTTP transport
-5. Crash auto-restart
-6. LM Studio polish
-7. Desktop polish (fall back to the `igor-cli` demo)
+2. Persistence
+3. HTTP transport
+4. Crash auto-restart
+5. LM Studio polish
+6. Desktop polish (fall back to the `igor-cli` demo)
 
 ## Open questions
 

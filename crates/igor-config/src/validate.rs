@@ -8,6 +8,7 @@ use std::time::Duration;
 use igor_core::policy::Classification;
 use igor_core::tools::ServerId;
 
+use crate::keychain::is_keychain_name;
 use crate::raw::{RawConfig, RawLimits, RawProvider, RawSecret, RawServer};
 use crate::secret::{SecretRef, is_env_name};
 use crate::{
@@ -72,7 +73,7 @@ fn validate(raw: RawConfig, base_dir: &Path) -> Result<Config, Invalid> {
     let providers = providers(raw.providers)?;
     let provider_keys: BTreeSet<&str> = providers
         .iter()
-        .filter_map(|p| p.api_key.as_ref().map(SecretRef::env_var))
+        .filter_map(|p| p.api_key.as_ref().and_then(SecretRef::env_var))
         .collect();
     let servers = servers(raw.servers, base_dir, &provider_keys, &limits)?;
     let permissions = permissions(raw.permissions, &servers)?;
@@ -220,6 +221,10 @@ fn secret_ref(raw: RawSecret, field: impl FnOnce() -> String) -> Result<SecretRe
         RawSecret::Literal => Err((field(), Problem::LiteralSecret)),
         RawSecret::Env(name) if is_env_name(&name) => Ok(SecretRef::from_validated_env(name)),
         RawSecret::Env(_) => Err((field(), Problem::InvalidSecretReference)),
+        RawSecret::Keychain(name) if is_keychain_name(&name) => {
+            Ok(SecretRef::from_validated_keychain(name))
+        }
+        RawSecret::Keychain(_) => Err((field(), Problem::InvalidKeychainReference)),
     }
 }
 
@@ -289,10 +294,14 @@ fn server_env(
             if !is_env_name(&name) {
                 return Err((field(&name), Problem::InvalidEnvName(name)));
             }
+            if matches!(secret, RawSecret::Keychain(_)) {
+                return Err((field(&name), Problem::KeychainNotAllowed));
+            }
             let reference = secret_ref(secret, || field(&name))?;
-            if provider_keys.contains(reference.env_var()) {
-                let var = reference.env_var().to_owned();
-                return Err((field(&name), Problem::ExposesProviderKey(var)));
+            if let Some(var) = reference.env_var()
+                && provider_keys.contains(var)
+            {
+                return Err((field(&name), Problem::ExposesProviderKey(var.to_owned())));
             }
             Ok((name, reference))
         })
