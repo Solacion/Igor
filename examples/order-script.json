@@ -15,7 +15,7 @@
           "input": {
             "supplier_id": "supplier-x",
             "delivery_date": "2026-07-15",
-            "lines": [{ "sku": "COLA-330", "quantity": 12, "rationale": "Hot week ahead." }]
+            "lines": [{ "sku": "COLA-330-24", "quantity": 12, "rationale": "Sales rising: 59 sold last week, 18 on hand." }]
           } }
       ]
     },

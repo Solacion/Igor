@@ -15,7 +15,7 @@ cargo build -p igor-fixture-server -p igor-cli
 
 The scripted provider replays model turns from [`examples/order-script.json`](../../examples/order-script.json), so the run needs no network or model. It reads stock and sales from the `sales` fixture server, then proposes `create_draft_order`. Answer `y` to approve it. Any other answer, or end of input, denies it and the call is never sent.
 
-The `weather` server in the sample configuration is reported as unavailable until its fixture is added ([#50](https://github.com/Solacion/Igor/issues/50)). The run continues without it.
+A server that fails to start is reported as unavailable, and the run continues without it.
 
 ## Options
 

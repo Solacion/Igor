@@ -16,6 +16,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["io-std", "macros", "rt-multi-thread", "time", "fs", "sync"] }
 
 [dev-dependencies]
+jsonschema.workspace = true
 rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 
 [lints]

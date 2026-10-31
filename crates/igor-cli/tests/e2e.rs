@@ -162,6 +162,16 @@ fn approved_draft_order_reaches_the_server_once() -> TestResult {
         ]
     );
     assert_eq!(run.calls[2]["arguments"]["lines"][0]["quantity"], json!(12));
+    // Every read matched an exact recording: the example script stays inside the fixture data.
+    // Any draft order is accepted, so the write matches the fallback.
+    for call in &run.calls {
+        let expected = if call["tool"] == "create_draft_order" {
+            "fallback"
+        } else {
+            "exact"
+        };
+        assert_eq!(call["match"], json!(expected), "{call}");
+    }
     assert!(
         run.stdout.contains("Approval required [approval-1]"),
         "{}",

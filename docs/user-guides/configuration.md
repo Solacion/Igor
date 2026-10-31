@@ -14,7 +14,7 @@ Relative paths in the file resolve against the file's directory, made absolute w
 
 ## Sample
 
-[`examples/igor.toml`](https://github.com/Solacion/Igor/blob/main/examples/igor.toml) configures the example scenario. It has two fixture servers, `sales` and `weather`, and needs no credentials to load. A test loads it in CI. The weather fixture file is added by [#50](https://github.com/Solacion/Igor/issues/50); until then the `weather` server exits at startup.
+[`examples/igor.toml`](https://github.com/Solacion/Igor/blob/main/examples/igor.toml) configures the example scenario. It has one fixture server, `sales`, and needs no credentials to load. A test loads it in CI.
 
 ```toml
 [[providers]]
@@ -81,7 +81,7 @@ Host configuration is the only source of tool classification. Under `[permission
 - `write`: the tool runs only after you approve the exact call.
 - `denied`: the tool never runs.
 
-A tool that is not listed is unclassified. IGOR hides it from the model and refuses any call to it. A permission applies only to its own server: `sales/x` does not classify `weather/x`. A permission for an undeclared server is an error.
+A tool that is not listed is unclassified. IGOR hides it from the model and refuses any call to it. A permission applies only to its own server: `sales/x` does not classify `inventory/x`. A permission for an undeclared server is an error.
 
 ## Limits
 

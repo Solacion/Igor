@@ -95,6 +95,15 @@ Tests use the log as the server-side record of what was invoked, for example "no
 
 | File | Contract | Covers |
 | --- | --- | --- |
-| `crates/igor-fixture-server/fixtures/sales.json` | [Sales and stock](sales.md) | `supplier-x`: sales 2026-07-06 to 2026-07-12, stock on 2026-07-13; `unknown_supplier` for `supplier-unknown`; `no_data` for anything else; any `create_draft_order` returns `draft-0001` |
+| `crates/igor-fixture-server/fixtures/sales.json` | [Sales and stock](sales.md) | `supplier-x`: sales 2026-07-06 to 2026-07-12, stock on 2026-07-13; `supplier-z`: stock on 2026-07-13 with a prompt-injection attempt in a product `name`; `unknown_supplier` for `supplier-unknown`; `no_data` for anything else; any `create_draft_order` returns `draft-0001` |
 
-The weather fixture set and the contract check follow in #50.
+Arguments match exactly, so a period not listed gets the missing-data error even inside the covered range.
+
+## Contract check
+
+`cargo test -p igor-fixture-server --test contracts` checks every file in `crates/igor-fixture-server/fixtures/` against the contract of the same name in this directory. It runs in CI with the other tests. It fails when:
+
+- a tool definition differs from the contract, or a tool is missing or extra;
+- recorded arguments do not satisfy the tool's `inputSchema`;
+- a success result does not satisfy the `outputSchema`, or its text block is not the same JSON as `structuredContent`;
+- an error result has `structuredContent`, or an error code that is not in the tool's error table.

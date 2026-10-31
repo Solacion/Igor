@@ -25,7 +25,7 @@ transport = "stdio"
 command = "./server"
 
 [[servers]]
-id = "weather"
+id = "inventory"
 transport = "stdio"
 command = "./server"
 "#;
@@ -50,7 +50,7 @@ fn sample_config_loads_and_needs_no_credentials() -> TestResult {
     let config = Config::load(&sample_path())?;
 
     let ids: Vec<&str> = config.servers().iter().map(|s| s.id.as_str()).collect();
-    assert_eq!(ids, ["sales", "weather"]);
+    assert_eq!(ids, ["sales"]);
     for server in config.servers() {
         assert!(server.command.ends_with("target/debug/igor-fixture-server"));
         assert!(server.env.is_empty(), "fixture servers need no secrets");
@@ -59,10 +59,6 @@ fn sample_config_loads_and_needs_no_credentials() -> TestResult {
     assert_eq!(
         permissions.classify(&tool("sales", "create_draft_order")?),
         Classification::Write
-    );
-    assert_eq!(
-        permissions.classify(&tool("weather", "get_forecast")?),
-        Classification::Read
     );
     for name in ["get_stock_levels", "get_sales_history"] {
         assert_eq!(
@@ -150,10 +146,10 @@ fn explicit_values_override_defaults() -> TestResult {
         sales.env.get("SALES_TOKEN").map(|r| r.env_var()),
         Some("IGOR_SALES_TOKEN")
     );
-    let weather = config
-        .server(&ServerId::new("weather")?)
-        .ok_or("weather missing")?;
-    assert_eq!(weather.call_timeout, Duration::from_millis(1500));
+    let inventory = config
+        .server(&ServerId::new("inventory")?)
+        .ok_or("inventory missing")?;
+    assert_eq!(inventory.call_timeout, Duration::from_millis(1500));
     Ok(())
 }
 
@@ -166,7 +162,7 @@ fn permission_is_scoped_to_its_server() -> TestResult {
         Classification::Write
     );
     assert_eq!(
-        permissions.classify(&tool("weather", "x")?),
+        permissions.classify(&tool("inventory", "x")?),
         Classification::Unclassified
     );
     assert_eq!(
@@ -193,17 +189,17 @@ fn invalid_values_name_field_and_problem() -> TestResult {
     let cases: Vec<InvalidCase> = vec![
         (
             "duplicate server id",
-            ("id = \"weather\"", "id = \"sales\""),
+            ("id = \"inventory\"", "id = \"sales\""),
             "",
             "servers[1].id",
             Problem::DuplicateServerId(ServerId::new("sales")?),
         ),
         (
             "invalid server id",
-            ("id = \"weather\"", "id = \"Weather\""),
+            ("id = \"inventory\"", "id = \"Inventory\""),
             "",
             "servers[1].id",
-            Problem::InvalidServerId(InvalidServerId("Weather".into())),
+            Problem::InvalidServerId(InvalidServerId("Inventory".into())),
         ),
         (
             "unknown provider kind",
@@ -277,8 +273,8 @@ fn invalid_values_name_field_and_problem() -> TestResult {
         (
             "unsupported transport",
             (
-                "transport = \"stdio\"\ncommand = \"./server\"\n\n[[servers]]\nid = \"weather\"",
-                "transport = \"http\"\ncommand = \"./server\"\n\n[[servers]]\nid = \"weather\"",
+                "transport = \"stdio\"\ncommand = \"./server\"\n\n[[servers]]\nid = \"inventory\"",
+                "transport = \"http\"\ncommand = \"./server\"\n\n[[servers]]\nid = \"inventory\"",
             ),
             "",
             "servers[0].transport",

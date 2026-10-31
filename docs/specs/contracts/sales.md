@@ -493,7 +493,7 @@ Arguments:
     {
       "sku": "WATER-500-24",
       "quantity": 20,
-      "rationale": "Sales rising with hot weather; 22 on hand against 15 a day."
+      "rationale": "Sales rising; 22 on hand against 15 a day."
     }
   ],
   "notes": "Check delivery slot."

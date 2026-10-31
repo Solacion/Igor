@@ -5,7 +5,7 @@
 - IGOR is a standalone, embeddable, local-first runtime in its own open-source repository.
 - Support multiple MCP servers, a model-provider abstraction and permissions/approvals.
 - Keep domain MCP servers, such as a future POS server, independent of IGOR.
-- Demo the generic runtime for the interview; a purchasing scenario using sales and weather data is an illustrative example only.
+- Demo the generic runtime for the interview; a purchasing scenario using sales and stock data is an illustrative example only.
 - Keep specifications and user guides under `/docs`, with a root `README.md`.
 - Track agreed work in [GitHub Issues](https://github.com/Solacion/Igor/issues) as epics, features, user stories and tasks.
 
@@ -13,9 +13,9 @@
 
 | Decision | Accepted answer |
 | --- | --- |
-| Demo scope | Generic runtime capabilities. The sales-and-weather purchasing scenario is one example, not a requirement. |
+| Demo scope | Generic runtime capabilities. IGOR connects to whichever MCP servers the operator configures. The sales-and-stock purchasing scenario is one example, not a requirement. Weather data is not part of the project. |
 | Interview deadline | Tuesday 3 November 2026. |
-| Example data | Realistic sample data served by fixture-backed MCP servers. No live retail or weather service is required. |
+| Example data | Realistic sample data served by fixture-backed MCP servers. No live retail service is required. |
 | Write boundary | IGOR may call write-classified tools on MCP servers that support them, only after explicit approval. The demo's fixture write tool, `create_draft_order`, creates a draft only and changes no external system. |
 | Unclassified tools | Denied by default. Host configuration is the only source of permission classification; MCP tool annotations are untrusted hints that can only tighten it. |
 | Clarification | When required information is missing or uncertain (for example the order date or period, supplier or quantities), the agent asks the operator instead of assuming. Dates are operator input, not fixed in fixtures. |

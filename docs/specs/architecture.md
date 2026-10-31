@@ -12,7 +12,7 @@ Status: stack agreed (Rust core, Tauri/Vue UI); no implementation exists.
 | MCP client | Connect to multiple servers, discover tools and route validated calls | [`rmcp`](https://crates.io/crates/rmcp); stdio transport for the demo |
 | `igor-cli` | Headless harness over the same session API and events; fallback demo | Rust binary |
 | Optional API | Expose the same runtime to other clients | HTTP; deferred from initial demo |
-| Example MCP servers | Serve sample sales/stock and weather data for the example scenario | Fixture-backed MCP servers; not part of the runtime |
+| Example MCP server | Serve sample sales and stock data for the example scenario, standing in for a POS server | Fixture-backed MCP server; not part of the runtime |
 
 ## Dependency boundaries
 
