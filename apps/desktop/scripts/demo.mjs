@@ -48,18 +48,30 @@ export function buildFixture(root, run = spawnSync) {
 
 export async function prepareDemo(root = repository, executable = buildFixture(root), temporaryRoot = tmpdir()) {
   const source = await readFile(join(root, 'examples/igor.toml'), 'utf8')
-  const content = absoluteConfig(source, root, executable)
+  const rewritten = absoluteConfig(source, root, executable)
+  // Start the walkthrough with providers only; Settings performs every server add and grant.
+  const firstServer = rewritten.indexOf('[[servers]]')
+  const limits = rewritten.indexOf('[limits]', firstServer)
+  const content = rewritten.slice(0, firstServer) + (limits < 0 ? '' : rewritten.slice(limits))
+  const servers = ['notes', 'sales', 'supplier'].map(id => ({
+    id, command: executable,
+    args: ['--fixture', join(root, id === 'notes' ? 'apps/desktop/fixtures/notes.json' : `crates/igor-fixture-server/fixtures/${id}.json`)],
+  }))
   await access(executable)
-  for (const fixture of ['sales', 'supplier']) await access(join(root, `crates/igor-fixture-server/fixtures/${fixture}.json`))
+  for (const server of servers) await access(server.args[1])
   const location = relative(await realpath(root), await realpath(temporaryRoot))
   if (location === '' || (location !== '..' && !location.startsWith(`..${sep}`) && !isAbsolute(location))) {
     throw new Error('The demo temporary directory must be outside the repository.')
   }
   const directory = await mkdtemp(join(temporaryRoot, 'igor-desktop-demo-'))
   const config = join(directory, 'igor.toml')
-  try { await writeFile(config, content, { mode: 0o600, flag: 'wx' }) }
+  const setup = join(directory, 'servers.json')
+  try {
+    await writeFile(config, content, { mode: 0o600, flag: 'wx' })
+    await writeFile(setup, JSON.stringify(servers, null, 2) + '\n', { mode: 0o600, flag: 'wx' })
+  }
   catch (error) { await rm(directory, { recursive: true, force: true }); throw error }
-  return { config, directory, cleanup: () => rm(directory, { recursive: true, force: true }) }
+  return { config, directory, servers, setup, cleanup: () => rm(directory, { recursive: true, force: true }) }
 }
 
 export async function launchDemo({ root = repository, demo, run = spawn, env = process.env }) {
@@ -85,6 +97,11 @@ async function main() {
   if (process.argv.slice(2).some(arg => arg !== '--prepare-only')) throw new Error('Usage: desktop:demo [--prepare-only]')
   const demo = await prepareDemo()
   console.log(`Disposable demo config: ${demo.config}`)
+  console.log(`Server setup reference: ${demo.setup}`)
+  console.log('In Settings, add these three servers. Each argument is a separate line; do not add shell quotes.')
+  for (const server of demo.servers) {
+    console.log(`Server id: ${server.id}\nProgram: ${server.command}\nArguments (one per line):\n${server.args.join('\n')}`)
+  }
   console.log('Choose lm_studio (qwen/qwen3-vl-8b loaded in LM Studio), or claude with ANTHROPIC_API_KEY set before launch.')
   if (process.argv.includes('--prepare-only')) {
     console.log('Preparation only: no app or provider was started. Remove this temporary directory when finished.')

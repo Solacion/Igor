@@ -7,12 +7,14 @@ import { join, resolve } from 'node:path'
 import { absoluteConfig, buildFixture, prepareDemo, launchDemo, repository } from './demo.mjs'
 
 const sample = await readFile(join(repository, 'examples/igor.toml'), 'utf8')
-test('copies the real two-server example with absolute paths, preserving providers/permissions and source', async () => {
+test('prepares provider-only setup plus three absolute server entries without modifying the source', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'igor-launcher-test-'))
   try {
     const root = join(dir, 'repo with spaces and "quotes"')
     await mkdir(join(root, 'examples'), { recursive: true })
     await mkdir(join(root, 'crates/igor-fixture-server/fixtures'), { recursive: true })
+    await mkdir(join(root, 'apps/desktop/fixtures'), { recursive: true })
+    await writeFile(join(root, 'apps/desktop/fixtures/notes.json'), await readFile(join(repository, 'apps/desktop/fixtures/notes.json')))
     const executable = join(root, 'fixture executable')
     await writeFile(executable, '')
     await writeFile(join(root, 'examples/igor.toml'), sample)
@@ -21,11 +23,12 @@ test('copies the real two-server example with absolute paths, preserving provide
     const demo = await prepareDemo(root, executable, dir)
     assert.ok(!demo.config.startsWith(root))
     const copied = await readFile(demo.config, 'utf8')
-    const programs = copied.match(/^command = .+$/gm)
-    assert.equal(programs.length, 2)
-    assert.ok(programs.every(line => JSON.parse(line.slice('command = '.length)) === executable))
-    for (const line of copied.match(/^args = .+$/gm)) assert.ok(JSON.parse(line.slice('args = '.length))[1].startsWith(root))
-    assert.ok(copied.includes('[permissions.supplier]'))
+    assert.ok(!copied.includes('[[servers]]'))
+    assert.ok(!copied.includes('[permissions.'))
+    const entries = JSON.parse(await readFile(demo.setup, 'utf8'))
+    assert.deepEqual(entries.map(entry => entry.id), ['notes', 'sales', 'supplier'])
+    assert.ok(entries.every(entry => entry.command === executable && entry.args.length === 2 && entry.args[0] === '--fixture' && entry.args[1].startsWith(root)))
+    assert.equal(entries[0].args[1], join(root, 'apps/desktop/fixtures/notes.json'))
     assert.ok(copied.includes('model = "qwen/qwen3-vl-8b"'))
     assert.ok(copied.includes('api_key = { env = "ANTHROPIC_API_KEY" }'))
     // Simulate Settings editing the copy; the repository source stays byte-for-byte unchanged.
@@ -57,4 +60,15 @@ test('launches with the disposable config, forwards exit status, and cleans up o
     else { child.emit('exit', 7, null); assert.equal(await task, 7) }
     assert.ok(cleaned)
   }
+})
+
+test('notes supplies the documented fixture dates and restock policy without writes', async () => {
+  const fixture = JSON.parse(await readFile(join(repository, 'apps/desktop/fixtures/notes.json'), 'utf8'))
+  assert.deepEqual(fixture.tools.map(tool => tool.name), ['list_notes'])
+  assert.equal(fixture.tools[0].annotations.readOnlyHint, true)
+  const call = fixture.calls[0]
+  assert.deepEqual(call.arguments, {})
+  assert.deepEqual(JSON.parse(call.result.content[0].text), call.result.structuredContent)
+  const text = JSON.stringify(call.result.structuredContent)
+  for (const fact of ['supplier-x', '2026-07-13', '2026-07-06', '2026-07-12', '2026-07-15', 'previous seven days', 'rounding up', 'Draft only']) assert.ok(text.includes(fact))
 })
