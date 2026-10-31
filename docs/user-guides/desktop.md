@@ -208,4 +208,4 @@ If the model answers after unsuccessful tool calls, the desktop shows “The ans
 
 ### Models without tool calling
 
-When a provider reports that its model cannot call tools, the conversation says “&lt;model&gt; can't call tools. Choose a model with tool calling in Settings → Model providers.” Open **Settings → Model providers**, choose a model with tool calling, then send again. Existing messages remain visible.
+When a provider reports that its model cannot call tools, the conversation shows the core diagnostic as plain text, followed by “Choose a model with tool calling in Settings → Model providers.” This is a distinct failed state. Select the **Settings → Model providers** link in that message, choose a model with tool calling, then send again. Existing messages remain visible.

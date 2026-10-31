@@ -284,13 +284,17 @@ for (const transport of ['return', 'event']) {
   it(`explains unsupported tool calling through the ${transport} using literal session model text`, async () => {
     const model = '<img src=x onerror=alert(1)>'
     let done: (value: unknown) => void = () => {}
-    const outcome = { outcome: 'tools_unsupported', message: 'provider diagnostic' }
+    const outcome = { outcome: 'tools_unsupported', message: `model "${model}" cannot call tools: LM Studio does not list tool use for it` }
     const mock = backend({ model, send: () => transport === 'return' ? outcome : new Promise(resolve => { done = resolve }) })
     const wrapper = mount(ConversationView); await start(wrapper)
     if (transport === 'event') {
       mock.emit({ event: 'turn_finished', outcome }); await flushPromises()
     }
-    expect(wrapper.text()).toContain(`${model} can't call tools. Choose a model with tool calling in Settings → Model providers.`)
+    expect(wrapper.text()).toContain(`${outcome.message}. Choose a model with tool calling in Settings → Model providers.`)
+    expect(wrapper.get('.turn-status').attributes('data-state')).toBe('tools_unsupported')
+    expect(wrapper.get('.turn-status').attributes('role')).toBe('alert')
+    await wrapper.get('.turn-status a').trigger('click')
+    expect(wrapper.emitted('settings')?.at(-1)).toEqual(['model-providers'])
     expect(wrapper.text()).not.toContain('provider diagnostic')
     expect(wrapper.text()).not.toContain('Not a full answer')
     expect(wrapper.text()).not.toContain('Turn failed')
@@ -298,3 +302,16 @@ for (const transport of ['return', 'event']) {
     done(outcome); await flushPromises(); wrapper.unmount()
   })
 }
+
+it('keeps a failed TurnFinished on the generic failure path', async () => {
+  let done: (value: unknown) => void = () => {}
+  const mock = backend({ send: () => new Promise(resolve => { done = resolve }) })
+  const wrapper = mount(ConversationView); await start(wrapper)
+  const outcome = { outcome: 'failed', message: '<b>Connection failed</b>' }
+  mock.emit({ event: 'turn_finished', outcome }); await flushPromises()
+  expect(wrapper.get('.turn-status').text()).toBe('Turn failed: <b>Connection failed</b>')
+  expect(wrapper.get('.turn-status').find('a').exists()).toBe(false)
+  expect(wrapper.get('.turn-status').find('b').exists()).toBe(false)
+  expect(wrapper.get('.turn-status').attributes('data-state')).toBeUndefined()
+  done(outcome); await flushPromises(); wrapper.unmount()
+})
