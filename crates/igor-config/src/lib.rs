@@ -7,7 +7,10 @@
 //! Secrets are never stored in configuration, only referenced by environment variable name (see
 //! [`SecretRef`]). Tool classification comes only from this configuration: a tool without an
 //! entry is [`Classification::Unclassified`] and therefore denied.
+//!
+//! [`ConfigDocument`] edits servers and permissions in the file, keeping its comments.
 
+mod edit;
 mod error;
 mod raw;
 mod secret;
@@ -21,6 +24,7 @@ use std::time::Duration;
 use igor_core::policy::Classification;
 use igor_core::tools::{ServerId, ToolId};
 
+pub use edit::{ConfigDocument, PermissionClass, ServerEntry};
 pub use error::{ConfigError, Origin, Problem};
 pub use secret::{REDACTED, Secret, SecretError, SecretRef};
 

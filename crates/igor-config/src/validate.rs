@@ -49,7 +49,7 @@ pub(crate) fn parse(source: &str, base_dir: &Path, origin: Origin) -> Result<Con
 /// echoed. Everything from the first to the last `"` is replaced as one unit, so escaped quotes
 /// inside a value cannot expose part of it. Field names, which the parser quotes with backticks,
 /// stay visible.
-fn hide_quoted_values(message: &str) -> String {
+pub(crate) fn hide_quoted_values(message: &str) -> String {
     match (message.find('"'), message.rfind('"')) {
         (Some(first), Some(last)) if first < last => format!(
             "{}\"[value not shown]\"{}",
@@ -60,7 +60,7 @@ fn hide_quoted_values(message: &str) -> String {
     }
 }
 
-fn line_column(source: &str, offset: usize) -> (usize, usize) {
+pub(crate) fn line_column(source: &str, offset: usize) -> (usize, usize) {
     let before = source.get(..offset).unwrap_or(source);
     let line = before.matches('\n').count() + 1;
     let column = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
