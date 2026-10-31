@@ -11,6 +11,8 @@ allow = [
     "MIT",
     "MIT-0",
     "Unicode-3.0",
+    # whisper-rs (embedded speech-to-text). A public-domain dedication; GPL-compatible.
+    "Unlicense",
     "Zlib",
 ]
 
