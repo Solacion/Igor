@@ -84,6 +84,8 @@ Host configuration is the only source of tool classification. Under `[permission
 - `write`: the tool runs only after you approve the exact call.
 - `denied`: the tool never runs.
 
+A server can make a tool stricter: a `read` tool whose server reports that it may modify data, or that it is not read-only, needs approval too. For such a tool you can choose to approve it for the rest of the session, and later calls to it then run without asking. A `write` tool always needs approval for each call.
+
 A tool that is not listed is unclassified. IGOR hides it from the model and refuses any call to it. A permission applies only to its own server: `sales/x` does not classify `inventory/x`. A permission for an undeclared server is an error.
 
 ## Limits

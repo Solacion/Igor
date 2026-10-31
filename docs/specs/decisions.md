@@ -18,6 +18,7 @@
 | Example data | Realistic sample data served by fixture-backed MCP servers. No live retail service is required. |
 | Write boundary | IGOR may call write-classified tools on MCP servers that support them, only after explicit approval. The demo's fixture write tool, `create_draft_order`, creates a draft only and changes no external system. |
 | Unclassified tools | Denied by default. Host configuration is the only source of permission classification; MCP tool annotations are untrusted hints that can only tighten it. |
+| Approval for the session | A tool the host configured as `read` that needs approval only because its server's hints say it may modify data can be approved for the rest of the session, so voice conversations are not interrupted by repeated prompts (31 October 2026). A tool the host configured as `write` needs approval for every call. The grant is bound to the tool definition and lapses when it changes, when the server disconnects or when the session ends. |
 | Clarification | When required information is missing or uncertain (for example the order date or period, supplier or quantities), the agent asks the operator instead of assuming. Dates are operator input, not fixed in fixtures. |
 | Model providers | Anthropic Claude (remote) and LM Studio (local), both behind the provider abstraction. |
 | Demo default models | Claude: `claude-haiku-5-5` (cheapest). LM Studio: `qwen/qwen3-vl-8b` (8B, fast, native tool calling). |

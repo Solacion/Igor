@@ -642,6 +642,13 @@ impl Session {
         }
         let permit = match self.gate.admit(call, call_id.clone()) {
             Ok(Admission::Ready(permit)) => permit,
+            Ok(Admission::ApprovedForSession(permit)) => {
+                self.emit(RuntimeEvent::ApprovedForSession {
+                    call_id: permit.call_id().to_owned(),
+                    tool: permit.tool().clone(),
+                });
+                permit
+            }
             Err(error) => {
                 return self.call_failed(
                     call_id,
@@ -713,6 +720,14 @@ impl Session {
                         approval_id,
                         call_id: permit.call_id().to_owned(),
                         outcome: ApprovalOutcome::Approved,
+                    });
+                    return Ok(permit);
+                }
+                Ok(Resolution::ApprovedForSession(permit)) => {
+                    self.emit(RuntimeEvent::ApprovalResolved {
+                        approval_id,
+                        call_id: permit.call_id().to_owned(),
+                        outcome: ApprovalOutcome::ApprovedForSession,
                     });
                     return Ok(permit);
                 }

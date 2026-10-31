@@ -33,7 +33,14 @@ where
         }
         match envelope.event {
             RuntimeEvent::ApprovalRequested { request } => {
-                write!(out, "Approve this action? [y/N] ")?;
+                if request.session_grant_allowed {
+                    write!(
+                        out,
+                        "Approve this action? [y]es, [a]lways this session, [N]o "
+                    )?;
+                } else {
+                    write!(out, "Approve this action? [y/N] ")?;
+                }
                 out.flush()?;
                 let answer = read_line(input).await?;
                 let decision = match answer.as_deref().map(str::trim) {
@@ -41,6 +48,13 @@ where
                         if text.eq_ignore_ascii_case("y") || text.eq_ignore_ascii_case("yes") =>
                     {
                         Decision::Approve
+                    }
+                    Some(text)
+                        if request.session_grant_allowed
+                            && (text.eq_ignore_ascii_case("a")
+                                || text.eq_ignore_ascii_case("always")) =>
+                    {
+                        Decision::ApproveForSession
                     }
                     _ => Decision::Deny,
                 };

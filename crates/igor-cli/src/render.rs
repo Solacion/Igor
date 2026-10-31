@@ -92,6 +92,11 @@ pub fn render(event: &RuntimeEvent, out: &mut impl Write) -> io::Result<()> {
         RuntimeEvent::AssistantText { text } if text.trim().is_empty() => Ok(()),
         RuntimeEvent::AssistantText { text } => writeln!(out, "\n{}\n", sanitize(text.trim())),
         RuntimeEvent::ApprovalRequested { request } => render_approval(request, out),
+        RuntimeEvent::ApprovedForSession { call_id, tool } => writeln!(
+            out,
+            "[{call_id}] approved for this session: {}",
+            sanitize(&tool.to_string())
+        ),
         RuntimeEvent::ApprovalResolved {
             approval_id,
             outcome,
@@ -99,6 +104,7 @@ pub fn render(event: &RuntimeEvent, out: &mut impl Write) -> io::Result<()> {
         } => {
             let outcome = match outcome {
                 ApprovalOutcome::Approved => "approved",
+                ApprovalOutcome::ApprovedForSession => "approved for the rest of the session",
                 ApprovalOutcome::Denied => "denied, not executed",
                 ApprovalOutcome::Cancelled => "cancelled, not executed",
                 ApprovalOutcome::Invalidated => "invalidated, not executed",

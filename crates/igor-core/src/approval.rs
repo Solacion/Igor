@@ -19,8 +19,18 @@
 //! Hashes use the core's canonical JSON (sorted keys, RFC 8785 string escaping, `serde_json`
 //! number formatting). This assumes approvals are created and checked inside one runtime
 //! process, so no other implementation needs to reproduce the hash.
+//!
+//! # Approval for the session
+//!
+//! [`Decision::ApproveForSession`] approves the call and lets later calls to the same tool run
+//! without asking, for the rest of the session. It is offered only for a tool the host
+//! configured as [`Classification::Read`] that needs approval because its server's hints say it
+//! may modify data ([`ApprovalRequest::session_grant_allowed`]). A tool the host configured as
+//! [`Classification::Write`] needs approval for every call. A grant is bound to the tool
+//! definition's fingerprint: it lapses when the definition changes, when the host reclassifies
+//! the tool, when its server disconnects, and when the gate is dropped with its session.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -150,6 +160,10 @@ pub struct ApprovalRequest {
     pub canonical_arguments: String,
     /// Hash the client must echo to approve or deny.
     pub action_hash: ActionHash,
+    /// The operator may answer [`Decision::ApproveForSession`]: the host configured the tool as
+    /// read, and only its server's hints made it need approval.
+    #[serde(default)]
+    pub session_grant_allowed: bool,
 }
 
 impl fmt::Debug for ApprovalRequest {
@@ -164,6 +178,7 @@ impl fmt::Debug for ApprovalRequest {
                 &format_args!("<redacted, {} bytes>", self.canonical_arguments.len()),
             )
             .field("action_hash", &self.action_hash)
+            .field("session_grant_allowed", &self.session_grant_allowed)
             .finish()
     }
 }
@@ -174,6 +189,9 @@ impl fmt::Debug for ApprovalRequest {
 pub enum Decision {
     /// Run the call.
     Approve,
+    /// Run the call, and run later calls to the same tool without asking for the rest of the
+    /// session. Accepted only when [`ApprovalRequest::session_grant_allowed`] is true.
+    ApproveForSession,
     /// Do not run the call.
     Deny,
 }
@@ -194,6 +212,8 @@ pub struct ClosedApproval {
 pub enum Admission {
     /// A read call, ready to dispatch.
     Ready(DispatchPermit),
+    /// A write call to a tool the operator approved for the session, ready to dispatch.
+    ApprovedForSession(DispatchPermit),
     /// A write call held until the operator decides.
     ApprovalRequired(ApprovalRequest),
 }
@@ -203,6 +223,8 @@ pub enum Admission {
 pub enum Resolution {
     /// Approved: dispatch the permit.
     Approved(DispatchPermit),
+    /// Approved, and later calls to the tool are approved for the session: dispatch the permit.
+    ApprovedForSession(DispatchPermit),
     /// Denied by the operator: nothing runs.
     Denied(ClosedApproval),
 }
@@ -223,6 +245,13 @@ pub enum ApprovalError {
         /// The id given.
         approval_id: String,
     },
+    /// [`Decision::ApproveForSession`] was given for a call that needs approval every time. The
+    /// approval stays pending.
+    #[error("approval {approval_id:?} cannot be approved for the session; approve this call only")]
+    SessionGrantNotAllowed {
+        /// The id given.
+        approval_id: String,
+    },
     /// The tool definition changed, or the tool is no longer a permitted write, since the
     /// request was made. The approval has ended.
     #[error("approval {} is invalid: the tool definition or classification changed", .closed.approval_id)]
@@ -238,6 +267,7 @@ struct Pending {
     fingerprint: ToolFingerprint,
     arguments: Map<String, Value>,
     action_hash: ActionHash,
+    session_grant_allowed: bool,
 }
 
 impl fmt::Debug for Pending {
@@ -248,6 +278,7 @@ impl fmt::Debug for Pending {
             .field("fingerprint", &self.fingerprint)
             .field("arguments", &RedactedArguments(&self.arguments))
             .field("action_hash", &self.action_hash)
+            .field("session_grant_allowed", &self.session_grant_allowed)
             .finish()
     }
 }
@@ -280,6 +311,14 @@ pub struct TooManyPending;
 pub struct ApprovalGate {
     next_id: u64,
     pending: BTreeMap<String, Pending>,
+    /// Tools approved for the session, with the definition they were approved against.
+    grants: BTreeMap<ToolId, ToolFingerprint>,
+}
+
+/// Whether a call may be approved for the session: the host configured the tool as read, and
+/// only its server's hints made it a write.
+fn may_grant(classification: Classification, host_classification: Classification) -> bool {
+    classification == Classification::Write && host_classification == Classification::Read
 }
 
 impl ApprovalGate {
@@ -289,7 +328,8 @@ impl ApprovalGate {
     }
 
     /// Admits a validated call: a read call gets a permit, a write call becomes a pending
-    /// approval. Every call needs a new approval, even if an identical one was approved before.
+    /// approval. Every call needs a new approval, even if an identical one was approved before,
+    /// unless the operator approved the tool for the session.
     ///
     /// A [`ValidatedCall`] is only ever [`Classification::Read`] or [`Classification::Write`]:
     /// [`ToolRegistry::prepare_call`] refuses every other class. Anything that is not `Read` is
@@ -300,9 +340,18 @@ impl ApprovalGate {
         call_id: impl Into<String>,
     ) -> Result<Admission, TooManyPending> {
         let call_id = call_id.into();
+        let session_grant_allowed = may_grant(call.classification(), call.host_classification());
         let (tool, classification, fingerprint, arguments) = call.into_parts();
         if classification == Classification::Read {
             return Ok(Admission::Ready(DispatchPermit {
+                call_id,
+                tool,
+                arguments,
+                approval_id: None,
+            }));
+        }
+        if session_grant_allowed && self.grants.get(&tool) == Some(&fingerprint) {
+            return Ok(Admission::ApprovedForSession(DispatchPermit {
                 call_id,
                 tool,
                 arguments,
@@ -325,6 +374,7 @@ impl ApprovalGate {
             fingerprint,
             canonical_arguments,
             action_hash,
+            session_grant_allowed,
         };
         self.pending.insert(
             approval_id,
@@ -334,6 +384,7 @@ impl ApprovalGate {
                 fingerprint,
                 arguments,
                 action_hash,
+                session_grant_allowed,
             },
         );
         Ok(Admission::ApprovalRequired(request))
@@ -344,6 +395,8 @@ impl ApprovalGate {
     /// `action_hash` must be the hash from the [`ApprovalRequest`] the operator saw. `registry`
     /// is the current tool registry: if the tool's fingerprint changed, or it is no longer a
     /// [`Classification::Write`] tool, the approval is invalidated instead of granted.
+    /// [`Decision::ApproveForSession`] is refused, leaving the approval pending, unless the tool
+    /// is still one the host configured as read.
     pub fn resolve(
         &mut self,
         approval_id: &str,
@@ -362,7 +415,18 @@ impl ApprovalGate {
                 approval_id: approval_id.to_owned(),
             });
         }
-        let still_valid = registry.get(&pending.tool).is_some_and(|tool| {
+        let current = registry.get(&pending.tool);
+        if decision == Decision::ApproveForSession
+            && !(pending.session_grant_allowed
+                && current.is_none_or(|tool| {
+                    may_grant(tool.classification(), tool.host_classification())
+                }))
+        {
+            return Err(ApprovalError::SessionGrantNotAllowed {
+                approval_id: approval_id.to_owned(),
+            });
+        }
+        let still_valid = current.is_some_and(|tool| {
             tool.fingerprint() == pending.fingerprint
                 && tool.classification() == Classification::Write
         });
@@ -384,7 +448,27 @@ impl ApprovalGate {
                 arguments: pending.arguments,
                 approval_id: Some(approval_id),
             }),
+            Decision::ApproveForSession => {
+                self.grants
+                    .insert(pending.tool.clone(), pending.fingerprint);
+                Resolution::ApprovedForSession(DispatchPermit {
+                    call_id: pending.call_id,
+                    tool: pending.tool,
+                    arguments: pending.arguments,
+                    approval_id: Some(approval_id),
+                })
+            }
         })
+    }
+
+    /// Tools approved for the session.
+    pub fn session_grants(&self) -> BTreeSet<ToolId> {
+        self.grants.keys().cloned().collect()
+    }
+
+    /// Withdraws every approval for the session: later calls ask again.
+    pub fn revoke_session_grants(&mut self) {
+        self.grants.clear();
     }
 
     /// Ends every pending approval, e.g. when the session or turn is cancelled.
@@ -395,8 +479,10 @@ impl ApprovalGate {
             .collect()
     }
 
-    /// Ends every pending approval for `server`, e.g. when it disconnects.
+    /// Ends every pending approval for `server`, e.g. when it disconnects, and withdraws its
+    /// tools' approvals for the session.
     pub fn invalidate_server(&mut self, server: &ServerId) -> Vec<ClosedApproval> {
+        self.grants.retain(|tool, _| &tool.server != server);
         let ids: Vec<String> = self
             .pending
             .iter()
@@ -514,7 +600,9 @@ mod tests {
             let call = self.registry.prepare_call(alias, arguments)?;
             match self.gate.admit(call, "call-1")? {
                 Admission::ApprovalRequired(request) => Ok(request),
-                Admission::Ready(_) => Err("write call was not held for approval".into()),
+                Admission::Ready(_) | Admission::ApprovedForSession(_) => {
+                    Err("write call was not held for approval".into())
+                }
             }
         }
 
@@ -530,7 +618,9 @@ mod tests {
     fn approved(resolution: Resolution) -> Result<DispatchPermit, Box<dyn std::error::Error>> {
         match resolution {
             Resolution::Approved(permit) => Ok(permit),
-            Resolution::Denied(_) => Err("expected approval".into()),
+            Resolution::ApprovedForSession(_) | Resolution::Denied(_) => {
+                Err("expected approval".into())
+            }
         }
     }
 
@@ -858,6 +948,137 @@ mod tests {
         assert_eq!(json["action_hash"], json!(request.action_hash.to_string()));
         let back: ApprovalRequest = serde_json::from_value(json)?;
         assert_eq!(back, request);
+        Ok(())
+    }
+
+    /// `browser/new_page`, configured as read by the host but reported by its server as not
+    /// read-only, so it needs approval; and `sales/create_order`, configured as write.
+    fn hinted_registry(description: &str) -> Result<ToolRegistry, InvalidServerId> {
+        let page = id("browser", "new_page")?;
+        let order = id("sales", "create_order")?;
+        let mut hinted = descriptor(&page, description);
+        hinted.hints.read_only = Some(false);
+        let classes = HashMap::from([
+            (page, Classification::Read),
+            (order.clone(), Classification::Write),
+        ]);
+        Ok(ToolRegistry::build(
+            [hinted, descriptor(&order, description)],
+            &classes,
+        ))
+    }
+
+    fn admit(
+        gate: &mut ApprovalGate,
+        registry: &ToolRegistry,
+        alias: &str,
+        supplier: &str,
+    ) -> Result<Admission, Box<dyn std::error::Error>> {
+        let call = registry.prepare_call(alias, json!({ "supplier": supplier }))?;
+        Ok(gate.admit(call, "call-1")?)
+    }
+
+    fn held(admission: Admission) -> Result<ApprovalRequest, Box<dyn std::error::Error>> {
+        match admission {
+            Admission::ApprovalRequired(request) => Ok(request),
+            Admission::Ready(_) | Admission::ApprovedForSession(_) => {
+                Err("expected the call to be held for approval".into())
+            }
+        }
+    }
+
+    #[test]
+    fn a_tool_approved_for_the_session_runs_later_calls_without_asking() -> TestResult {
+        let registry = hinted_registry("Opens a page.")?;
+        let mut gate = ApprovalGate::new();
+        let request = held(admit(&mut gate, &registry, "browser__new_page", "a")?)?;
+        assert!(request.session_grant_allowed);
+        let resolution = gate.resolve(
+            &request.approval_id,
+            request.action_hash,
+            Decision::ApproveForSession,
+            &registry,
+        )?;
+        let Resolution::ApprovedForSession(permit) = resolution else {
+            return Err("expected an approval for the session".into());
+        };
+        assert_eq!(permit.approval_id(), Some(request.approval_id.as_str()));
+        assert_eq!(
+            gate.session_grants(),
+            BTreeSet::from([id("browser", "new_page")?])
+        );
+
+        // Different arguments: still approved, because the grant covers the tool.
+        let Admission::ApprovedForSession(permit) =
+            admit(&mut gate, &registry, "browser__new_page", "b")?
+        else {
+            return Err("expected the call to run without asking".into());
+        };
+        assert_eq!(permit.approval_id(), None);
+        assert_eq!(gate.pending_count(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn a_tool_the_host_configured_as_write_cannot_be_approved_for_the_session() -> TestResult {
+        let registry = hinted_registry("Opens a page.")?;
+        let mut gate = ApprovalGate::new();
+        let request = held(admit(&mut gate, &registry, "sales__create_order", "a")?)?;
+        assert!(!request.session_grant_allowed);
+        let refused = gate.resolve(
+            &request.approval_id,
+            request.action_hash,
+            Decision::ApproveForSession,
+            &registry,
+        );
+        assert!(
+            matches!(refused, Err(ApprovalError::SessionGrantNotAllowed { .. })),
+            "{refused:?}"
+        );
+        assert_eq!(gate.pending_count(), 1, "the approval stays pending");
+        assert!(gate.session_grants().is_empty());
+        let resolution = gate.resolve(
+            &request.approval_id,
+            request.action_hash,
+            Decision::Approve,
+            &registry,
+        )?;
+        assert!(matches!(resolution, Resolution::Approved(_)));
+        held(admit(&mut gate, &registry, "sales__create_order", "a")?)?;
+        Ok(())
+    }
+
+    #[test]
+    fn approvals_for_the_session_lapse() -> TestResult {
+        let registry = hinted_registry("Opens a page.")?;
+        let mut gate = ApprovalGate::new();
+        let grant = |gate: &mut ApprovalGate, registry: &ToolRegistry| -> TestResult {
+            let request = held(admit(gate, registry, "browser__new_page", "a")?)?;
+            gate.resolve(
+                &request.approval_id,
+                request.action_hash,
+                Decision::ApproveForSession,
+                registry,
+            )?;
+            Ok(())
+        };
+
+        // The tool definition changes.
+        grant(&mut gate, &registry)?;
+        let changed = hinted_registry("Opens a page and does more.")?;
+        held(admit(&mut gate, &changed, "browser__new_page", "a")?)?;
+
+        // The server disconnects.
+        let mut gate = ApprovalGate::new();
+        grant(&mut gate, &registry)?;
+        gate.invalidate_server(&ServerId::new("browser")?);
+        held(admit(&mut gate, &registry, "browser__new_page", "a")?)?;
+
+        // The operator withdraws the grants.
+        let mut gate = ApprovalGate::new();
+        grant(&mut gate, &registry)?;
+        gate.revoke_session_grants();
+        held(admit(&mut gate, &registry, "browser__new_page", "a")?)?;
         Ok(())
     }
 }

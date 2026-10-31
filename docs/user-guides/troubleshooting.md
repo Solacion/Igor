@@ -37,7 +37,7 @@ New tools are blocked until classified. In **Settings**, set the tool to **Use i
 
 ## A read tool still asks for approval
 
-A tool you set to **Use it freely (read)** still needs approval when its server reports that it may modify data or is not read-only. The desktop and `igor-cli` list these tools when the server connects. IGOR only adds approval on such reports and never removes it, so a server's warning always wins. `chrome-devtools-mcp`, for example, reports this for `new_page`, `navigate_page` and the performance trace tools.
+A tool you set to **Use it freely (read)** still needs approval when its server reports that it may modify data or is not read-only. The desktop and `igor-cli` list these tools when the server connects. IGOR only adds approval on such reports and never removes it, so a server's warning always wins. `chrome-devtools-mcp`, for example, reports this for `new_page`, `navigate_page` and the performance trace tools. To stop being asked, approve such a tool for the session: `a` in `igor-cli`.
 
 ## An answer is marked incomplete
 
