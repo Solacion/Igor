@@ -7,6 +7,9 @@
   ],
   "permissions": [
     "allow-desktop-status",
+    "allow-settings-providers",
+    "allow-settings-save-provider",
+    "allow-settings-remove-provider",
     "allow-settings-view",
     "allow-settings-save-server",
     "allow-settings-test-server",

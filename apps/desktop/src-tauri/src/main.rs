@@ -109,6 +109,7 @@ use crate::settings::{
 
 #[derive(Serialize)]
 struct ProviderView {
+    revision: String,
     id: String,
     model: String,
     unavailable: Option<String>,
@@ -121,15 +122,38 @@ struct ProvidersView {
 async fn conversation_providers(
     settings: State<'_, Arc<Settings>>,
 ) -> Result<ProvidersView, BridgeError> {
-    let snapshot = settings
-        .snapshot()
-        .await
+    let configured = settings
+        .provider_choices()
         .map_err(|_| BridgeError::Configuration)?;
-    let providers = snapshot.config.providers().iter().map(|p| ProviderView {
+    let providers = configured.iter().map(|p| ProviderView {
+        revision: settings::provider_revision(p),
         id: p.id.clone(), model: p.model.clone(),
         unavailable: p.api_key.as_ref().filter(|key| key.resolve().is_err()).map(|key| format!("Environment variable {} is missing or unavailable. Set it before starting Igor.", key.env_var())),
     }).collect();
     Ok(ProvidersView { providers })
+}
+
+#[tauri::command]
+async fn settings_providers(
+    settings: State<'_, Arc<Settings>>,
+) -> Result<settings::ProviderSettingsView, CommandError> {
+    settings.provider_view()
+}
+#[tauri::command]
+async fn settings_save_provider(
+    settings: State<'_, Arc<Settings>>,
+    request: settings::SaveProviderRequest,
+) -> Result<settings::ProviderSettingsView, CommandError> {
+    settings
+        .save_provider(request.replacing.as_deref(), request.entry)
+        .await
+}
+#[tauri::command]
+async fn settings_remove_provider(
+    settings: State<'_, Arc<Settings>>,
+    request: settings::ProviderRequest,
+) -> Result<settings::ProviderSettingsView, CommandError> {
+    settings.remove_provider(&request.id).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -240,6 +264,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             cancel_turn,
             close_session,
             export_activity,
+            settings_providers,
+            settings_save_provider,
+            settings_remove_provider,
             settings_view,
             settings_save_server,
             settings_test_server,

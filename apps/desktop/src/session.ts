@@ -52,7 +52,7 @@ export async function startSession(
   }
 }
 
-export interface ProviderView { id: string; model: string; unavailable: string | null }
+export interface ProviderView { revision?: string; id: string; model: string; unavailable: string | null }
 export function readProviders() {
   return invoke<{ providers: ProviderView[] }>('conversation_providers')
 }

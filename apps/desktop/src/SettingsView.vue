@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import ServerForm from './ServerForm.vue'
+import ProviderSettings from './ProviderSettings.vue'
 import { isCommandError, readSettings, reconnectServer, removeServer, setPermission } from './bridge'
 import type { PermissionClass, ServerEntry, ServerView, SettingsView, ToolView } from './bridge'
 
@@ -97,7 +98,8 @@ onUnmounted(() => clearInterval(timer))
 
     <div class="settings-layout">
       <nav class="settings-nav" aria-label="Settings sections">
-        <a href="#mcp-servers" class="is-active" aria-current="true">MCP servers</a>
+        <a href="#mcp-servers">MCP servers</a>
+        <a href="#model-providers">Model providers</a>
       </nav>
 
       <div class="settings-body">
@@ -180,6 +182,7 @@ onUnmounted(() => clearInterval(timer))
 
           <p v-if="view" class="hint config-path">Saved in {{ view.config_path }}</p>
         </section>
+        <ProviderSettings />
       </div>
     </div>
   </section>

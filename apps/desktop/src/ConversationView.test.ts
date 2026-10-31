@@ -96,6 +96,40 @@ it('keeps the session and visible history for subsequent messages without a Sett
   expect(wrapper.findAll('.messages li')).toHaveLength(2); wrapper.unmount()
 })
 
+it('refreshes provider edits immediately and resets the model session when its configuration changes', async () => {
+  let revision = 'first'; const calls: string[] = []
+  mockIPC((command) => {
+    calls.push(command)
+    if (command === 'conversation_providers') return { providers: [{ id: 'local', model: revision, revision, unavailable: null }] }
+    if (command === 'settings_view') return { servers: [] }
+    if (command === 'start_session') return { session_id: revision, provider_id: 'local', model: revision, provider_revision: revision, servers: [] }
+    if (command === 'send_message') return { outcome: 'completed' }
+  })
+  const wrapper = mount(ConversationView); await start(wrapper)
+  revision = 'edited'; window.dispatchEvent(new Event('igor:providers-changed')); await flushPromises()
+  expect(wrapper.get('#provider').text()).toContain('edited')
+  await wrapper.get('#message').setValue('Again'); await wrapper.get('form').trigger('submit'); await flushPromises()
+  expect(calls.filter(call => call === 'start_session')).toHaveLength(2)
+  expect(calls.filter(call => call === 'close_session')).toHaveLength(1)
+  expect(wrapper.text()).toContain('Provider changed. A new model conversation starts here')
+  expect(wrapper.findAll('.messages li')).toHaveLength(2); wrapper.unmount()
+})
+it('selects a remaining provider after removal and starts its model session on the next message', async () => {
+  let removed = false; const calls: Array<{command: string; args: any}> = []
+  mockIPC((command, args: any) => {
+    calls.push({command, args})
+    if (command === 'conversation_providers') return { providers: [{ id: removed ? 'other' : 'local', model: 'model', unavailable: null }] }
+    if (command === 'settings_view') return { servers: [] }
+    if (command === 'start_session') return { session_id: args.request.provider_id, provider_id: args.request.provider_id, model: 'model', servers: [] }
+    if (command === 'send_message') return { outcome: 'completed' }
+  })
+  const wrapper = mount(ConversationView); await start(wrapper)
+  removed = true; window.dispatchEvent(new Event('igor:providers-changed')); await flushPromises()
+  await wrapper.get('#message').setValue('Again'); await wrapper.get('form').trigger('submit'); await flushPromises()
+  expect(calls.filter(call => call.command === 'start_session').map(call => call.args.request.provider_id)).toEqual(['local','other'])
+  expect(wrapper.text()).toContain('Provider changed'); wrapper.unmount()
+})
+
 it('tracks proposed, started, completed, refused and uncertain failed tool calls literally', async () => {
   const mock = backend(); const wrapper = mount(ConversationView); await start(wrapper)
   const tool = { server: 'sales', name: 'create_draft_order' }
