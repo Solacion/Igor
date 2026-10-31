@@ -105,7 +105,23 @@ The dedicated macOS workflow runs those checks. The debug app is at `apps/deskto
 - Native diagnostics are not echoed into the frontend on failure. Native version text is rendered with Vue interpolation, never HTML. Component tests mock Tauri IPC to cover success, failure/retry, pending state and markup escaping.
 - Session commands stream core event envelopes on a channel scoped to the session. Replies include the session and request identifiers; approval replies echo core's action hash. Unknown request fields are rejected, commands have generated permissions restricted to the local main window, and closing the window cancels the session. Resolved credential values are blocked before core events cross IPC; this is a defensive exact-value check, not a general-purpose secret detector. All model, tool and server content is rendered as plain text.
 
-The separate root `pnpm run verify` and Rust dependency audit cover the core workspace, not this standalone desktop graph. Use the desktop workflow/commands above for its validation. Desktop-specific dependency audit coverage remains a follow-up when this shell is adopted; no change to runtime dependency policy is implied.
+The root `pnpm run verify` covers the core workspace; use the desktop workflow/commands above for this standalone desktop package. The dependency workflow now runs separate core and desktop graph checks with the same pinned cargo-deny 0.20.2 and the unchanged root `deny.toml`. Both use their committed lockfiles. Neither job suppresses advisories or filters away platform dependencies; a desktop failure does not cancel the core job.
+
+### Desktop dependency findings — 31 October 2026
+
+The initial all-target desktop scan failed under the root policy: GTK3 brings in unmaintained `proc-macro-error` 1.0.4 (RUSTSEC-2024-0370) and `target-lexicon` with `Apache-2.0 WITH LLVM-exception`. Maintained parser and directory dependencies also require MPL-2.0.
+
+The newest Tauri releases at least two weeks old on 2026-10-31 are Rust `tauri` 2.12.4, `tauri-build` 2.7.3, CLI 2.12.3 and API 2.12.4. Testing this set still finds the same GTK3 dependency in the all-target graph. The desktop therefore uses its own `apps/desktop/src-tauri/deny.toml`, covering both Apple Silicon and Intel macOS, the supported demo targets. Neither macOS graph contains `proc-macro-error`, `target-lexicon` or GTK. Adding Linux support would bring back the unmaintained GTK3 stack, an upstream Tauri dependency issue that must be resolved or explicitly reviewed before broadening this policy.
+
+The desktop policy copies the root licence/advisory rules and additionally accepts MPL-2.0 for the maintained Servo parser and `option-ext` dependencies. MPL-2.0 is file-level copyleft; the desktop itself is GPL-3.0-only. Distribution must retain applicable licence notices and meet source obligations. There are no advisory ignores. The root `deny.toml` remains unchanged and strict for the core graph. CI records findings and fails on policy violations within each graph.
+
+To reproduce from the repository root with pinned cargo-deny:
+
+```sh
+cargo deny --manifest-path apps/desktop/src-tauri/Cargo.toml --config apps/desktop/src-tauri/deny.toml --locked check licenses advisories
+```
+
+Audit results depend on the fetched advisory database; read the latest job output.
 
 ## Manual smoke-test checklist — NOT RUN
 
