@@ -62,3 +62,24 @@ it('starts a fresh session after Settings change, explaining history reset befor
   expect(mock.calls.filter(c => c.command === 'send_message')).toHaveLength(3)
   expect(wrapper.findAll('.messages li')).toHaveLength(2); wrapper.unmount()
 })
+
+it('tracks proposed, started, completed, refused and uncertain failed tool calls literally', async () => {
+  const mock = backend(); const wrapper = mount(ConversationView); await start(wrapper)
+  const tool = { server: 'sales', name: 'create_draft_order' }
+  mock.emit({ event: 'tool_call_proposed', call_id: 'a', tool, arguments: { note: '<script>bad()</script>' } }); await flushPromises()
+  expect(wrapper.get('.activity-row').text()).toContain('Proposed')
+  mock.emit({ event: 'tool_call_started', call_id: 'a' }); await flushPromises(); expect(wrapper.get('.activity-row').text()).toContain('Started')
+  mock.emit({ event: 'tool_call_completed', call_id: 'a', is_error: false, truncated: true }); await flushPromises()
+  expect(wrapper.get('.activity-row').text()).toContain('Completed'); expect(wrapper.text()).toContain('truncated')
+  mock.emit({ event: 'tool_call_rejected', call_id: 'b', tool, reason: '<img> permission refused' })
+  mock.emit({ event: 'tool_call_failed', call_id: 'c', outcome: 'unknown', message: 'Timeout <b>unsafe</b>' }); await flushPromises()
+  expect(wrapper.text()).toContain('Nothing was sent'); expect(wrapper.text()).toContain('effect is unknown'); expect(wrapper.find('script').exists()).toBe(false); expect(wrapper.find('img').exists()).toBe(false); expect(wrapper.find('b').exists()).toBe(false)
+  expect(wrapper.findAll('.activity-row')).toHaveLength(3); wrapper.unmount()
+})
+it('reports model failure and limits without presenting a completed answer', async () => {
+  for (const outcome of [{ outcome: 'failed', message: 'Provider failed <img>' }, { outcome: 'limit_reached', limit: 'tool_calls' }]) {
+    backend({ send: () => outcome }); const wrapper = mount(ConversationView); await start(wrapper)
+    expect(wrapper.text()).toContain(outcome.outcome === 'failed' ? 'Turn failed' : 'Stopped at limit: tool_calls')
+    expect(wrapper.find('img').exists()).toBe(false); wrapper.unmount()
+  }
+})

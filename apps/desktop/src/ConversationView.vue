@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { updateActivity, type Activity } from './activity'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { readSettings, type ServerView } from './bridge'
 import { readProviders, startSession, type CoreEvent, type ProviderView, type TurnOutcome } from './session'
@@ -13,6 +14,8 @@ const text = ref('')
 const error = ref('')
 const notice = ref('')
 const status = ref('Ready for a message')
+const activity = ref<Record<string, Activity>>({})
+let epoch = 0
 const messages = ref<Array<{ role: string; text: string }>>([])
 const selected = computed(() => providers.value.find(p => p.id === providerId.value))
 let session: Awaited<ReturnType<typeof startSession>> | null = null
@@ -53,6 +56,7 @@ function receive(envelope: CoreEvent) {
   }
   lastSequence = envelope.sequence
   const event = envelope.event
+  updateActivity(activity.value, event, epoch)
   if (event.event === 'assistant_text' && typeof event.text === 'string') messages.value.push({ role: 'Igor', text: event.text })
   if (event.event === 'turn_finished') finish(event.outcome as TurnOutcome)
 }
@@ -61,7 +65,7 @@ async function prepare() {
     await session.close(); session = null
     notice.value = 'Provider changed. A new model conversation starts here; earlier messages remain visible.'
   }
-  if (!session) { lastSequence = -1; session = await startSession(providerId.value, receive) }
+  if (!session) { epoch++; lastSequence = -1; session = await startSession(providerId.value, receive) }
   return session
 }
 async function send() {
@@ -99,7 +103,7 @@ async function stop() {
 async function reset() {
   if (busy.value) return
   try {
-    await session?.close(); session = null; messages.value = []; notice.value = ''; error.value = ''; status.value = 'Ready for a message'
+    await session?.close(); session = null; messages.value = []; activity.value = {}; notice.value = ''; error.value = ''; status.value = 'Ready for a message'
   } catch { error.value = 'Could not close the conversation. Try again.' }
 }
 onMounted(() => { void refresh(); timer = setInterval(() => { void refresh() }, 3000) })
@@ -126,6 +130,14 @@ onUnmounted(() => { disposed = true; clearInterval(timer); void session?.close()
     <ol class="messages" aria-label="Conversation messages" aria-live="polite" aria-relevant="additions">
       <li v-for="(message, index) in messages" :key="index"><strong>{{ message.role }}</strong><p class="literal">{{ message.text }}</p></li>
     </ol>
+    <section v-if="Object.keys(activity).length" class="tool-activity" aria-labelledby="activity-title">
+      <h2 id="activity-title">Tool activity</h2>
+      <ol><li v-for="(call, key) in activity" :key="key" class="activity-row">
+        <strong>{{ call.server }} · {{ call.tool }}</strong><p>{{ call.state }}</p>
+        <p v-if="call.detail" class="literal">{{ call.detail }}</p>
+        <details v-if="call.arguments !== undefined"><summary>Proposed arguments</summary><pre>{{ JSON.stringify(call.arguments, null, 2) }}</pre></details>
+      </li></ol>
+    </section>
     <p role="status" class="turn-status">{{ status }}</p>
     <p v-if="error" role="alert">{{ error }} <button v-if="!loaded" @click="refresh">Try again</button></p>
     <form class="composer" @submit.prevent="send">
