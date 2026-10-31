@@ -14,6 +14,7 @@ const text = ref('')
 const error = ref('')
 const notice = ref('')
 const status = ref('Ready for a message')
+const questions = ref<Array<{ key: string; id: string; question: string; answer: string; state: string }>>([])
 const approvals = ref<Array<{ key: string; request: ApprovalPreview; state: string }>>([])
 const activity = ref<Record<string, Activity>>({})
 let epoch = 0
@@ -41,6 +42,7 @@ async function refresh() {
   } finally { refreshing = false }
 }
 function finish(outcome: TurnOutcome) {
+  for (const item of questions.value) if (item.state === 'pending' || item.state === 'sending') item.state = 'Turn ended'
   for (const item of approvals.value) if (item.state === 'pending' || item.state === 'sending') item.state = 'Turn ended'
   switch (outcome.outcome) {
     case 'completed': status.value = 'Completed'; break
@@ -69,7 +71,18 @@ function receive(envelope: CoreEvent) {
     if (item) item.state = String(event.outcome)
     status.value = 'Working…'
   }
+  if (event.event === 'clarification_requested' && typeof event.question === 'string' && typeof event.request_id === 'string') {
+    questions.value.push({ key: `${epoch}:${event.request_id}`, id: event.request_id, question: event.question, answer: '', state: 'pending' })
+    status.value = 'Waiting for your answer'
+  }
+  if (event.event === 'clarification_answered') {
+    const item = questions.value.find(item => item.key === `${epoch}:${String(event.request_id)}`)
+    if (item) { item.state = 'Answered'; messages.value.push({ role: 'You', text: item.answer }) }
+    status.value = 'Working…'
+  }
   if (event.event === 'input_rejected') {
+    const question = questions.value.find(item => item.key === `${epoch}:${String(event.id)}`)
+    if (question?.state === 'sending') question.state = 'pending'
     const item = approvals.value.find(item => item.key === `${epoch}:${String(event.id)}`)
     if (item?.state === 'sending') item.state = 'pending'
     error.value = `Your response was refused: ${String(event.reason)}`
@@ -110,7 +123,18 @@ async function send() {
     error.value = 'The turn could not finish. Check the provider and server settings before sending another message.'
     status.value = 'Turn failed — the answer may be incomplete'
     if (session) { try { await session.close() } catch { /* Keep diagnostics native. */ } session = null }
-  } finally { busy.value = false; for (const item of approvals.value) if (item.state === 'pending' || item.state === 'sending') item.state = 'Turn ended' }
+  } finally {
+    busy.value = false
+    for (const item of [...questions.value, ...approvals.value]) {
+      if (item.state === 'pending' || item.state === 'sending') item.state = 'Turn ended'
+    }
+  }
+}
+async function answer(item: (typeof questions.value)[number]) {
+  if (!session || !busy.value || item.state !== 'pending' || !item.answer.trim()) return
+  item.state = 'sending'; error.value = ''
+  try { await session.answer(item.id, item.answer) }
+  catch { item.state = 'pending'; error.value = 'Could not submit your answer. Try again or stop the turn.' }
 }
 async function decide(item: (typeof approvals.value)[number], decision: 'approve' | 'deny') {
   if (!busy.value || item.state !== 'pending' || !session) return
@@ -126,7 +150,7 @@ async function stop() {
 async function reset() {
   if (busy.value) return
   try {
-    await session?.close(); session = null; messages.value = []; activity.value = {}; approvals.value = []; notice.value = ''; error.value = ''; status.value = 'Ready for a message'
+    await session?.close(); session = null; messages.value = []; activity.value = {}; approvals.value = []; questions.value = []; notice.value = ''; error.value = ''; status.value = 'Ready for a message'
   } catch { error.value = 'Could not close the conversation. Try again.' }
 }
 onMounted(() => { void refresh(); timer = setInterval(() => { void refresh() }, 3000) })
@@ -172,6 +196,17 @@ onUnmounted(() => { disposed = true; clearInterval(timer); void session?.close()
           <button type="button" :disabled="item.state !== 'pending'" @click="decide(item, 'approve')">Approve</button>
           <button type="button" class="secondary" :disabled="item.state !== 'pending'" @click="decide(item, 'deny')">Deny</button>
         </div>
+      </article>
+    </section>
+    <section v-if="questions.length" class="clarifications" aria-label="Questions from Igor">
+      <article v-for="item in questions" :key="item.key" class="activity-row">
+        <h2>Igor needs your answer</h2><p class="literal">{{ item.question }}</p>
+        <form v-if="busy && (item.state === 'pending' || item.state === 'sending')" class="composer" @submit.prevent="answer(item)">
+          <label :for="`answer-${item.key}`">Your answer</label>
+          <textarea :id="`answer-${item.key}`" v-model="item.answer" :disabled="item.state !== 'pending'" maxlength="32768" rows="2" />
+          <button type="submit" :disabled="item.state !== 'pending' || !item.answer.trim()">Send answer</button>
+        </form>
+        <p role="status">{{ item.state === 'sending' ? 'Answer sent; waiting for the runtime.' : item.state === 'pending' ? 'Waiting for your answer. You can stop the turn.' : item.state }}</p>
       </article>
     </section>
     <p role="status" class="turn-status">{{ status }}</p>
