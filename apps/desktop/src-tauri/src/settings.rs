@@ -139,6 +139,18 @@ impl Connection {
     }
 }
 
+impl Connection {
+    /// The recorded status, or failed when a connected server has since stopped.
+    fn current_status(&self) -> Status {
+        match (&self.status, &self.backend) {
+            (Status::Connected, Some(backend)) if !backend.is_connected() => Status::Failed {
+                detail: "the server stopped".to_owned(),
+            },
+            (status, _) => status.clone(),
+        }
+    }
+}
+
 impl Drop for Connection {
     fn drop(&mut self) {
         if let Some(backend) = &self.backend {
@@ -186,7 +198,7 @@ impl Settings {
                 .map_err(|error| CommandError::config(&error, None))?;
             let (status, tools) = connections.get(&entry.id).map_or_else(
                 || (Status::NotConnected, Vec::new()),
-                |c| (c.status.clone(), c.tools.clone()),
+                |c| (c.current_status(), c.tools.clone()),
             );
             servers.push(ServerView {
                 entry,
@@ -476,6 +488,24 @@ mod tests {
         assert_eq!(view.servers[0].permissions["create_draft_order"], "write");
         let config = igor_config::Config::load(&path)?;
         assert_eq!(config.servers()[0].id.as_str(), "pos");
+
+        if let Some(backend) = settings
+            .connections
+            .lock()
+            .await
+            .get("pos")
+            .and_then(|c| c.backend.as_ref())
+        {
+            backend.disconnect();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let view = settings.view().await?;
+        assert_eq!(
+            view.servers[0].status,
+            Status::Failed {
+                detail: "the server stopped".to_owned()
+            }
+        );
 
         let view = settings.remove_server("pos").await?;
         assert!(view.servers.is_empty());
