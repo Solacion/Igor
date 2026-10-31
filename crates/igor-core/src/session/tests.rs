@@ -641,7 +641,12 @@ async fn tool_timeout_reports_unknown_outcome() -> TestResult {
         Vec::new(),
     )?;
     let (outcome, events) = run(&mut h, "lookup", Operator::default()).await;
-    assert_eq!(outcome, TurnOutcome::Completed);
+    assert_eq!(
+        outcome,
+        TurnOutcome::CompletedWithGaps {
+            unsuccessful_calls: 1
+        }
+    );
     h.provider.verify()?;
     assert_eq!(h.sales.calls().len(), 1);
     assert!(events.iter().any(|e| matches!(
@@ -673,7 +678,12 @@ async fn oversized_server_error_text_is_bounded() -> TestResult {
         Vec::new(),
     )?;
     let (outcome, events) = run(&mut h, "lookup", Operator::default()).await;
-    assert_eq!(outcome, TurnOutcome::Completed);
+    assert_eq!(
+        outcome,
+        TurnOutcome::CompletedWithGaps {
+            unsuccessful_calls: 1
+        }
+    );
     h.provider.verify()?;
     assert!(events.iter().any(|e| matches!(
         &e.event,
@@ -701,7 +711,12 @@ async fn write_with_unknown_outcome_is_not_retried_without_new_approval() -> Tes
     )?;
     let operator = Operator::approving([Decision::Approve, Decision::Deny]);
     let (outcome, events) = run(&mut h, "order", operator).await;
-    assert_eq!(outcome, TurnOutcome::Completed);
+    assert_eq!(
+        outcome,
+        TurnOutcome::CompletedWithGaps {
+            unsuccessful_calls: 1
+        }
+    );
     h.provider.verify()?;
     assert_eq!(count(&events, "approval_requested"), 2);
     assert_eq!(
@@ -730,7 +745,12 @@ async fn a_server_that_stops_is_reported_once_and_not_called_again() -> TestResu
     )?;
     let operator = Operator::approving([Decision::Approve]);
     let (outcome, events) = run(&mut h, "order", operator).await;
-    assert_eq!(outcome, TurnOutcome::Completed);
+    assert_eq!(
+        outcome,
+        TurnOutcome::CompletedWithGaps {
+            unsuccessful_calls: 3
+        }
+    );
     h.provider.verify()?;
     assert_eq!(
         count(&events, "connection_changed"),
@@ -792,7 +812,12 @@ async fn replacing_tools_keeps_the_conversation_and_applies_the_new_tools() -> T
     assert_eq!(replaced.len(), 2);
 
     let (outcome, events) = run(&mut h, "second", Operator::default()).await;
-    assert_eq!(outcome, TurnOutcome::Completed);
+    assert_eq!(
+        outcome,
+        TurnOutcome::CompletedWithGaps {
+            unsuccessful_calls: 1
+        }
+    );
     h.provider.verify()?;
     assert_eq!(count(&events, "tool_call_rejected"), 1);
     assert_eq!(h.sales.calls().len(), 1, "removed server is not called");
@@ -822,7 +847,12 @@ async fn unknown_names_and_invalid_arguments_are_refused_before_dispatch() -> Te
         }),
     ])?;
     let (outcome, events) = run(&mut h, "go", Operator::default()).await;
-    assert_eq!(outcome, TurnOutcome::Completed);
+    assert_eq!(
+        outcome,
+        TurnOutcome::CompletedWithGaps {
+            unsuccessful_calls: 3
+        }
+    );
     h.provider.verify()?;
     assert_eq!(count(&events, "tool_call_rejected"), 3);
     assert_eq!(count(&events, "approval_requested"), 0);
@@ -911,5 +941,16 @@ async fn next_message_after_tool_results_keeps_roles_alternating() -> TestResult
         [Role::User, Role::Assistant, Role::User, Role::Assistant]
     );
     h.provider.verify()?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_denied_write_alone_is_not_a_gap() -> TestResult {
+    let mut h = harness(vec![
+        ScriptedTurn::tool_call("u1", "sales__create_order", json!({ "supplier": "x" })),
+        ScriptedTurn::text("You declined the order."),
+    ])?;
+    let (outcome, _) = run(&mut h, "order", Operator::approving([Decision::Deny])).await;
+    assert_eq!(outcome, TurnOutcome::Completed);
     Ok(())
 }

@@ -135,6 +135,14 @@ fn render_approval(request: &ApprovalRequest, out: &mut impl Write) -> io::Resul
 pub fn describe(outcome: &TurnOutcome) -> String {
     match outcome {
         TurnOutcome::Completed => "completed".to_owned(),
+        TurnOutcome::CompletedWithGaps { unsuccessful_calls } => format!(
+            "completed with gaps: {unsuccessful_calls} tool {} did not succeed",
+            if *unsuccessful_calls == 1 {
+                "call"
+            } else {
+                "calls"
+            }
+        ),
         TurnOutcome::LimitReached { limit } => {
             let limit = match limit {
                 LimitKind::ModelRequests => "model requests",
