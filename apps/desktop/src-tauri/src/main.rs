@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use tauri::Emitter;
+
 mod activity_export;
 mod composition;
 mod sessions;
@@ -145,19 +147,25 @@ async fn settings_providers(
 }
 #[tauri::command]
 async fn settings_save_provider(
+    app: tauri::AppHandle,
     settings: State<'_, Arc<Settings>>,
     request: settings::SaveProviderRequest,
 ) -> Result<settings::ProviderSettingsView, CommandError> {
-    settings
+    let result = settings
         .save_provider(request.replacing.as_deref(), request.entry)
-        .await
+        .await?;
+    let _ = app.emit_to("main", "settings-changed", ());
+    Ok(result)
 }
 #[tauri::command]
 async fn settings_remove_provider(
+    app: tauri::AppHandle,
     settings: State<'_, Arc<Settings>>,
     request: settings::ProviderRequest,
 ) -> Result<settings::ProviderSettingsView, CommandError> {
-    settings.remove_provider(&request.id).await
+    let result = settings.remove_provider(&request.id).await?;
+    let _ = app.emit_to("main", "settings-changed", ());
+    Ok(result)
 }
 
 #[derive(Debug, Deserialize)]
@@ -196,12 +204,15 @@ async fn settings_view(settings: State<'_, Arc<Settings>>) -> Result<SettingsVie
 
 #[tauri::command]
 async fn settings_save_server(
+    app: tauri::AppHandle,
     settings: State<'_, Arc<Settings>>,
     request: SaveServerRequest,
 ) -> Result<SettingsView, CommandError> {
-    settings
+    let result = settings
         .save_server(request.replacing.as_deref(), request.entry)
-        .await
+        .await?;
+    let _ = app.emit_to("main", "settings-changed", ());
+    Ok(result)
 }
 
 #[tauri::command]
@@ -216,28 +227,37 @@ async fn settings_test_server(
 
 #[tauri::command]
 async fn settings_remove_server(
+    app: tauri::AppHandle,
     settings: State<'_, Arc<Settings>>,
     request: ServerRequest,
 ) -> Result<SettingsView, CommandError> {
-    settings.remove_server(&request.id).await
+    let result = settings.remove_server(&request.id).await?;
+    let _ = app.emit_to("main", "settings-changed", ());
+    Ok(result)
 }
 
 #[tauri::command]
 async fn settings_reconnect_server(
+    app: tauri::AppHandle,
     settings: State<'_, Arc<Settings>>,
     request: ServerRequest,
 ) -> Result<SettingsView, CommandError> {
-    settings.reconnect(&request.id).await
+    let result = settings.reconnect(&request.id).await?;
+    let _ = app.emit_to("main", "settings-changed", ());
+    Ok(result)
 }
 
 #[tauri::command]
 async fn settings_set_permission(
+    app: tauri::AppHandle,
     settings: State<'_, Arc<Settings>>,
     request: PermissionRequest,
 ) -> Result<SettingsView, CommandError> {
-    settings
+    let result = settings
         .set_permission(&request.server, &request.tool, request.class)
-        .await
+        .await?;
+    let _ = app.emit_to("main", "settings-changed", ());
+    Ok(result)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -16,5 +16,3 @@ export const saveProvider = (replacing: string | null, entry: ProviderEntry) =>
 export const removeProvider = (id: string) =>
   invoke<ProviderSettingsView>('settings_remove_provider', { request: { id } })
 
-/** Both mounted pages use this signal; the native configuration remains the source of truth. */
-export function providersChanged() { window.dispatchEvent(new Event('igor:providers-changed')) }

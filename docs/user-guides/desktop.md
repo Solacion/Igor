@@ -221,3 +221,7 @@ If the model answers after unsuccessful tool calls, the desktop shows “The ans
 ### Models without tool calling
 
 When a provider reports that its model cannot call tools, the conversation shows the core diagnostic as plain text, followed by “Choose a model with tool calling in Settings → Model providers.” This is a distinct failed state. Select the **Settings → Model providers** link in that message, choose a model with tool calling, then send again. Existing messages remain visible.
+
+### Conversation and Settings updates
+
+The conversation uses an instance-scoped lifecycle composable and validated core event variants. Settings and the conversation share one application-owned store. Successful native Settings changes emit `settings-changed` to the local main window; runtime connection/tool-list events also trigger a refresh. The desktop no longer uses a three-second browser poll or a provider-change window event. An idle server that exits without a runtime event is detected on the next operation rather than by a browser timer. The Igor brand is a keyboard-accessible home button.

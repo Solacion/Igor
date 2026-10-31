@@ -1,11 +1,7 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 
-/** Core schema v1. Unknown event variants must be ignored by consumers. */
-export interface CoreEvent {
-  schema_version: number
-  sequence: number
-  event: { event: string; [key: string]: unknown }
-}
+export type { EventEnvelope as CoreEvent } from './events'
+import type { EventEnvelope as CoreEvent } from './events'
 export interface SessionInfo {
   session_id: string
   provider_id: string
