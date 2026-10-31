@@ -63,6 +63,9 @@ function finish(value: unknown) {
       break
     case 'cancelled': status.value = 'Cancelled — the answer may be incomplete'; break
     case 'limit_reached': status.value = `Stopped at limit: ${outcome.limit}. The answer may be incomplete.`; break
+    case 'tools_unsupported':
+      status.value = `${session?.info.model ?? selected.value?.model ?? 'This model'} can't call tools. Choose a model with tool calling in Settings → Model providers.`
+      break
     case 'failed': status.value = `Turn failed: ${outcome.message}`; break
     default: status.value = 'Not a full answer — the runtime returned an unrecognized outcome.'; break
   }

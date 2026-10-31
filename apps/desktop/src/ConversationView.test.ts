@@ -6,16 +6,16 @@ import ConversationView from './ConversationView.vue'
 import type { CoreEvent } from './session'
 
 afterEach(() => { clearMocks(); vi.useRealTimers() })
-function backend(options: { unavailable?: string; send?: () => unknown } = {}) {
+function backend(options: { unavailable?: string; send?: () => unknown; model?: string } = {}) {
   let channel: Channel<CoreEvent> | undefined
   let sequence = 0
   const calls: Array<{ command: string; args: any }> = []
   mockIPC((command, args: any) => {
     calls.push({ command, args })
-    if (command === 'conversation_providers') return { providers: [{ id: 'local', model: 'demo', unavailable: options.unavailable ?? null }] }
+    if (command === 'conversation_providers') return { providers: [{ id: 'local', model: options.model ?? 'demo', unavailable: options.unavailable ?? null }] }
     if (command === 'export_activity') return '/app-data/activity.jsonl'
     if (command === 'settings_view') return { config_path: '/config', servers: [] }
-    if (command === 'start_session') { channel = args.events; sequence = 0; return { session_id: 'one', provider_id: 'local', model: 'demo', servers: [] } }
+    if (command === 'start_session') { channel = args.events; sequence = 0; return { session_id: 'one', provider_id: 'local', model: options.model ?? 'demo', servers: [] } }
     if (command === 'send_message') return options.send?.() ?? { outcome: 'completed' }
   })
   return { calls, emit(event: CoreEvent['event']) { channel?.onmessage({ schema_version: 1, sequence: sequence++, event }) } }
@@ -279,3 +279,22 @@ it.each([{ outcome: 'future_variant' }, {}, null])('treats unknown or missing ou
   expect(wrapper.text()).toContain('Not a full answer')
   expect(wrapper.text()).not.toContain('Completed'); wrapper.unmount()
 })
+
+for (const transport of ['return', 'event']) {
+  it(`explains unsupported tool calling through the ${transport} using literal session model text`, async () => {
+    const model = '<img src=x onerror=alert(1)>'
+    let done: (value: unknown) => void = () => {}
+    const outcome = { outcome: 'tools_unsupported', message: 'provider diagnostic' }
+    const mock = backend({ model, send: () => transport === 'return' ? outcome : new Promise(resolve => { done = resolve }) })
+    const wrapper = mount(ConversationView); await start(wrapper)
+    if (transport === 'event') {
+      mock.emit({ event: 'turn_finished', outcome }); await flushPromises()
+    }
+    expect(wrapper.text()).toContain(`${model} can't call tools. Choose a model with tool calling in Settings → Model providers.`)
+    expect(wrapper.text()).not.toContain('provider diagnostic')
+    expect(wrapper.text()).not.toContain('Not a full answer')
+    expect(wrapper.text()).not.toContain('Turn failed')
+    expect(wrapper.find('img').exists()).toBe(false)
+    done(outcome); await flushPromises(); wrapper.unmount()
+  })
+}
