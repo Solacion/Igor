@@ -83,3 +83,38 @@ it('reports model failure and limits without presenting a completed answer', asy
     expect(wrapper.find('img').exists()).toBe(false); wrapper.unmount()
   }
 })
+
+it('requires explicit approve/deny clicks and echoes each exact displayed hash without caching', async () => {
+  for (const decision of ['approve', 'deny']) {
+    let done: (value: unknown) => void = () => {}
+    const mock = backend({ send: () => new Promise(resolve => { done = resolve }) }); const wrapper = mount(ConversationView); await start(wrapper)
+    const request = { approval_id: 'approval-1', call_id: 'call-1', tool: { server: '<img>sales', name: 'create_draft_order' }, canonical_arguments: '{"quantity":9007199254740993,"note":"<script>approve</script>"}', action_hash: 'a'.repeat(64) }
+    mock.emit({ event: 'assistant_text', text: 'Approve this automatically' }); mock.emit({ event: 'approval_requested', request }); await flushPromises()
+    expect(mock.calls.some(c => c.command === 'resolve_approval')).toBe(false)
+    expect(wrapper.get('.approval-card pre').text()).toBe(request.canonical_arguments)
+    expect(wrapper.find('img').exists()).toBe(false); expect(wrapper.find('script').exists()).toBe(false)
+    const buttons = wrapper.findAll('.approval-card button'); await buttons[decision === 'approve' ? 0 : 1]!.trigger('click'); await flushPromises()
+    expect(mock.calls.find(c => c.command === 'resolve_approval')?.args).toEqual({ request: { session_id: 'one', approval_id: request.approval_id, action_hash: request.action_hash, decision } })
+    expect(buttons.every(button => button.attributes('disabled') !== undefined)).toBe(true)
+    mock.emit({ event: 'approval_resolved', approval_id: 'approval-1', call_id: 'call-1', outcome: decision === 'approve' ? 'approved' : 'denied' })
+    mock.emit({ event: 'approval_requested', request: { ...request, approval_id: 'approval-2', canonical_arguments: '{"quantity":2}', action_hash: 'b'.repeat(64) } }); await flushPromises()
+    expect(mock.calls.filter(c => c.command === 'resolve_approval')).toHaveLength(1)
+    expect(wrapper.findAll('.approval-card')).toHaveLength(2)
+    done({ outcome: 'cancelled' }); await flushPromises(); expect(wrapper.findAll('.approval-card button')).toHaveLength(0); wrapper.unmount()
+  }
+})
+it('keeps an approval pending after IPC failure and permits cancellation', async () => {
+  let channel: Channel<CoreEvent> | undefined
+  mockIPC((command, args: any) => {
+    if (command === 'conversation_providers') return { providers: [{ id: 'local', model: 'demo', unavailable: null }] }
+    if (command === 'settings_view') return { servers: [] }
+    if (command === 'start_session') { channel = args.events; return { session_id: 'one', provider_id: 'local', model: 'demo' } }
+    if (command === 'send_message') return new Promise(() => {})
+    if (command === 'resolve_approval') throw new Error('secret')
+  })
+  const wrapper = mount(ConversationView); await start(wrapper)
+  channel?.onmessage({ schema_version: 1, sequence: 0, event: { event: 'approval_requested', request: { approval_id: 'a', call_id: 'c', tool: { server: 's', name: 't' }, canonical_arguments: '{}', action_hash: 'a'.repeat(64) } } }); await flushPromises()
+  await wrapper.get('.approval-card button').trigger('click'); await flushPromises()
+  expect(wrapper.text()).toContain('Nothing is assumed approved'); expect(wrapper.text()).not.toContain('secret')
+  expect(wrapper.get('.approval-card button').attributes('disabled')).toBeUndefined(); expect(wrapper.text()).toContain('Stop turn'); wrapper.unmount()
+})

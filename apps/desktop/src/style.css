@@ -119,3 +119,9 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus
 .tool-activity ol { padding: 0; list-style: none; }
 .activity-row { padding: 1rem; margin: .75rem 0; border: 1px solid var(--line); border-radius: .5rem; background: var(--surface); }
 .conversation pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; }
+
+.approval-card { padding: 1.25rem; margin: 1rem 0; border: 2px solid var(--accent); border-radius: .75rem; }
+.approval-card h2 { font-size: 1.25rem; }
+.approval-card h3 { font-size: 1rem; margin-bottom: .5rem; }
+.approval-card dd { margin: 0 0 .5rem; overflow-wrap: anywhere; }
+.approval-card dt { color: var(--muted); font-size: .85rem; }

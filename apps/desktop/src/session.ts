@@ -54,3 +54,11 @@ export interface ProviderView { id: string; model: string; unavailable: string |
 export function readProviders() {
   return invoke<{ providers: ProviderView[] }>('conversation_providers')
 }
+
+export interface ApprovalPreview {
+  approval_id: string
+  call_id: string
+  tool: { server: string; name: string }
+  canonical_arguments: string
+  action_hash: string
+}
