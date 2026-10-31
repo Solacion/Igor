@@ -187,6 +187,8 @@ Audit results depend on the fetched advisory database; read the latest job outpu
 
 ## Manual smoke-test checklist — NOT RUN
 
+Use the [maintainer desktop smoke-test checklist](../verification/desktop-smoke-test.md) to record separate LM Studio and Claude PASS/FAIL results, expected outcomes and limitations.
+
 These are pending checks for the native app and a real configured provider. Automated ScriptedProvider/fixture tests do not establish live-provider or visual correctness. Do not mark these checked without running them.
 
 Use the one-command disposable fixture demo above and follow its exact prompts and expected results. Never put key values in the config, chat or checklist evidence. Preparation/scripted checks do not count as a manual/live pass.
