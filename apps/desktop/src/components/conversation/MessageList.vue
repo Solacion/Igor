@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
+import type { ApprovalDecision } from '../../session'
 import type { TimelineEntry } from '../../conversationDisplay'
 import { approvalSummary } from '../../conversationDisplay'
 import ToolActivity from './ToolActivity.vue'
@@ -7,7 +8,7 @@ import ApprovalCard from './ApprovalCard.vue'
 import ClarificationCard from './ClarificationCard.vue'
 import type { ApprovalItem, QuestionItem } from '../../composables/useConversation'
 const props = defineProps<{ entries: TimelineEntry[]; busy: boolean }>()
-const emit = defineEmits<{ decide: [item: ApprovalItem, decision: 'approve' | 'deny']; answer: [item: QuestionItem] }>()
+const emit = defineEmits<{ decide: [item: ApprovalItem, decision: ApprovalDecision]; answer: [item: QuestionItem] }>()
 const container = ref<HTMLOListElement>()
 const following = ref(true)
 const announcement = ref('')
@@ -45,6 +46,7 @@ watch(() => props.entries, async entries => {
       <template v-if="entry.kind === 'message'"><strong>{{ entry.message.role }}</strong><p class="literal">{{ entry.message.text }}</p></template>
       <ToolActivity v-else-if="entry.kind === 'tool'" :call="entry.call" />
       <ToolActivity v-else-if="entry.kind === 'connection'" :connection="entry.connection" />
+      <p v-else-if="entry.kind === 'session-grant'" class="literal">{{ entry.tool.server }} · {{ entry.tool.name }}: Ran without asking — allowed for this conversation</p>
       <ApprovalCard v-else-if="entry.kind === 'approval'" :item="entry.item" :busy="busy" @decide="emit('decide', entry.item, $event)" />
       <ClarificationCard v-else-if="entry.kind === 'question'" :item="entry.item" :busy="busy" @answer="emit('answer', entry.item)" />
     </li>

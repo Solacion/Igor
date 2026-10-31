@@ -48,10 +48,14 @@ export type RuntimeEvent = {
   event: 'approval_requested'
   request: ApprovalPreview
 } | {
+  event: 'approved_for_session'
+  call_id: string
+  tool: ToolId
+} | {
   event: 'approval_resolved'
   approval_id: string
   call_id: string
-  outcome: 'approved' | 'denied' | 'cancelled' | 'invalidated'
+  outcome: 'approved' | 'approved_for_session' | 'denied' | 'cancelled' | 'invalidated'
 } | {
   event: 'clarification_requested'
   request_id: string
@@ -79,6 +83,7 @@ function tool(value: unknown): value is ToolId {
 export function isApproval(value: unknown): value is ApprovalPreview {
   return isRecord(value) && typeof value.approval_id === 'string' && typeof value.call_id === 'string'
     && tool(value.tool) && typeof value.canonical_arguments === 'string' && typeof value.action_hash === 'string'
+    && (value.session_grant_allowed === undefined || typeof value.session_grant_allowed === 'boolean')
 }
 export function isTurnOutcome(value: unknown): value is TurnOutcome {
   if (!isRecord(value))
@@ -123,8 +128,11 @@ export function isAssistantText(v: unknown): v is Variant<'assistant_text'> {
 export function isApprovalRequested(v: unknown): v is Variant<'approval_requested'> {
   return kind(v, 'approval_requested') && isApproval(v.request)
 }
+export function isApprovedForSession(v: unknown): v is Variant<'approved_for_session'> {
+  return kind(v, 'approved_for_session') && typeof v.call_id === 'string' && tool(v.tool)
+}
 export function isApprovalResolved(v: unknown): v is Variant<'approval_resolved'> {
-  return kind(v, 'approval_resolved') && typeof v.approval_id === 'string' && typeof v.call_id === 'string' && ['approved', 'denied', 'cancelled', 'invalidated'].includes(typeof v.outcome === 'string' ? v.outcome : '')
+  return kind(v, 'approval_resolved') && typeof v.approval_id === 'string' && typeof v.call_id === 'string' && ['approved', 'approved_for_session', 'denied', 'cancelled', 'invalidated'].includes(typeof v.outcome === 'string' ? v.outcome : '')
 }
 export function isClarificationRequested(v: unknown): v is Variant<'clarification_requested'> {
   return kind(v, 'clarification_requested') && typeof v.request_id === 'string' && typeof v.question === 'string'
@@ -138,7 +146,7 @@ export function isInputRejected(v: unknown): v is Variant<'input_rejected'> {
 export function isTurnFinished(v: unknown): v is Variant<'turn_finished'> {
   return kind(v, 'turn_finished') && 'outcome' in v
 }
-export const eventGuards = [isConnectionChanged, isToolsChanged, isToolCallProposed, isToolCallRejected, isToolCallStarted, isToolCallCompleted, isToolCallFailed, isAssistantText, isApprovalRequested, isApprovalResolved, isClarificationRequested, isClarificationAnswered, isInputRejected, isTurnFinished]
+export const eventGuards = [isConnectionChanged, isToolsChanged, isToolCallProposed, isToolCallRejected, isToolCallStarted, isToolCallCompleted, isToolCallFailed, isAssistantText, isApprovalRequested, isApprovedForSession, isApprovalResolved, isClarificationRequested, isClarificationAnswered, isInputRejected, isTurnFinished]
 export function parseEvent(value: unknown): RuntimeEvent | undefined {
   for (const guard of eventGuards) {
     if (guard(value))
