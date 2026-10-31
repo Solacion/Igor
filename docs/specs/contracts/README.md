@@ -2,9 +2,10 @@
 
 Status: agreed for the demo · 30 October 2026
 
-The example scenario ("Create an order for supplier X") uses one MCP server for sales and stock. Its tool contract is defined here, and the fixture server implements it. A live server that implements the same contract, such as a point-of-sale MCP server, can replace the fixture server through configuration alone. The IGOR core knows nothing about these contracts.
+The example scenario ("Create an order for supplier X") uses two MCP servers: sales and stock, and a supplier catalogue. Their tool contracts are defined here, and the fixture servers implement them. A live server that implements the same contract, such as a point-of-sale MCP server, can replace a fixture server through configuration alone. The IGOR core knows nothing about these contracts.
 
 - [Sales and stock](sales.md): `get_stock_levels`, `get_sales_history` and the write-classified `create_draft_order`.
+- [Supplier catalogue](supplier.md): `get_catalogue`.
 - [Fixture file format](fixture-format.md): how a fixture server records and matches calls, and the contract check.
 
 ## Protocol

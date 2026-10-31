@@ -5,7 +5,7 @@
 - IGOR is a standalone, embeddable, local-first runtime in its own open-source repository.
 - Support multiple MCP servers, a model-provider abstraction and permissions/approvals.
 - Keep domain MCP servers, such as a future POS server, independent of IGOR.
-- Demo the generic runtime for the interview; a purchasing scenario using sales and stock data is an illustrative example only.
+- Demo the generic runtime for the interview; a purchasing scenario using sales, stock and supplier catalogue data is an illustrative example only.
 - Keep specifications and user guides under `/docs`, with a root `README.md`.
 - Track agreed work in [GitHub Issues](https://github.com/Solacion/Igor/issues) as epics, features, user stories and tasks.
 

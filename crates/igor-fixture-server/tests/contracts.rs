@@ -189,7 +189,7 @@ fn every_fixture_matches_its_contract() -> TestResult {
         .iter()
         .filter_map(|(path, _)| path.file_name()?.to_str())
         .collect();
-    assert_eq!(names, ["sales.json"]);
+    assert_eq!(names, ["sales.json", "supplier.json"]);
     for (fixture_path, contract_path) in pairs {
         let fixture: Value = serde_json::from_str(&std::fs::read_to_string(&fixture_path)?)?;
         let contract = parse_contract(&std::fs::read_to_string(&contract_path)?)?;

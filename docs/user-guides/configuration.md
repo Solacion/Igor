@@ -14,7 +14,7 @@ Relative paths in the file resolve against the file's directory, made absolute w
 
 ## Sample
 
-[`examples/igor.toml`](https://github.com/Solacion/Igor/blob/main/examples/igor.toml) configures the example scenario. It has one fixture server, `sales`, and needs no credentials to load. A test loads it in CI.
+[`examples/igor.toml`](https://github.com/Solacion/Igor/blob/main/examples/igor.toml) configures the example scenario. It has two fixture servers, `sales` and `supplier`, and needs no credentials to load. A test loads it in CI.
 
 ```toml
 [[providers]]

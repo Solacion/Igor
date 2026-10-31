@@ -50,7 +50,7 @@ fn sample_config_loads_and_needs_no_credentials() -> TestResult {
     let config = Config::load(&sample_path())?;
 
     let ids: Vec<&str> = config.servers().iter().map(|s| s.id.as_str()).collect();
-    assert_eq!(ids, ["sales"]);
+    assert_eq!(ids, ["sales", "supplier"]);
     for server in config.servers() {
         assert!(server.command.ends_with("target/debug/igor-fixture-server"));
         assert!(server.env.is_empty(), "fixture servers need no secrets");
@@ -66,6 +66,10 @@ fn sample_config_loads_and_needs_no_credentials() -> TestResult {
             Classification::Read
         );
     }
+    assert_eq!(
+        permissions.classify(&tool("supplier", "get_catalogue")?),
+        Classification::Read
+    );
     let local = config.provider("lm_studio").ok_or("lm_studio missing")?;
     assert_eq!(local.kind, ProviderKind::OpenAiCompatible);
     assert!(local.api_key.is_none());

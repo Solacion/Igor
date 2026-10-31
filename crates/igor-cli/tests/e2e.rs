@@ -1,6 +1,6 @@
-//! End-to-end runs of the `igor-cli` binary: scripted model, real `igor-fixture-server` over
-//! stdio, terminal approvals on stdin. The fixture server's call log is the oracle for what
-//! reached the server.
+//! End-to-end runs of the `igor-cli` binary: scripted model, real `igor-fixture-server`
+//! processes for the sales and supplier servers over stdio, terminal approvals on stdin. The
+//! fixture servers' call logs are the oracle for what reached each server.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -49,7 +49,10 @@ struct Run {
     dir: PathBuf,
     output: Output,
     stdout: String,
+    /// Calls logged by the sales server.
     calls: Vec<Value>,
+    /// Calls logged by the supplier server.
+    supplier_calls: Vec<Value>,
 }
 
 impl Run {
@@ -61,7 +64,7 @@ impl Run {
     }
 }
 
-/// Runs `igor-cli` with the sales fixture server, `script` and `stdin`, in a fresh directory.
+/// Runs `igor-cli` with the sales and supplier fixture servers, `script` and `stdin`, in a fresh directory.
 fn run(name: &str, script: &Value, stdin: &str) -> Result<Run, Box<dyn std::error::Error>> {
     run_with(name, script, stdin, &[])
 }
@@ -82,23 +85,35 @@ fn run_with(
     }
     std::fs::create_dir_all(&dir)?;
     let call_log = dir.join("calls.jsonl");
-    let fixture = workspace_root().join("crates/igor-fixture-server/fixtures/sales.json");
+    let supplier_log = dir.join("supplier-calls.jsonl");
+    let fixtures = workspace_root().join("crates/igor-fixture-server/fixtures");
     let quote = |path: &Path| serde_json::to_string(&path.display().to_string());
     let config = format!(
         r#"[[servers]]
 id = "sales"
 transport = "stdio"
 command = {command}
-args = ["--fixture", {fixture}, "--call-log", {call_log}]
+args = ["--fixture", {sales}, "--call-log", {call_log}]
+
+[[servers]]
+id = "supplier"
+transport = "stdio"
+command = {command}
+args = ["--fixture", {supplier}, "--call-log", {supplier_log}]
 
 [permissions.sales]
 get_stock_levels = "read"
 get_sales_history = "read"
 create_draft_order = "write"
+
+[permissions.supplier]
+get_catalogue = "read"
 "#,
         command = quote(&fixture_server()?)?,
-        fixture = quote(&fixture)?,
+        sales = quote(&fixtures.join("sales.json"))?,
+        supplier = quote(&fixtures.join("supplier.json"))?,
         call_log = quote(&call_log)?,
+        supplier_log = quote(&supplier_log)?,
     );
     let config_path = dir.join("igor.toml");
     std::fs::write(&config_path, config)?;
@@ -125,11 +140,15 @@ create_draft_order = "write"
         .write_all(stdin.as_bytes())?;
     let output = child.wait_with_output()?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    let calls = std::fs::read_to_string(&call_log)
-        .unwrap_or_default()
-        .lines()
-        .map(serde_json::from_str)
-        .collect::<Result<Vec<Value>, _>>()?;
+    let read_log = |path: &Path| {
+        std::fs::read_to_string(path)
+            .unwrap_or_default()
+            .lines()
+            .map(serde_json::from_str)
+            .collect::<Result<Vec<Value>, _>>()
+    };
+    let calls = read_log(&call_log)?;
+    let supplier_calls = read_log(&supplier_log)?;
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         !stderr.contains("script did not match"),
@@ -140,6 +159,7 @@ create_draft_order = "write"
         output,
         stdout,
         calls,
+        supplier_calls,
     })
 }
 
@@ -164,7 +184,10 @@ fn approved_draft_order_reaches_the_server_once() -> TestResult {
     assert_eq!(run.calls[2]["arguments"]["lines"][0]["quantity"], json!(12));
     // Every read matched an exact recording: the example script stays inside the fixture data.
     // Any draft order is accepted, so the write matches the fallback.
-    for call in &run.calls {
+    assert!(run.stdout.contains("[server supplier: connected, 1 tools]"));
+    assert_eq!(run.supplier_calls.len(), 1);
+    assert_eq!(run.supplier_calls[0]["tool"], json!("get_catalogue"));
+    for call in run.calls.iter().chain(&run.supplier_calls) {
         let expected = if call["tool"] == "create_draft_order" {
             "fallback"
         } else {
