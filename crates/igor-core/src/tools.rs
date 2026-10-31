@@ -186,6 +186,13 @@ pub trait ToolBackend: Send + Sync {
     /// later calls fail with [`BackendError::NotConnected`]. The default does nothing.
     async fn shutdown(&self) {}
 
+    /// The server's most recent diagnostic output, such as a stdio server's stderr, oldest
+    /// first, with secret values given to the server already removed. Untrusted server output:
+    /// display as plain text only. The default has none.
+    fn recent_stderr(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Lists the tools the server currently exposes.
     async fn list_tools(&self) -> Result<Vec<ToolDescriptor>, BackendError>;
 

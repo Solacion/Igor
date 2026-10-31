@@ -8,6 +8,13 @@
 //! [`StdioServerConfig::env_allowlist`] are copied from IGOR's environment, plus those set
 //! explicitly in [`StdioServerConfig::env`]. API keys and other secrets in IGOR's environment are
 //! therefore not inherited.
+//!
+//! The child's stderr is kept as bounded, redacted diagnostics: see [`McpBackend::recent_stderr`]
+//! and [`ConnectError::stderr`].
+
+mod stderr;
+
+pub use stderr::{MAX_STDERR_LINE_CHARS, MAX_STDERR_LINES, REDACTED};
 
 use std::ffi::OsString;
 use std::fmt;
@@ -87,6 +94,14 @@ impl StdioServerConfig {
         }
         command
     }
+
+    /// The secret values given to the child, which its stderr must not reveal.
+    fn secret_values(&self) -> Vec<String> {
+        self.env
+            .iter()
+            .map(|(_, value)| value.to_string_lossy().into_owned())
+            .collect()
+    }
 }
 
 impl fmt::Debug for StdioServerConfig {
@@ -122,6 +137,8 @@ pub enum ConnectError {
         server: ServerId,
         /// What went wrong.
         reason: String,
+        /// The server's last stderr lines, redacted.
+        stderr: Vec<String>,
     },
     /// `initialize` did not complete within the startup timeout.
     #[error("server {server} did not initialize within {timeout:?}")]
@@ -130,7 +147,20 @@ pub enum ConnectError {
         server: ServerId,
         /// The startup timeout.
         timeout: Duration,
+        /// The server's last stderr lines, redacted.
+        stderr: Vec<String>,
     },
+}
+
+impl ConnectError {
+    /// The server's last stderr lines, redacted, oldest first. Empty when the process did not
+    /// start. Untrusted server output: display as plain text only.
+    pub fn stderr(&self) -> &[String] {
+        match self {
+            Self::Spawn { .. } => &[],
+            Self::Initialize { stderr, .. } | Self::Timeout { stderr, .. } => stderr,
+        }
+    }
 }
 
 /// The MCP client side: records `notifications/tools/list_changed` so the session can tell when
@@ -143,6 +173,18 @@ impl ClientHandler for Client {
     async fn on_tool_list_changed(&self, _context: NotificationContext<RoleClient>) {
         self.tool_list_version.fetch_add(1, Ordering::SeqCst);
     }
+}
+
+/// The stderr lines of a server whose start failed. The child is stopping, so the reader gets a
+/// moment to collect its last lines.
+async fn last_lines(
+    reader: Option<tokio::task::JoinHandle<()>>,
+    log: &stderr::StderrLog,
+) -> Vec<String> {
+    if let Some(reader) = reader {
+        let _ = tokio::time::timeout(stderr::DRAIN_TIMEOUT, reader).await;
+    }
+    log.snapshot()
 }
 
 /// Bound on [`McpBackend::shutdown`]: how long the server gets to exit after its input closes
@@ -161,6 +203,7 @@ pub struct McpBackend {
     service: Mutex<Option<RunningService<RoleClient, Client>>>,
     /// Count of `notifications/tools/list_changed` received.
     tool_list_version: Arc<AtomicU64>,
+    stderr: stderr::StderrLog,
     call_timeout: Duration,
 }
 
@@ -177,39 +220,62 @@ impl fmt::Debug for McpBackend {
 impl McpBackend {
     /// Starts the server and completes the MCP `initialize` handshake.
     ///
-    /// The child's stderr is discarded; bounded diagnostics capture is not implemented yet.
+    /// The child's stderr is captured from the start: see [`McpBackend::recent_stderr`]. When
+    /// the start fails, the error carries the last lines.
     pub async fn connect(
         server_id: ServerId,
         config: &StdioServerConfig,
     ) -> Result<Self, ConnectError> {
-        let (transport, _stderr) = TokioChildProcess::builder(config.command())
-            .stderr(Stdio::null())
+        let (transport, child_stderr) = TokioChildProcess::builder(config.command())
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|source| ConnectError::Spawn {
                 server: server_id.clone(),
                 source,
             })?;
+        let (stderr, reader) = match child_stderr {
+            Some(child_stderr) => {
+                let (log, task) = stderr::capture(child_stderr, config.secret_values());
+                (log, Some(task))
+            }
+            None => (stderr::StderrLog::default(), None),
+        };
         let tool_list_version = Arc::new(AtomicU64::new(0));
         let client = Client {
             tool_list_version: Arc::clone(&tool_list_version),
         };
-        let service = tokio::time::timeout(config.startup_timeout, client.serve(transport))
-            .await
-            .map_err(|_| ConnectError::Timeout {
-                server: server_id.clone(),
-                timeout: config.startup_timeout,
-            })?
-            .map_err(|error| ConnectError::Initialize {
-                server: server_id.clone(),
-                reason: error.to_string(),
-            })?;
+        let started = tokio::time::timeout(config.startup_timeout, client.serve(transport)).await;
+        let service = match started {
+            Ok(Ok(service)) => service,
+            Ok(Err(error)) => {
+                return Err(ConnectError::Initialize {
+                    server: server_id,
+                    reason: error.to_string(),
+                    stderr: last_lines(reader, &stderr).await,
+                });
+            }
+            Err(_elapsed) => {
+                return Err(ConnectError::Timeout {
+                    server: server_id,
+                    timeout: config.startup_timeout,
+                    stderr: last_lines(reader, &stderr).await,
+                });
+            }
+        };
         Ok(Self {
             server_id,
             peer: service.peer().clone(),
             service: Mutex::new(Some(service)),
             tool_list_version,
+            stderr,
             call_timeout: config.call_timeout,
         })
+    }
+
+    /// The server's last stderr lines, redacted, oldest first. Untrusted server output: display
+    /// as plain text only.
+    pub fn recent_stderr(&self) -> Vec<String> {
+        self.stderr.snapshot()
     }
 
     fn service(&self) -> MutexGuard<'_, Option<RunningService<RoleClient, Client>>> {
@@ -259,6 +325,10 @@ impl McpBackend {
 impl ToolBackend for McpBackend {
     fn server_id(&self) -> &ServerId {
         &self.server_id
+    }
+
+    fn recent_stderr(&self) -> Vec<String> {
+        McpBackend::recent_stderr(self)
     }
 
     fn is_connected(&self) -> bool {

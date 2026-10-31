@@ -464,3 +464,68 @@ async fn tool_list_changed_notifications_bump_the_version() -> TestResult {
     assert_eq!(backend.tool_list_version(), 1);
     Ok(())
 }
+
+const STDERR_SECRET: &str = "IGOR-TEST-SECRET-5e1d";
+
+/// A `/bin/sh -c script` server given `TOKEN` as a secret.
+fn shell(script: &str) -> StdioServerConfig {
+    let mut config = StdioServerConfig::new("/bin/sh");
+    config.args = vec!["-c".into(), script.into()];
+    config.env = vec![("TOKEN".to_owned(), STDERR_SECRET.into())];
+    config.startup_timeout = Duration::from_secs(5);
+    config
+}
+
+#[tokio::test]
+async fn a_failed_start_carries_its_redacted_stderr() -> TestResult {
+    let crashing = shell(r#"echo "boot: token=$TOKEN" >&2; echo "module not found" >&2; exit 3"#);
+    let error = McpBackend::connect(ServerId::new("crashing")?, &crashing)
+        .await
+        .err()
+        .ok_or("a crashing server connected")?;
+    assert!(
+        matches!(error, ConnectError::Initialize { .. }),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.stderr(),
+        ["boot: token=[REDACTED]", "module not found"]
+    );
+    assert!(!format!("{error} {error:?}").contains(STDERR_SECRET));
+
+    let mut silent = shell(r#"echo "waiting with $TOKEN" >&2; exec sleep 30"#);
+    silent.startup_timeout = Duration::from_millis(300);
+    let error = McpBackend::connect(ServerId::new("silent")?, &silent)
+        .await
+        .err()
+        .ok_or("a silent server connected")?;
+    assert!(matches!(error, ConnectError::Timeout { .. }), "{error:?}");
+    assert_eq!(error.stderr(), ["waiting with [REDACTED]"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_running_server_keeps_its_recent_redacted_stderr() -> TestResult {
+    let server = fixture_server()?;
+    let script = format!(
+        r#"for n in $(seq 1 60); do echo "line $n" >&2; done; echo "using $TOKEN" >&2; exec "{}" --fixture "{}""#,
+        server.display(),
+        sales_fixture().display()
+    );
+    let backend = McpBackend::connect(ServerId::new("sales")?, &shell(&script)).await?;
+    assert!(!backend.list_tools().await?.is_empty());
+    let mut lines = Vec::new();
+    for _ in 0..50 {
+        lines = ToolBackend::recent_stderr(&backend);
+        if lines.iter().any(|line| line.starts_with("using")) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(lines.len(), igor_mcp::MAX_STDERR_LINES, "{lines:?}");
+    assert_eq!(lines.first().map(String::as_str), Some("line 12"));
+    assert!(lines.contains(&"using [REDACTED]".to_owned()), "{lines:?}");
+    assert!(lines.iter().all(|line| !line.contains(STDERR_SECRET)));
+    backend.shutdown().await;
+    Ok(())
+}

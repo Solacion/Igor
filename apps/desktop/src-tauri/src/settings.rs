@@ -183,6 +183,9 @@ impl ToolBackend for SharedBackend {
     fn tool_list_version(&self) -> u64 {
         self.0.tool_list_version()
     }
+    fn recent_stderr(&self) -> Vec<String> {
+        self.0.recent_stderr()
+    }
     async fn shutdown(&self) {
         self.0.shutdown().await;
     }

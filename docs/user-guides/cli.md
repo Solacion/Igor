@@ -15,7 +15,7 @@ cargo build -p igor-fixture-server -p igor-cli
 
 The scripted provider replays model turns from [`examples/order-script.json`](../../examples/order-script.json), so the run needs no network or model. It reads stock and sales from the `sales` fixture server and ordering terms from the `supplier` fixture server, then proposes `create_draft_order`. Answer `y` to approve it. Any other answer, or end of input, denies it and the call is never sent.
 
-A server that fails to start is reported as unavailable, and the run continues without it.
+A server that fails to start is reported as unavailable, and the run continues without it. Its last lines of error output follow, prefixed with `  | `. The values of secrets given to the server are shown as `[REDACTED]`. The model is told only that the server is unavailable, never its output.
 
 ## Options
 
