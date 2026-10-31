@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -58,6 +59,24 @@ quantities, first look up what the tools can tell you, then ask the operator ins
 When igor_ask_operator is available, ask with it and continue once you have the answer; do not \
 end your reply with a question.";
 
+/// Added to the system prompt when replies are spoken: see [`ReplyStyle::Spoken`].
+pub const SPOKEN_REPLY_PROMPT: &str = "- Your replies are read aloud by a speech synthesiser. Answer \
+in one to three short sentences of plain spoken English. Do not use Markdown, lists, tables, code, \
+emoji or symbols. Write amounts so they read naturally, such as \"2,268 rand\" or \"12 cases\". \
+Mention identifiers such as SKUs only when the operator needs them. When you propose an action \
+that needs approval, say in one sentence what it will do; the operator approves on screen.";
+
+/// How the operator receives replies.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplyStyle {
+    /// Read on screen. Markdown and lists are fine.
+    #[default]
+    Written,
+    /// Read aloud: short, plain sentences. Adds [`SPOKEN_REPLY_PROMPT`] to the system prompt.
+    Spoken,
+}
+
 /// Default maximum number of model requests per user message.
 pub const DEFAULT_MAX_MODEL_REQUESTS: u32 = 10;
 
@@ -96,6 +115,8 @@ pub struct SessionConfig {
     /// is told about them, so it can say which data is missing instead of answering as if the
     /// data did not exist. Update between turns with [`Session::set_unavailable_servers`].
     pub unavailable_servers: Vec<UnavailableServer>,
+    /// How replies reach the operator. Change between turns with [`Session::set_reply_style`].
+    pub reply_style: ReplyStyle,
 }
 
 /// A configured server that is not available.
@@ -122,6 +143,7 @@ impl Default for SessionConfig {
             result_limit: ResultSizeLimit::default(),
             ask_operator: true,
             unavailable_servers: Vec::new(),
+            reply_style: ReplyStyle::Written,
         }
     }
 }
@@ -351,6 +373,12 @@ impl Session {
     /// request. Hosts call it with [`Session::replace_tools`] when connections change.
     pub fn set_unavailable_servers(&mut self, servers: Vec<UnavailableServer>) {
         self.config.unavailable_servers = servers;
+    }
+
+    /// Sets how replies reach the operator, from the next model request. The conversation is
+    /// kept, so a host can switch voice on or off between turns.
+    pub fn set_reply_style(&mut self, style: ReplyStyle) {
+        self.config.reply_style = style;
     }
 
     /// Servers that reported a tool list change since their tools were registered, sorted. The
@@ -909,9 +937,14 @@ is called again"
 
     /// The host system prompt, plus a note on unavailable servers when there are any.
     fn system_prompt(&self) -> String {
+        let mut prompt = self.config.system_prompt.clone();
+        if self.config.reply_style == ReplyStyle::Spoken {
+            prompt.push('\n');
+            prompt.push_str(SPOKEN_REPLY_PROMPT);
+        }
         let servers = &self.config.unavailable_servers;
         if servers.is_empty() {
-            return self.config.system_prompt.clone();
+            return prompt;
         }
         let listed: Vec<String> = servers
             .iter()
@@ -926,10 +959,9 @@ is called again"
             })
             .collect();
         format!(
-            "{}\n- These configured servers are unavailable, so their tools are not offered and \
-their data cannot be retrieved: {}. When this affects the request, tell the operator which data \
-is missing.",
-            self.config.system_prompt,
+            "{prompt}\n- These configured servers are unavailable, so their tools are not offered \
+and their data cannot be retrieved: {}. When this affects the request, tell the operator which \
+data is missing.",
             listed.join("; ")
         )
     }
