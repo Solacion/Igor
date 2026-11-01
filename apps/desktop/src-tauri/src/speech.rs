@@ -287,6 +287,14 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 #[tauri::command]
+pub fn speech_sentences(text: String) -> Vec<String> {
+    igor_tts::sentences(&text)
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
+#[tauri::command]
 pub fn speech_status(speech: tauri::State<'_, Arc<Speech>>) -> SpeechStatus {
     speech.status()
 }
@@ -329,6 +337,19 @@ pub async fn speak(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sentence_command_uses_core_boundaries_and_byte_limits() {
+        assert_eq!(
+            speech_sentences("At 1.5 km/h; fine.\nNext!".into()),
+            ["At 1.5 km/h;", "fine.", "Next!"]
+        );
+        assert!(
+            speech_sentences("é".repeat(400))
+                .iter()
+                .all(|part| part.len() <= 300)
+        );
+    }
 
     fn request(voice: &str) -> SpeakRequest {
         SpeakRequest {
