@@ -137,7 +137,7 @@ it('keeps following the bottom when content grows without a new entry, unless sc
   const observers: { callback: () => void, targets: Set<Element> }[] = []
   vi.stubGlobal('ResizeObserver', class {
     targets = new Set<Element>()
-    constructor(private callback: () => void) { observers.push(this) }
+    constructor(public callback: () => void) { observers.push(this) }
     observe(target: Element) { this.targets.add(target) }
     disconnect() { this.targets.clear() }
     unobserve(target: Element) { this.targets.delete(target) }
