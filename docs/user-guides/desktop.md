@@ -41,13 +41,13 @@ Choose **lm_studio** in Igor for the no-cost live run. Choosing **claude** requi
 
    | Server | Tool | Permission |
    | --- | --- | --- |
-   | notes | list_notes | Use it freely (read) |
-   | sales | get_stock_levels | Use it freely (read) |
-   | sales | get_sales_history | Use it freely (read) |
-   | sales | create_draft_order | Ask me each time (write) |
-   | supplier | get_catalogue | Use it freely (read) |
+   | notes | list_notes | Always allow (read) |
+   | sales | get_stock_levels | Always allow (read) |
+   | sales | get_sales_history | Always allow (read) |
+   | sales | create_draft_order | Ask first (write) |
+   | supplier | get_catalogue | Always allow (read) |
 
-   Never set `create_draft_order` to read. Wait for each change to finish saving. Choose **Done**, select **lm_studio**, and choose **New conversation**.
+   Never set `create_draft_order` to read. Wait for each change to finish saving. Choose **‹ Conversation**, select **lm_studio** in the toolbar, and choose **New conversation** (the pencil icon).
 
 4. Send exactly:
 
@@ -112,14 +112,24 @@ The launcher uses Cargo metadata to honor `CARGO_TARGET_DIR`; use the same envir
 
 Follow the same setup, permission, approval, denial and export walkthrough above. Close the window or choose **Quit Igor** for awaited server shutdown. A successful release build or preparation-only run is not a manual/live demo pass.
 
+## Layout
+
+The window has a slim toolbar, the conversation and a message box pinned to the bottom. Only the conversation scrolls, with space kept for the scrollbar so it never covers text.
+
+- **Toolbar**: the model provider, a connection dot that opens the list of servers (with **Manage servers…**), and icon buttons for **New conversation**, **Export activity** and **Settings**.
+- **Conversation**: your messages are bubbles on the right. Igor's replies are formatted Markdown, including tables, lists and bold text. Raw HTML is shown as text, and links and images are not rendered. Tool work is one small line per run of steps.
+- **Approvals** are the one large card, with **Approve** on the right.
+- **Message box**: type and press Return, or click the microphone. The status line below it shows listening, transcribing and speaking.
+- A status bar at the bottom shows whether the desktop backend is ready and the app version.
+
 ## Manage MCP servers
 
-Choose **Settings** in the top bar. Under **MCP servers** you can:
+Choose **Settings** (the gear icon) in the conversation toolbar. Settings opens with a sidebar of sections; **‹ Conversation** at the top returns to the conversation. Under **MCP servers** you can:
 
 - **Add server**: give it a name, the program to run and its arguments. **Test connection** starts the server, lists its tools and stops it, without saving. **Save** shows the exact command line and asks you to confirm before Igor runs it.
 - See each server's connection status. A failed start shows the reason. **Reconnect** tries again.
 - **Edit** or **Remove** a server. Removing also removes its tool permissions.
-- Open **Tools and permissions** to choose what Igor may do with each tool: use it freely (`read`), ask you each time (`write`) or never (`denied`). A new tool is not allowed until you choose. Server descriptions and hints are shown as hints only.
+- Open **Tools and permissions** to choose what Igor may do with each tool: **Always allow** (`read`), **Ask first** (`write`) or **Never** (`denied`). A new tool is not allowed until you choose. When a server has more than five tools, a search box filters them by name or description. A tool the server says may change data still asks for approval under Always allow. Server descriptions and hints are shown as hints only.
 
 Under **Advanced**, set the working directory, the environment variables the server may inherit (such as `PATH`), secrets and timeouts. A secret is written as `NAME=IGOR_VARIABLE`: the server gets `NAME`, read from Igor's own environment variable `IGOR_VARIABLE`. Only the variable name is saved.
 
@@ -226,7 +236,7 @@ When a provider reports that its model cannot call tools, the conversation shows
 
 ### Conversation and Settings updates
 
-The conversation uses an instance-scoped lifecycle composable and validated core event variants. Settings and the conversation share one application-owned store. Successful native Settings changes emit `settings-changed` to the local main window; runtime connection/tool-list events also trigger a refresh. The desktop no longer uses a three-second browser poll or a provider-change window event. An idle server that exits without a runtime event is detected on the next operation rather than by a browser timer. The Igor brand is a keyboard-accessible home button.
+The conversation uses an instance-scoped lifecycle composable and validated core event variants. Settings and the conversation share one application-owned store. Successful native Settings changes emit `settings-changed` to the local main window; runtime connection/tool-list events also trigger a refresh. The desktop no longer uses a three-second browser poll or a provider-change window event. An idle server that exits without a runtime event is detected on the next operation rather than by a browser timer.
 
 ### Conversation timeline
 
@@ -256,7 +266,7 @@ Igor speaks assistant text after the turn finishes and reads approval requests a
 
 In **Settings → Voice**, choose **Download speech input (574 MB)** to consent to downloading Whisper. The model is saved to `~/Library/Application Support/igor/models/ggml-large-v3-turbo-q5_0.bin`. Input and output share a downloader that checks size and SHA-256 before renaming a `.part` file; failed checks remove the partial file. Audio stays on this Mac. The model loads once in the background with **Preparing speech…** shown while it loads; the microphone becomes available when ready. You can keep typing while the model downloads or prepares.
 
-Click **Talk** once and speak. After 1.2 seconds of silence, Igor transcribes and sends your message automatically. Click **Stop listening** to finish sooner; Space outside text fields and controls also toggles listening. Listening shows a microphone level meter. Window blur or leaving the conversation cancels capture, and recordings are limited to one minute. Starting to talk stops speech output. Microphone and transcription errors appear inline; write approvals still require an on-screen decision.
+Click the microphone in the message box once and speak. After 1.2 seconds of silence, Igor transcribes and sends your message automatically. Click it again (**Stop listening**) to finish sooner; Space outside text fields and controls also toggles listening. Listening shows a microphone level meter. Window blur or leaving the conversation cancels capture, and recordings are limited to one minute. Starting to talk stops speech output. Microphone and transcription errors appear inline; write approvals still require an on-screen decision.
 
 In **Settings → Voice → Speech language**, choose **Automatic** (the default) to detect the language of each recording, or choose a fixed language such as **German**. The list comes from the embedded Whisper recognizer. A fixed language can improve recognition of short clips or accented speech. The language code is saved locally with your other voice preferences, never in `igor.toml`. Changes apply to the next transcription without reloading the model. Choose **Automatic** again to clear the fixed language.
 

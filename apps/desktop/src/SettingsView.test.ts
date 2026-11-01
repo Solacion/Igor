@@ -51,24 +51,25 @@ describe('settings', () => {
     backend({ settings_view: () => view([{ ...pos, tools: changed ? [...pos.tools, { name: 'new_tool', description: null, read_only_hint: true, destructive_hint: null }] : pos.tools }]) })
     const wrapper = mount(SettingsView); await flushPromises()
     changed = true; emitSettingsChanged(); await flushPromises(); await flushPromises()
-    const row = wrapper.findAll('tbody tr').find(row => row.text().includes('new_tool'))!
+    const row = wrapper.findAll('.tool-row').find(row => row.text().includes('new_tool'))!
     expect(row.exists()).toBe(true)
-    expect((row.get('select').element as HTMLSelectElement).value).toBe('')
+    expect(row.findAll('input:checked')).toHaveLength(0)
+    expect(row.text()).toContain('Not allowed yet')
     wrapper.unmount()
   })
 
-  it('opens from the top bar and closes with Done', async () => {
+  it('opens from the conversation toolbar and closes with the back button', async () => {
     backend({
       desktop_status: () => ({ app_version: '0.1.0', core_event_schema: 1 }),
       settings_view: () => view(),
     })
     const wrapper = mount(App, { global: { stubs: { ConversationView: true } } })
     await flushPromises()
-    await wrapper.get('.topbar-actions button').trigger('click')
+    wrapper.findComponent({ name: 'ConversationView' }).vm.$emit('settings')
     await flushPromises()
     expect(wrapper.get('h1').text()).toBe('Settings')
     expect(wrapper.text()).toContain('MCP servers')
-    await wrapper.get('.settings-header button').trigger('click')
+    await wrapper.get('.settings-back').trigger('click')
     expect(wrapper.find('.settings').exists()).toBe(false)
     wrapper.unmount()
   })
@@ -84,8 +85,10 @@ describe('settings', () => {
     expect(card.text()).toContain('Sales <b>per day</b>')
     expect(card.find('b').exists()).toBe(false)
     expect(card.text()).toContain('Server says: may change or delete data.')
-    expect((card.get('tbody tr:nth-child(1) select').element as HTMLSelectElement).value).toBe('read')
-    expect((card.get('tbody tr:nth-child(2) select').element as HTMLSelectElement).value).toBe('')
+    const rows = card.findAll('.tool-row')
+    expect(rows[0]!.get('input:checked').attributes('value')).toBe('read')
+    expect(rows[0]!.get('label.is-on').text()).toBe('Always allow')
+    expect(rows[1]!.findAll('input:checked')).toHaveLength(0)
     expect(wrapper.text()).toContain('Saved in /Users/op/igor/config.toml')
     wrapper.unmount()
   })
@@ -101,21 +104,21 @@ describe('settings', () => {
     wrapper.unmount()
   })
 
-  it('sets and clears a tool permission', async () => {
+  it('sets tool permissions', async () => {
     const calls = backend({
       settings_view: () => view(),
       settings_set_permission: () => view(),
     })
     const wrapper = mount(SettingsView)
     await flushPromises()
-    await wrapper.get('tbody tr:nth-child(2) select').setValue('write')
+    await wrapper.findAll('.tool-row')[1]!.get('input[value="write"]').setValue(true)
     await flushPromises()
-    await wrapper.get('tbody tr:nth-child(1) select').setValue('')
+    await wrapper.findAll('.tool-row')[0]!.get('input[value="denied"]').setValue(true)
     await flushPromises()
     const sets = calls.filter((call) => call.command === 'settings_set_permission').map((call) => call.args)
     expect(sets).toEqual([
       { request: { server: 'pos', tool: 'create_order', class: 'write' } },
-      { request: { server: 'pos', tool: 'get_sales', class: null } },
+      { request: { server: 'pos', tool: 'get_sales', class: 'denied' } },
     ])
     wrapper.unmount()
   })
@@ -255,5 +258,23 @@ it('does not offer process output before a server has started', async () => {
   backend({ settings_view: () => view([{ ...pos, status: { state: 'not_connected' } }, { ...pos, entry: { ...pos.entry, id: 'starting' }, status: { state: 'starting' } }]) })
   const wrapper = mount(SettingsView); await flushPromises()
   expect(wrapper.find('.server-output').exists()).toBe(false)
+  wrapper.unmount()
+
+})
+
+it('filters a long tool list by name or description', async () => {
+  const many = Array.from({ length: 8 }, (_, i) => ({ name: `tool_${i}`, description: i === 3 ? 'Stock on hand' : null, read_only_hint: true, destructive_hint: null }))
+  backend({ settings_view: () => view([{ ...pos, tools: many }]) })
+  const wrapper = mount(SettingsView)
+  await flushPromises()
+  const search = wrapper.get('.tool-search input')
+  await search.setValue('stock')
+  expect(wrapper.findAll('.tool-row').map(row => row.get('strong').text())).toEqual(['tool_3'])
+  expect(wrapper.get('.tool-search').text()).toContain('1 of 9')
+  await search.setValue('tool 5')
+  expect(wrapper.findAll('.tool-row').map(row => row.get('strong').text())).toEqual(['tool_5'])
+  await search.setValue('nothing')
+  expect(wrapper.findAll('.tool-row')).toHaveLength(0)
+  expect(wrapper.text()).toContain('No tools match.')
   wrapper.unmount()
 })
