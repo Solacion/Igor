@@ -668,8 +668,8 @@ command = "/nonexistent/igor-missing-server"
 env = { TOKEN = { env = "IGOR_DESKTOP_TEST_UNAVAILABLE_CREDENTIAL_20261031" } }
 "#,
     )?;
-    let settings = Settings::new(Some(path));
-    settings.connect_all().await;
+    let settings = Arc::new(Settings::new(Some(path)));
+    settings.connect_all(|| {}).await;
     let prepared = prepare(
         StartRequest {
             provider_id: "local".into(),

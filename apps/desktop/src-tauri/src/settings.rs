@@ -616,16 +616,28 @@ impl Settings {
     }
 
     /// Connects every configured server. Problems are recorded as statuses.
-    pub async fn connect_all(&self) {
+    ///
+    /// Servers start at the same time, so a slow one does not hold up the others, and
+    /// `connected` runs as each one finishes so the window can show its status.
+    pub async fn connect_all(self: &Arc<Self>, connected: impl Fn() + Send + Sync + 'static) {
         let Ok(doc) = self.document() else {
             return;
         };
         let Ok(config) = doc.validate() else {
             return;
         };
+        let connected = Arc::new(connected);
+        let mut starting = tokio::task::JoinSet::new();
         for server in config.servers() {
-            self.connect(server).await;
+            let server = server.clone();
+            let settings = Arc::clone(self);
+            let connected = Arc::clone(&connected);
+            starting.spawn(async move {
+                settings.connect(&server).await;
+                connected();
+            });
         }
+        while starting.join_next().await.is_some() {}
     }
 
     async fn connect(&self, server: &ServerConfig) {
@@ -1175,6 +1187,31 @@ mod tests {
 
         settings.remove_server("crm").await?;
         assert!(igor_config::KeyStore::get(store.as_ref(), "mcp-crm")?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn startup_reports_each_server_as_it_finishes() -> TestResult {
+        let path = temp_config("startup")?;
+        std::fs::write(
+            &path,
+            "[[servers]]\nid = \"one\"\ncommand = \"/nonexistent/one\"\n\n[[servers]]\nid = \"two\"\ncommand = \"/nonexistent/two\"\n",
+        )?;
+        let settings = Arc::new(Settings::new(Some(path)));
+        let finished = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = Arc::clone(&finished);
+        settings
+            .connect_all(move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+            })
+            .await;
+        assert_eq!(finished.load(Ordering::SeqCst), 2);
+        let view = settings.view().await?;
+        assert!(
+            view.servers
+                .iter()
+                .all(|server| matches!(server.status, Status::Failed { .. }))
+        );
         Ok(())
     }
 }
