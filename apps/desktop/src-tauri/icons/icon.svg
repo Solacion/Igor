@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Igor's app icon: a friendly robot head with headphones on a macOS-style rounded square.
+       Source for icon.icns and icon.png: run the Tauri icon command on this file (see icons/README.md). -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1F6390"/>
+      <stop offset="1" stop-color="#0B2B45"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.46" r="0.42">
+      <stop offset="0" stop-color="#4FB6D8" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#4FB6D8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="helmet" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4E9BE8"/>
+      <stop offset="1" stop-color="#2468B8"/>
+    </linearGradient>
+    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#DCE8F2"/>
+    </linearGradient>
+    <linearGradient id="cup" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8FE0D2"/>
+      <stop offset="1" stop-color="#4DB3A3"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+    <filter id="soft" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#04182A" flood-opacity="0.45"/>
+    </filter>
+    <clipPath id="tile-clip">
+      <rect x="100" y="100" width="824" height="824" rx="186"/>
+    </clipPath>
+  </defs>
+
+  <!-- Tile -->
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#tile)" filter="url(#shadow)"/>
+  <g clip-path="url(#tile-clip)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#glow)"/>
+
+    <!-- Shoulders -->
+    <path d="M318 960 C330 840 410 790 512 790 C614 790 694 840 706 960 Z" fill="#1D5A9C"/>
+    <path d="M440 800 L512 860 L584 800 Z" fill="#163F6E" opacity="0.7"/>
+
+    <g filter="url(#soft)">
+      <!-- Headphone band -->
+      <path d="M292 540 C292 330 390 236 512 236 C634 236 732 330 732 540" fill="none" stroke="#6FCFC0" stroke-width="38" stroke-linecap="round"/>
+
+      <!-- Helmet -->
+      <path d="M332 500 C332 352 410 270 512 270 C614 270 692 352 692 500 L692 600 C692 712 614 790 512 790 C410 790 332 712 332 600 Z" fill="url(#helmet)"/>
+      <!-- Crest -->
+      <rect x="474" y="262" width="76" height="132" rx="30" fill="#7DB8F2"/>
+
+      <!-- Face plate -->
+      <path d="M372 498 C372 410 432 368 512 368 C592 368 652 410 652 498 L652 590 C652 680 592 744 512 744 C432 744 372 680 372 590 Z" fill="url(#face)"/>
+
+      <!-- Eyes -->
+      <circle cx="448" cy="528" r="50" fill="#123A55"/>
+      <circle cx="576" cy="528" r="50" fill="#123A55"/>
+      <circle cx="448" cy="528" r="29" fill="#62D2F6"/>
+      <circle cx="576" cy="528" r="29" fill="#62D2F6"/>
+      <circle cx="459" cy="516" r="9" fill="#FFFFFF"/>
+      <circle cx="587" cy="516" r="9" fill="#FFFFFF"/>
+
+      <!-- Smile -->
+      <path d="M458 640 Q512 684 566 640" fill="none" stroke="#123A55" stroke-width="16" stroke-linecap="round"/>
+
+      <!-- Ear cups -->
+      <rect x="266" y="464" width="84" height="170" rx="36" fill="url(#cup)"/>
+      <rect x="674" y="464" width="84" height="170" rx="36" fill="url(#cup)"/>
+      <rect x="292" y="496" width="32" height="106" rx="16" fill="#2E8C7E"/>
+      <rect x="700" y="496" width="32" height="106" rx="16" fill="#2E8C7E"/>
+    </g>
+  </g>
+
+  <!-- Rim -->
+  <rect x="112" y="112" width="800" height="800" rx="176" fill="none" stroke="#7CC4F4" stroke-opacity="0.45" stroke-width="8"/>
+</svg>
