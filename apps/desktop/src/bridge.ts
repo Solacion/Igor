@@ -55,7 +55,8 @@ export interface SettingsView {
   servers: ServerView[]
 }
 
-export type PermissionClass = 'read' | 'write' | 'denied'
+/** `allow` is Always allow; `read` still asks when the server says a tool changes data. */
+export type PermissionClass = 'read' | 'allow' | 'write' | 'denied'
 
 /** A rejected settings command. `field` names the entry field at fault, such as `command`. */
 export interface CommandError {

@@ -97,6 +97,11 @@ pub fn render(event: &RuntimeEvent, out: &mut impl Write) -> io::Result<()> {
             "[{call_id}] approved for this session: {}",
             sanitize(&tool.to_string())
         ),
+        RuntimeEvent::AlwaysAllowed { call_id, tool } => writeln!(
+            out,
+            "[{call_id}] runs without asking (Always allow): {}",
+            sanitize(&tool.to_string())
+        ),
         RuntimeEvent::ApprovalResolved {
             approval_id,
             outcome,

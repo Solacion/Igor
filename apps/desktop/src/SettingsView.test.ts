@@ -86,7 +86,7 @@ describe('settings', () => {
     expect(card.find('b').exists()).toBe(false)
     expect(card.text()).toContain('Server says: may change or delete data.')
     const rows = card.findAll('.tool-row')
-    expect(rows[0]!.get('input:checked').attributes('value')).toBe('read')
+    expect(rows[0]!.get('input:checked').attributes('value')).toBe('always')
     expect(rows[0]!.get('label.is-on').text()).toBe('Always allow')
     expect(rows[1]!.findAll('input:checked')).toHaveLength(0)
     expect(wrapper.text()).toContain('Saved in /Users/op/igor/config.toml')
@@ -111,9 +111,9 @@ describe('settings', () => {
     })
     const wrapper = mount(SettingsView)
     await flushPromises()
-    await wrapper.findAll('.tool-row')[1]!.get('input[value="write"]').setValue(true)
+    await wrapper.findAll('.tool-row')[1]!.get('input[value="ask"]').setValue(true)
     await flushPromises()
-    await wrapper.findAll('.tool-row')[0]!.get('input[value="denied"]').setValue(true)
+    await wrapper.findAll('.tool-row')[0]!.get('input[value="never"]').setValue(true)
     await flushPromises()
     const sets = calls.filter((call) => call.command === 'settings_set_permission').map((call) => call.args)
     expect(sets).toEqual([
@@ -289,3 +289,23 @@ it('shows a remote server by its URL and does not offer the local server form fo
   expect(card.findAll('button').map(b => b.text())).toContain('Reconnect')
   wrapper.unmount()
 })
+
+it('writes allow only for tools the server says change data, and shows read on such a tool as Ask first', async () => {
+  const start = view([{ ...pos, permissions: { create_order: 'read' } }])
+  const calls = backend({ settings_view: () => start, settings_set_permission: () => start })
+  const wrapper = mount(SettingsView)
+  await flushPromises()
+  const rows = wrapper.findAll('.tool-row')
+  expect(rows[1]!.get('input:checked').attributes('value')).toBe('ask')
+  expect(rows[1]!.text()).toContain('choose Always allow to stop asking')
+  await rows[1]!.get('input[value="always"]').setValue(true)
+  await flushPromises()
+  await wrapper.findAll('.tool-row')[0]!.get('input[value="always"]').setValue(true)
+  await flushPromises()
+  expect(calls.filter(call => call.command === 'settings_set_permission').map(call => call.args)).toEqual([
+    { request: { server: 'pos', tool: 'create_order', class: 'allow' } },
+    { request: { server: 'pos', tool: 'get_sales', class: 'read' } },
+  ])
+  wrapper.unmount()
+})
+

@@ -180,6 +180,9 @@ export function useConversation(options: { spoken?: () => boolean } = {}) {
     if (event.event === 'approved_for_session') {
       timeline.value.push({ kind: 'session-grant', key: `${epoch}:${event.call_id}:${envelope.sequence}`, tool: event.tool })
     }
+    if (event.event === 'always_allowed') {
+      timeline.value.push({ kind: 'session-grant', key: `${epoch}:${event.call_id}:${envelope.sequence}`, tool: event.tool, always: true })
+    }
     if (event.event === 'approval_resolved') {
       const item = approvals.value.find(item => item.key === `${epoch}:${String(event.approval_id)}`)
       if (item)

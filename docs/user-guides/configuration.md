@@ -103,11 +103,12 @@ A server can never receive a provider API key. IGOR rejects an allowlist entry o
 
 Host configuration is the only source of tool classification. Under `[permissions.<server id>]`, map each exact tool name to one of these classes:
 
-- `read`: the tool runs without approval.
+- `read`: the tool runs without approval, unless its server says it may change data (see below).
+- `allow`: the tool always runs without approval, even when its server says it may change data. Settings writes this when you choose **Always allow** for such a tool. Each such call shows in the activity as "Ran without asking — Always allow".
 - `write`: the tool runs only after you approve the exact call.
 - `denied`: the tool never runs.
 
-A server can make a tool stricter: a `read` tool whose server reports that it may modify data, or that it is not read-only, needs approval too. For such a tool you can choose to approve it for the rest of the session, and later calls to it then run without asking. A `write` tool always needs approval for each call.
+A server can make a `read` tool stricter: a `read` tool whose server reports that it may modify data, or that it is not read-only, needs approval too. For such a tool you can choose to approve it for the rest of the session, and later calls to it then run without asking. A `write` tool always needs approval for each call.
 
 A tool that is not listed is unclassified. IGOR hides it from the model and refuses any call to it. A permission applies only to its own server: `sales/x` does not classify `inventory/x`. A permission for an undeclared server is an error.
 

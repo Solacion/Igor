@@ -214,6 +214,9 @@ pub enum Admission {
     Ready(DispatchPermit),
     /// A write call to a tool the operator approved for the session, ready to dispatch.
     ApprovedForSession(DispatchPermit),
+    /// A call to a tool the operator set to [`Classification::Allow`], ready to dispatch without
+    /// approval whatever its server's hints say.
+    AlwaysAllowed(DispatchPermit),
     /// A write call held until the operator decides.
     ApprovalRequired(ApprovalRequest),
 }
@@ -341,7 +344,16 @@ impl ApprovalGate {
     ) -> Result<Admission, TooManyPending> {
         let call_id = call_id.into();
         let session_grant_allowed = may_grant(call.classification(), call.host_classification());
+        let always_allowed = call.host_classification() == Classification::Allow;
         let (tool, classification, fingerprint, arguments) = call.into_parts();
+        if classification == Classification::Read && always_allowed {
+            return Ok(Admission::AlwaysAllowed(DispatchPermit {
+                call_id,
+                tool,
+                arguments,
+                approval_id: None,
+            }));
+        }
         if classification == Classification::Read {
             return Ok(Admission::Ready(DispatchPermit {
                 call_id,
@@ -600,9 +612,9 @@ mod tests {
             let call = self.registry.prepare_call(alias, arguments)?;
             match self.gate.admit(call, "call-1")? {
                 Admission::ApprovalRequired(request) => Ok(request),
-                Admission::Ready(_) | Admission::ApprovedForSession(_) => {
-                    Err("write call was not held for approval".into())
-                }
+                Admission::Ready(_)
+                | Admission::ApprovedForSession(_)
+                | Admission::AlwaysAllowed(_) => Err("write call was not held for approval".into()),
             }
         }
 
@@ -981,10 +993,33 @@ mod tests {
     fn held(admission: Admission) -> Result<ApprovalRequest, Box<dyn std::error::Error>> {
         match admission {
             Admission::ApprovalRequired(request) => Ok(request),
-            Admission::Ready(_) | Admission::ApprovedForSession(_) => {
+            Admission::Ready(_)
+            | Admission::ApprovedForSession(_)
+            | Admission::AlwaysAllowed(_) => {
                 Err("expected the call to be held for approval".into())
             }
         }
+    }
+
+    #[test]
+    fn always_allow_runs_a_tool_its_server_says_changes_data_without_asking() -> TestResult {
+        let page = id("browser", "new_page")?;
+        let mut hinted = descriptor(&page, "Opens a page.");
+        hinted.hints.read_only = Some(false);
+        hinted.hints.destructive = Some(true);
+        let registry = ToolRegistry::build(
+            [hinted],
+            &HashMap::from([(page.clone(), Classification::Allow)]),
+        );
+        let mut gate = ApprovalGate::new();
+        match admit(&mut gate, &registry, "browser__new_page", "a")? {
+            Admission::AlwaysAllowed(permit) => {
+                assert_eq!(permit.tool(), &page);
+                assert_eq!(permit.call_id(), "call-1");
+            }
+            other => return Err(format!("expected Always allow, got {other:?}").into()),
+        }
+        Ok(())
     }
 
     #[test]

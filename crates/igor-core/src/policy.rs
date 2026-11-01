@@ -12,8 +12,11 @@ use crate::tools::ToolHints;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Classification {
-    /// Runs without approval.
+    /// Runs without approval, unless its server reports that it may change data.
     Read,
+    /// Runs without approval even when its server reports that it may change data: the operator
+    /// chose to trust it ("Always allow").
+    Allow,
     /// Runs only after explicit operator approval of the exact call.
     Write,
     /// Never runs.
@@ -25,19 +28,22 @@ pub enum Classification {
 impl Classification {
     /// True when the model may be offered this tool.
     pub fn is_offered(self) -> bool {
-        matches!(self, Self::Read | Self::Write)
+        matches!(self, Self::Read | Self::Allow | Self::Write)
     }
 }
 
 /// Applies untrusted server hints to the host classification. Hints only tighten, never relax.
 ///
 /// A host [`Classification::Read`] tool becomes [`Classification::Write`], and so needs approval,
-/// when its server reports that it is not read-only or that it may be destructive. Every other
-/// classification is returned unchanged: no hint can make a tool more permissive.
+/// when its server reports that it is not read-only or that it may be destructive. A host
+/// [`Classification::Allow`] tool runs as [`Classification::Read`] whatever its hints say: the
+/// operator chose that explicitly. Every other classification is returned unchanged: no hint can
+/// make a tool more permissive.
 pub fn effective_classification(host: Classification, hints: &ToolHints) -> Classification {
     let may_modify = hints.read_only == Some(false) || hints.destructive == Some(true);
     match host {
         Classification::Read if may_modify => Classification::Write,
+        Classification::Allow => Classification::Read,
         other => other,
     }
 }
@@ -92,8 +98,21 @@ mod tests {
     #[test]
     fn only_read_and_write_tools_are_offered() {
         assert!(Classification::Read.is_offered());
+        assert!(Classification::Allow.is_offered());
         assert!(Classification::Write.is_offered());
         assert!(!Classification::Denied.is_offered());
         assert!(!Classification::Unclassified.is_offered());
+    }
+
+    #[test]
+    fn always_allow_ignores_hints_that_would_require_approval() {
+        for read_only in [None, Some(true), Some(false)] {
+            for destructive in [None, Some(false), Some(true)] {
+                assert_eq!(
+                    effective_classification(Classification::Allow, &hints(read_only, destructive)),
+                    Classification::Read
+                );
+            }
+        }
     }
 }

@@ -111,7 +111,7 @@ watch(() => props.entries, async entries => {
       <template v-if="entry.kind === 'message'"><strong class="message-role sr-only">{{ entry.message.role }}</strong><!-- Igor's replies are Markdown; renderMarkdown escapes HTML and drops links and images. --><div v-if="entry.message.role === 'Igor'" class="message-text markdown" v-html="renderMarkdown(entry.message.text)"></div><p v-else class="literal message-text">{{ entry.message.text }}</p></template>
       <ToolActivity v-else-if="entry.kind === 'tool'" :call="entry.call" />
       <ToolActivity v-else-if="entry.kind === 'connection'" :connection="entry.connection" />
-      <p v-else-if="entry.kind === 'session-grant'" class="literal activity-line session-grant"><span class="activity-icon" aria-hidden="true"></span>{{ entry.tool.server }} · {{ entry.tool.name }}: Ran without asking — allowed for this conversation</p>
+      <p v-else-if="entry.kind === 'session-grant'" class="literal activity-line session-grant"><span class="activity-icon" aria-hidden="true"></span>{{ entry.tool.server }} · {{ entry.tool.name }}: Ran without asking — {{ entry.always ? 'Always allow' : 'allowed for this conversation' }}</p>
       <ApprovalCard v-else-if="entry.kind === 'approval'" :item="entry.item" :busy="busy" @decide="emit('decide', entry.item, $event)" />
       <ClarificationCard v-else-if="entry.kind === 'question'" :item="entry.item" :busy="busy" @answer="emit('answer', entry.item)" />
     </li>

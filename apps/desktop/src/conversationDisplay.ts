@@ -9,7 +9,8 @@ export type TimelineEntry =
   | { kind: 'tool'; key: string; call: Activity }
   | { kind: 'connection'; key: string; connection: Connection }
   | { kind: 'approval'; key: string; item: ApprovalItem }
-  | { kind: 'session-grant'; key: string; tool: ToolId }
+  /** A call that ran without asking: approved for this conversation, or set to Always allow. */
+  | { kind: 'session-grant'; key: string; tool: ToolId; always?: boolean }
   | { kind: 'question'; key: string; item: QuestionItem }
 
 /** Display-only parsing: preserve number lexemes, including integers above JS's safe range. */

@@ -65,12 +65,32 @@ function remove(id: string) {
   confirmingRemove.value = null
   void act(`remove:${id}`, () => removeServer(id))
 }
-/** Permission choices as the operator sees them. "Always allow" is the `read` class. */
-const permissionOptions: { value: PermissionClass, label: string }[] = [
-  { value: 'read', label: 'Always allow' },
-  { value: 'write', label: 'Ask first' },
-  { value: 'denied', label: 'Never' },
+type Choice = 'always' | 'ask' | 'never'
+/** Permission choices as the operator sees them. */
+const permissionOptions: { value: Choice, label: string }[] = [
+  { value: 'always', label: 'Always allow' },
+  { value: 'ask', label: 'Ask first' },
+  { value: 'never', label: 'Never' },
 ]
+/** True when the server says the tool may change data, so a `read` tool still asks first. */
+function mayModify(tool: ToolView): boolean {
+  return tool.read_only_hint === false || tool.destructive_hint === true
+}
+/** What the tool will actually do: a `read` tool the server says changes data asks first. */
+function choiceOf(server: ServerView, tool: ToolView): Choice | null {
+  switch (server.permissions[tool.name]) {
+    case 'allow': return 'always'
+    case 'read': return mayModify(tool) ? 'ask' : 'always'
+    case 'write': return 'ask'
+    case 'denied': return 'never'
+    default: return null
+  }
+}
+function choose(server: ServerView, tool: ToolView, choice: Choice) {
+  // `allow` only where it differs from `read`: it overrides the server's own warning.
+  const cls: PermissionClass = choice === 'always' ? (mayModify(tool) ? 'allow' : 'read') : choice === 'ask' ? 'write' : 'denied'
+  permission(server.entry.id, tool.name, cls)
+}
 function permission(server: string, tool: string, value: string) {
   const cls = value === '' ? null : (value as PermissionClass)
   void act(`permission:${server}:${tool}`, () => setPermission(server, tool, cls))
@@ -180,11 +200,13 @@ onUnmounted(unsubscribe)
                           <span v-if="tool.destructive_hint">Server says: may change or delete data. </span>
                           <span v-if="!server.tools.some((live) => live.name === tool.name)">Not reported by the server right now.</span>
                           <span v-if="!server.permissions[tool.name]">Not allowed yet. </span>
+                          <span v-if="server.permissions[tool.name] === 'read' && mayModify(tool)">Asks first because the server says it changes data; choose Always allow to stop asking. </span>
+                          <span v-if="server.permissions[tool.name] === 'allow' && mayModify(tool)">Runs without asking although the server says it changes data. </span>
                         </p>
                       </div>
                       <div class="segmented" role="radiogroup" :aria-label="`Permission for ${tool.name}`">
-                        <label v-for="option in permissionOptions" :key="option.value" :class="{ 'is-on': server.permissions[tool.name] === option.value }">
-                          <input type="radio" :name="`permission-${server.entry.id}-${tool.name}`" :value="option.value" :checked="server.permissions[tool.name] === option.value" :disabled="!!busy" @change="permission(server.entry.id, tool.name, option.value)" />{{ option.label }}
+                        <label v-for="option in permissionOptions" :key="option.value" :class="{ 'is-on': choiceOf(server, tool) === option.value }">
+                          <input type="radio" :name="`permission-${server.entry.id}-${tool.name}`" :value="option.value" :checked="choiceOf(server, tool) === option.value" :disabled="!!busy" @change="choose(server, tool, option.value)" />{{ option.label }}
                         </label>
                       </div>
                     </li>
