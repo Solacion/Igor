@@ -13,6 +13,7 @@ IGOR is a Cargo workspace. The toolchain is pinned in `rust-toolchain.toml`; doc
 | `igor-provider-openai` | OpenAI-compatible chat completions adapter (LM Studio) implementing `igor_core::provider::Provider` | `igor-core`, `igor-config`, `igor-provider-http` |
 | `igor-mcp` | `rmcp` client implementing `igor_core::tools::ToolBackend` over stdio | `igor-core`, `rmcp` |
 | `igor-fixture-server` | Generic fixture-backed MCP server for tests and the demo | `rmcp`; never `igor-core` |
+| `igor-tts` | Embedded text-to-speech: Kokoro voices through sherpa-onnx (ONNX Runtime, linked statically), phonemes from espeak-ng | `sherpa-onnx`, `piper-phonemize` |
 | `igor-voice` | Embedded speech-to-text: Whisper through whisper.cpp (`whisper-rs`), Metal on macOS | `whisper-rs` |
 | `igor-cli` | Headless harness over the session API; fallback demo | `igor-core`, `igor-mcp`, providers |
 

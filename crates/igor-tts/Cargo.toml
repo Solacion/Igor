@@ -1,0 +1,20 @@
+[package]
+name = "igor-tts"
+description = "Text-to-speech for IGOR: embedded Kokoro voices (sherpa-onnx), no extra services."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+piper-phonemize = "=1.5.9"
+sherpa-onnx = "=2.0.1"
+thiserror.workspace = true
+
+[dev-dependencies]
+igor-voice = { path = "../igor-voice" }
+
+[lints]
+workspace = true
