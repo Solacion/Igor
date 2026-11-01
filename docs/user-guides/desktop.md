@@ -230,7 +230,11 @@ The conversation uses an instance-scoped lifecycle composable and validated core
 
 ### Conversation timeline
 
-Messages, compact tool-call rows, approvals and questions appear in one chronological timeline. A successful stock read appears as “Checked stock · sales ✓”; expand its details for outcome/arguments. A write card starts with a human summary. Draft orders show SKU, quantity and rationale from the canonical arguments; other tools show key/value arguments. Expand **Exact arguments and action hash** to review the unchanged authority data. Approve/Deny still echo that exact hash; display parsing never changes the request.
+Messages, tool work, approvals and questions appear in one chronological timeline. Replies use compact 14-point text; your own messages appear as small bubbles on the right.
+
+Tool work takes one small line: an icon (a spinner while working, a tick when done, an exclamation mark for a problem) and the latest step, such as “Checked stock · sales · Completed”. Consecutive steps share that line, and each new step fades in over the previous one, so tool work never pushes the conversation off the screen. **N steps** beside the line shows every step; **Hide steps** folds them again. Click a step for its outcome and arguments. Finished lines fade back once Igor moves on.
+
+Approval requests are a large, highlighted block with large **Approve**, **Deny** and **Allow for this conversation** buttons. A write card starts with a human summary. Draft orders show SKU, quantity and rationale from the canonical arguments; other tools show key/value arguments. Expand **Exact arguments and action hash** to review the unchanged authority data. Approve/Deny still echo that exact hash; display parsing never changes the request.
 
 New approvals/questions are announced, scrolled into view and focused on their first control. Other new content follows automatically while you are at the bottom; scrolling up pauses following until **Jump to latest**. A thinking indicator appears during a turn and stops animating with the system's reduced-motion preference. **Enter** sends, **Shift+Enter** adds a newline, and text composition does not send prematurely. The compact toolbar keeps the provider and connection dots together. **New conversation** asks for confirmation when history exists; export first if needed.
 

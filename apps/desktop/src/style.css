@@ -151,3 +151,70 @@ button.brand { background: transparent; color: inherit; padding: 0; border-radiu
 .voice-input .hint, .voice-input [role="alert"] { flex-basis: 100%; }
 .mic-button { touch-action: none; user-select: none; }
 .mic-button[aria-pressed="true"] { outline: 3px solid var(--focus); }
+
+/* Compact conversation (#135): small reply text, one quiet line for tool work, prominent approvals. */
+.topbar { min-height: 60px; }
+.brand, button.brand { font-size: 18px; }
+.brand-mark { width: 28px; height: 28px; border-radius: 8px 8px 3px 8px; }
+main.wide:has(.conversation) { padding-top: 16px; padding-bottom: 16px; }
+.conversation .eyebrow { display: none; }
+.conversation h1 { font-family: inherit; font-size: 17px; font-weight: 600; letter-spacing: 0; line-height: 1.3; margin: 0; }
+.conversation-heading { padding-block: 4px; }
+.conversation-heading button, .conversation-toolbar button { min-height: 32px; padding: 6px 12px; font-size: 12px; }
+.conversation-toolbar { font-size: 12px; color: var(--muted); padding-block: 4px; }
+.conversation-toolbar label { font-size: 12px; }
+.conversation-toolbar select { min-height: 30px; padding: 4px 8px; margin: 0; font-size: 12px; }
+.conversation-servers { font-size: 12px; gap: .75rem; }
+.conversation-servers .readiness-dot { display: inline-block; margin-right: 5px; }
+.conversation > p, .turn-status, .thinking { font-size: 12px; color: var(--muted); margin: 4px 0; }
+
+.timeline { max-height: none; height: calc(100vh - 330px); min-height: 220px; padding: 4px 2px; }
+.messages li, .timeline > li { border-bottom: 0; padding: 0; margin-block: 10px; }
+.message-role { display: block; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+.message-text { font-size: 14px; line-height: 1.55; margin: 0; }
+.timeline > li[data-role="You"] { display: flex; flex-direction: column; align-items: flex-end; }
+.timeline > li[data-role="You"] .message-text { max-width: 80%; background: var(--surface); border: 1px solid var(--line); border-radius: 12px 12px 3px 12px; padding: 8px 12px; }
+
+/* Tool work: one small line per run of steps; earlier steps hide until expanded. */
+.timeline > li.activity-entry { margin-block: 2px; display: flex; align-items: center; gap: 8px; }
+.timeline > li.activity-entry > :not(.activity-toggle) { flex: 1; min-width: 0; }
+.timeline > li.activity-past { display: none; }
+.activity-row.activity-line, .activity-line { display: flex; align-items: center; gap: 8px; margin: 0; padding: 2px 0; border: 0; background: none; font-size: 12px; color: var(--muted); }
+.tool-activity ol { margin: 0; }
+.activity-line summary { display: flex; align-items: center; gap: 8px; list-style: none; cursor: pointer; min-height: 22px; min-width: 0; }
+.activity-line summary::-webkit-details-marker { display: none; }
+details.activity-line { display: block; }
+.activity-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.activity-server { opacity: .7; }
+.activity-detail { font-size: 11px; }
+.activity-more { font-size: 12px; padding: 4px 0 6px 22px; }
+.activity-more h3 { font-size: 12px; margin: 4px 0; }
+.activity-toggle { order: 2; flex: none; min-height: 22px; padding: 0 4px; font-size: 11px; color: var(--muted); }
+.activity-icon { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--accent); border-right-color: transparent; animation: activity-spin .9s linear infinite; }
+[data-icon="done"] .activity-icon, .session-grant .activity-icon { border: 0; animation: none; background: var(--ready); mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.5l2.2 2.2 4.8-5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; }
+[data-icon="problem"] .activity-icon { border: 0; animation: none; background: var(--pending); mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M6 2.2v4.6M6 9.3v.1' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat; }
+.activity-settled .activity-line { opacity: .55; transition: opacity 1.2s ease; }
+.activity-settled .activity-icon { animation: none; }
+.activity-fade-enter-active, .activity-fade-leave-active { transition: opacity .25s ease; }
+.activity-fade-enter-from, .activity-fade-leave-to { opacity: 0; }
+@keyframes activity-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .activity-icon { animation: none; } .activity-fade-enter-active, .activity-fade-leave-active, .activity-settled .activity-line { transition: none; } }
+
+/* Approvals: a large block that cannot be missed. */
+.approval-card { margin: 16px 0; padding: 22px 24px; border: 2px solid var(--accent); border-radius: 14px; background: color-mix(in srgb, var(--accent) 7%, var(--surface)); box-shadow: 0 6px 24px color-mix(in srgb, var(--accent) 14%, transparent); }
+.approval-card h2 { font-size: 18px; margin: 0 0 6px; }
+.approval-summary { font-size: 16px; line-height: 1.45; margin: 0 0 12px; }
+.approval-card dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13px; margin: 8px 0; }
+.approval-card dt { font-size: 12px; }
+.approval-card details { font-size: 12px; margin: 8px 0; }
+.approval-card [role="status"] { font-size: 12px; color: var(--muted); }
+.approval-card .composer-actions { flex-wrap: wrap; margin-top: 12px; }
+.approval-card .composer-actions button { min-height: 44px; padding: 10px 22px; font-size: 14px; }
+.clarifications .clarification-card, .clarifications > * { font-size: 14px; }
+
+/* Voice and composer: compact. */
+.voice-input { font-size: 12px; padding-block: 4px; }
+.voice-input .hint { font-size: 11px; }
+.composer label { font-size: 12px; color: var(--muted); }
+.composer textarea { font-family: inherit; font-size: 14px; min-height: 0; margin: 4px 0 8px; padding: 8px 10px; }
+.composer .composer-actions button { min-height: 36px; padding: 8px 14px; }
