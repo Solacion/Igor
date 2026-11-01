@@ -28,6 +28,17 @@ jobs:
 
       - name: Cache build
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # piper-phonemize-sys downloads its native library here, outside what the cache keeps.
+          cache-directories: target/piper-phonemize-prebuilt
+
+      - name: Re-download native libraries missing from the cache
+        # A cache restored without the download would skip piper-phonemize-sys's build script and
+        # fail to link. Removing its cached output makes cargo run the script again.
+        run: |
+          if [ ! -d target/piper-phonemize-prebuilt ]; then
+            rm -rf target/debug/build/piper-phonemize-sys-* target/debug/.fingerprint/piper-phonemize-sys-*
+          fi
 
       - name: Check formatting
         run: cargo fmt --all --check
