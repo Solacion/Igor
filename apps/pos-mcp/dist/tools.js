@@ -1,5 +1,5 @@
 import { MAX_ROWS } from './db.js';
-import { resolveRange, sqlDate } from './periods.js';
+import { previousRange, resolveRange, sqlDate } from './periods.js';
 /**
  * RedTill facts the queries rely on:
  * - `SaleMaster.SaleStatus` 9 is Paid and 4 is AccountSale; only these are sales. Quotes, open
@@ -11,6 +11,19 @@ import { resolveRange, sqlDate } from './periods.js';
 const SALE = 'm.SaleStatus IN (4, 9)';
 const IN_RANGE = `${SALE} AND m.DateCompleted >= CAST(@from AS datetime) AND m.DateCompleted < DATEADD(day, 1, CAST(@to AS datetime))`;
 const ORDER_STATUS = ['created', 'received', 'completed', 'cancelled'];
+/** Named in every result with money, because small models otherwise guess dollars or euros. */
+const CURRENCY = 'ZAR: South African rand, written R';
+/** A sale line's cost excluding VAT. `SaleDetail.UnitCost` is the cost when the sale was made;
+ * it includes VAT when `@costIncl` (the POS's `CostIncludesTax` setting) is 1. */
+const LINE_COST = 'd.Qty * ISNULL(d.UnitCost, 0) / CASE WHEN @costIncl = 1 THEN 1 + ISNULL(d.TaxPercentage, 0) / 100.0 ELSE 1 END';
+const NO_COST = 'ISNULL(d.UnitCost, 0) <= 0 AND d.TotalPriceExcl > 0';
+const REPORT_COLUMNS = `SUM(d.TotalPriceInc) AS revenue_incl_vat, SUM(d.TotalPriceExcl) AS revenue_excl_vat, SUM(${LINE_COST}) AS cost_excl_vat`;
+const REPORT_GROUPS = {
+    day: { key: 'CONVERT(char(10), CAST(m.DateCompleted AS date), 120)', join: '', order: '1' },
+    department: { key: 'ISNULL(dp.Name, \'(none)\')', join: 'LEFT JOIN Departments dp ON dp.DepartmentID = s.DepartmentID', order: 'SUM(d.TotalPriceExcl) DESC' },
+    category: { key: 'ISNULL(c.Name, \'(none)\')', join: 'LEFT JOIN StockCategories c ON c.CategoryID = s.ItemCategory', order: 'SUM(d.TotalPriceExcl) DESC' },
+    product: { key: 'ISNULL(s.Description, \'(unknown product)\')', join: '', order: 'SUM(d.TotalPriceExcl) DESC' },
+};
 /** How long the VAT setting is trusted before it is read again. */
 const SETTINGS_TTL_MS = 5 * 60_000;
 /** Rounds money to cents and quantities to three decimals; leaves null as null. */
@@ -68,7 +81,7 @@ export class PosTools {
       LEFT JOIN SalesTax t ON t.TaxID = s.TaxID
       WHERE s.Deleted = 0 AND ((${words.sql}) OR s.ItemCode = @q OR s.Barcode = @q)
       ORDER BY CASE WHEN s.ItemCode = @q OR s.Barcode = @q THEN 0 ELSE 1 END, s.ImportanceWeight DESC, s.Description`, [{ name: 'limit', type: 'int', value: clamp(args.limit, 20, 50) }, { name: 'q', type: 'text', value: args.query.trim() }, ...words.params]);
-        return { products: rows.map(row => ({
+        return { currency: CURRENCY, products: rows.map(row => ({
                 id: row.id, code: text(row.code), barcode: text(row.barcode), name: text(row.name),
                 department: text(row.department), category: text(row.category), supplier: text(row.supplier),
                 ...prices(row, costIncl), on_hand: qty(row.on_hand ?? 0),
@@ -131,7 +144,7 @@ export class PosTools {
         const total = totals[0] ?? {};
         const sales = Number(total.sales ?? 0);
         const summary = {
-            period: range, today: isoDay(this.now()), sales, revenue_incl_vat: money(total.revenue_incl_vat ?? 0),
+            currency: CURRENCY, period: range, today: isoDay(this.now()), sales, revenue_incl_vat: money(total.revenue_incl_vat ?? 0),
             average_sale_incl_vat: sales ? money(Number(total.revenue_incl_vat) / sales) : null,
         };
         const group = args.group_by ?? 'total';
@@ -155,6 +168,47 @@ export class PosTools {
       GROUP BY ${key} ORDER BY SUM(d.TotalPriceInc) DESC`, params);
         return { ...summary, [`by_${group}`]: rows.map(row => ({ name: text(row.name), quantity: qty(row.quantity), revenue_incl_vat: money(row.revenue_incl_vat) })) };
     }
+    /** Revenue, VAT, cost of sales, gross profit and margin for a period, optionally broken down
+     * and compared with the previous period. Cost is what each line cost when it was sold. */
+    async salesReport(args) {
+        const range = resolveRange(args, this.now());
+        const costIncl = { name: 'costIncl', type: 'bit', value: await this.costIncludesVat() };
+        const totals = async (r) => {
+            const row = (await this.db.query(`
+        SELECT COUNT(DISTINCT m.SaleID) AS sales, ${REPORT_COLUMNS},
+          SUM(CASE WHEN ${NO_COST} THEN 1 ELSE 0 END) AS lines_without_cost,
+          SUM(CASE WHEN ${NO_COST} THEN d.TotalPriceExcl ELSE 0 END) AS revenue_without_cost
+        FROM SaleMaster m JOIN SaleDetail d ON d.SaleID = m.SaleID
+        WHERE ${IN_RANGE}`, [...rangeParams(r), costIncl]))[0] ?? {};
+            return {
+                period: r, sales: Number(row.sales ?? 0), ...profit(row),
+                lines_without_cost: Number(row.lines_without_cost ?? 0), revenue_without_cost_excl_vat: money(row.revenue_without_cost ?? 0),
+            };
+        };
+        const current = await totals(range);
+        const report = { currency: CURRENCY, ...current, today: isoDay(this.now()) };
+        if (args.compare) {
+            const previous = await totals(previousRange(range, args.from || args.to ? undefined : args.period ?? 'today'));
+            report.previous = previous;
+            report.change_percent = {
+                revenue: change(current.revenue_excl_vat, previous.revenue_excl_vat),
+                gross_profit: change(current.gross_profit_excl_vat, previous.gross_profit_excl_vat),
+                sales: change(current.sales, previous.sales),
+            };
+        }
+        const group = args.group_by ?? 'total';
+        if (group !== 'total') {
+            const { key, join, order } = REPORT_GROUPS[group];
+            const rows = await this.db.query(`
+        SELECT TOP (@limit) ${key} AS name, SUM(d.Qty) AS quantity, ${REPORT_COLUMNS}
+        FROM SaleMaster m JOIN SaleDetail d ON d.SaleID = m.SaleID
+        LEFT JOIN Stock s ON s.StockID = d.StockID ${join}
+        WHERE ${IN_RANGE}
+        GROUP BY ${key} ORDER BY ${order}`, [...rangeParams(range), costIncl, { name: 'limit', type: 'int', value: group === 'day' ? clamp(args.limit, MAX_ROWS) : clamp(args.limit, 25, 100) }]);
+            report[`by_${group}`] = rows.map(row => ({ name: text(row.name), quantity: qty(row.quantity), ...profit(row) }));
+        }
+        return report;
+    }
     /** Best-selling products for a period, by revenue or quantity. */
     async topProducts(args) {
         const range = resolveRange(args, this.now());
@@ -173,7 +227,7 @@ export class PosTools {
       LEFT JOIN Departments dp ON dp.DepartmentID = s.DepartmentID
       WHERE ${IN_RANGE} ${department}
       GROUP BY s.StockID, s.Description, dp.Name ORDER BY ${order} DESC`, params);
-        return { period: range, today: isoDay(this.now()), by: args.by ?? 'revenue', products: rows.map(row => ({
+        return { currency: CURRENCY, period: range, today: isoDay(this.now()), by: args.by ?? 'revenue', products: rows.map(row => ({
                 id: row.id, name: text(row.name), department: text(row.department), quantity: qty(row.quantity), revenue_incl_vat: money(row.revenue_incl_vat),
             })) };
     }
@@ -249,6 +303,21 @@ export class PosTools {
 function isoDay(date) {
     const pad = (n) => String(n).padStart(2, '0');
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+/** Revenue with and without VAT, VAT, cost, gross profit and margin from summed sale lines. */
+function profit(row) {
+    const incl = Number(row.revenue_incl_vat ?? 0);
+    const excl = Number(row.revenue_excl_vat ?? 0);
+    const cost = Number(row.cost_excl_vat ?? 0);
+    return {
+        revenue_incl_vat: money(incl), revenue_excl_vat: money(excl), vat: money(incl - excl),
+        cost_excl_vat: money(cost), gross_profit_excl_vat: money(excl - cost),
+        margin_percent: excl > 0 ? Math.round((excl - cost) / excl * 1000) / 10 : null,
+    };
+}
+/** Percentage change from `before` to `now`, to one decimal; null when there is nothing before. */
+function change(now, before) {
+    return now == null || !before ? null : Math.round((now - before) / Math.abs(before) * 1000) / 10;
 }
 /** Selling price and cost, each excluding and including VAT. Selling prices are stored excluding
  * VAT; costs follow the POS's `CostIncludesTax` setting. */

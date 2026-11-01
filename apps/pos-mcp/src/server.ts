@@ -25,7 +25,7 @@ async function respond(work: () => Promise<unknown>) {
 export function createServer(tools: PosTools, version: string) {
   const server = new McpServer(
     { name: 'redtill-pos', version },
-    { instructions: 'Read-only access to the shop\'s RedTill POS: products, stock on hand, sales and supplier orders. Money is in rand; sales amounts include VAT. For relative days such as today or last week, pass period and let the server work out the dates; results include today\'s date. Product names are often Afrikaans: search with the words the operator used, and try a shorter word if nothing matches. Stock on hand can be negative when sales were rung up for stock never received in the POS; say so rather than treating it as a real shortage.' },
+    { instructions: 'Read-only access to the shop\'s RedTill POS: products, stock on hand, sales and supplier orders. Money is in rand; sales amounts include VAT unless named excl_vat. Gross profit and margin are calculated excluding VAT; give them as such. For relative days such as today or last week, pass period and let the server work out the dates; results include today\'s date. Product names are often Afrikaans: search with the words the operator used, and try a shorter word if nothing matches. Stock on hand can be negative when sales were rung up for stock never received in the POS; say so rather than treating it as a real shortage.' },
   )
 
   server.registerTool('search_products', {
@@ -60,6 +60,18 @@ export function createServer(tools: PosTools, version: string) {
     },
     annotations: { title: 'Sales summary', ...READ_ONLY },
   }, args => respond(() => tools.salesSummary(args)))
+
+  server.registerTool('get_sales_report', {
+    title: 'Sales report',
+    description: 'Profit and loss on sales for a period: revenue including and excluding VAT, VAT, cost of sales, gross profit and margin. Cost is what each item cost when it was sold. Optionally broken down by day, department, category or product, and compared with the previous period. Use this for profit, margin or "how did we do" questions.',
+    inputSchema: {
+      ...period,
+      group_by: z.enum(['total', 'day', 'department', 'category', 'product']).optional().describe('Breakdown; default total. product lists the products with the most revenue.'),
+      compare: z.boolean().optional().describe('Also report the previous period (yesterday, last week, last month, the same days last year, or the days just before a custom range) and the change in percent.'),
+      limit: z.number().int().min(1).max(100).optional().describe('Most rows in the breakdown; default 25, or every day for day.'),
+    },
+    annotations: { title: 'Sales report', ...READ_ONLY },
+  }, args => respond(() => tools.salesReport(args)))
 
   server.registerTool('get_top_products', {
     title: 'Top products',

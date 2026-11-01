@@ -8,6 +8,7 @@
 |---|---|
 | `search_products` | Products by name words, item code or barcode, with selling price and cost (excluding and including VAT), margin and stock on hand. |
 | `get_stock_levels` | Stock on hand in total and by location, with warning level, reorder quantity and order pack. `low_only` lists what needs reordering. |
+| `get_sales_report` | Profit and loss on sales for a period: revenue including and excluding VAT, VAT, cost of sales, gross profit and margin, overall or by day, department, category or product, optionally compared with the previous period. |
 | `get_sales_summary` | Number of sales, revenue including VAT and average sale for a period, overall or by day, department or category. |
 | `get_top_products` | Best sellers for a period, by revenue or quantity. |
 | `get_product_sales_history` | Daily sales of one product, average per day and roughly how many days the stock will last. |
@@ -21,6 +22,9 @@ Periods are named (`today`, `yesterday`, `this_week`, `last_7_days`, `this_month
 - Only paid sales (status 9) and account sales (status 4) count as sales. Quotes, open sales, jobs, bookings, voided and cancelled sales are left out.
 - Sales totals include VAT, as RedTill stores them. Selling prices are stored excluding VAT; the server adds the product's VAT rate.
 - Whether cost prices include VAT is read from RedTill's `CostIncludesTax` setting, checked again every five minutes.
+- Cost of sales uses the cost recorded on each sale line when it was sold, not today's cost. Gross profit and margin exclude VAT. Lines sold without a cost are counted and reported, so a margin that looks too high can be explained.
+- A comparison uses the same days of the previous week, month or year for a named period, so a month in progress is compared with the same days last month.
+- Every result with money names the currency, rand.
 - Stock on hand is the total over all locations, with a per-location split.
 - Stock can be negative when sales were rung up for stock never received in the POS. The server tells the model to say so rather than call it a shortage.
 - Customer names, phone numbers and card details are never returned.
@@ -56,6 +60,7 @@ env = { POS_DB_PASSWORD = { env = "POS_DB_PASSWORD" } }
 search_products = "read"
 get_stock_levels = "read"
 get_sales_summary = "read"
+get_sales_report = "read"
 get_top_products = "read"
 get_product_sales_history = "read"
 list_suppliers = "read"

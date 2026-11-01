@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readConfig } from './config.js'
 import type { Db, Param } from './db.js'
-import { resolveRange, sqlDate } from './periods.js'
+import { previousRange, resolveRange, sqlDate } from './periods.js'
 import { PosTools } from './tools.js'
 
 /** A database that records each query and answers from `reply`. */
@@ -38,6 +38,20 @@ describe('periods', () => {
     expect(resolveRange({ from: 'yesterday' }, sunday)).toEqual({ from: '2026-10-31', to: '2026-10-31' })
     expect(() => resolveRange({ from: 'last week' }, sunday)).toThrow(/pass period/)
     expect(sqlDate('2026-11-01')).toBe('20261101')
+  })
+})
+
+describe('previous periods', () => {
+  it('compares with the same days of the previous week, month or year', () => {
+    const range = (period: Parameters<typeof resolveRange>[0]['period']) => previousRange(resolveRange({ period }, sunday), period)
+    expect(range('today')).toEqual({ from: '2026-10-31', to: '2026-10-31' })
+    expect(range('this_week')).toEqual({ from: '2026-10-19', to: '2026-10-25' })
+    expect(range('last_7_days')).toEqual({ from: '2026-10-19', to: '2026-10-25' })
+    expect(range('this_month')).toEqual({ from: '2026-10-01', to: '2026-10-01' })
+    expect(range('last_month')).toEqual({ from: '2026-09-01', to: '2026-09-30' })
+    expect(range('this_year')).toEqual({ from: '2025-01-01', to: '2025-11-01' })
+    expect(previousRange({ from: '2026-03-01', to: '2026-03-31' }, 'this_month')).toEqual({ from: '2026-02-01', to: '2026-02-28' })
+    expect(previousRange({ from: '2026-10-01', to: '2026-10-10' })).toEqual({ from: '2026-09-21', to: '2026-09-30' })
   })
 })
 
@@ -128,5 +142,32 @@ describe('tools', () => {
     const { orders } = await new PosTools(db, () => sunday).supplierOrders({ status: 'received' })
     expect(orders.map(o => o.status)).toEqual(['received', 'cancelled', 'unknown (7)'])
     expect(param(calls[0]!.params, 'status')).toBe(1)
+  })
+
+  it('reports profit excluding VAT from the cost at the time of sale', async () => {
+    const line = { sales: 10, revenue_incl_vat: 1150, revenue_excl_vat: 1000, cost_excl_vat: 700, lines_without_cost: 1, revenue_without_cost: 20 }
+    const { db, calls } = fakeDb(sql => sql.includes('CostIncludesTax') ? [{ value: 'true' }] : [line])
+    const report = await new PosTools(db, () => sunday).salesReport({ period: 'this_week', compare: true })
+    expect(report).toMatchObject({
+      currency: expect.stringContaining('rand'),
+      period: { from: '2026-10-26', to: '2026-11-01' }, sales: 10, revenue_incl_vat: 1150, revenue_excl_vat: 1000, vat: 150,
+      cost_excl_vat: 700, gross_profit_excl_vat: 300, margin_percent: 30, lines_without_cost: 1, revenue_without_cost_excl_vat: 20,
+      previous: { period: { from: '2026-10-19', to: '2026-10-25' } }, change_percent: { revenue: 0, gross_profit: 0 },
+    })
+    const report_calls = calls.filter(c => c.sql.includes('SaleDetail'))
+    expect(report_calls).toHaveLength(2)
+    expect(report_calls[0]!.sql).toContain('m.SaleStatus IN (4, 9)')
+    expect(param(report_calls[0]!.params, 'costIncl')).toBe(true)
+  })
+
+  it('breaks the report down by product, capped', async () => {
+    const { db, calls } = fakeDb(sql => sql.includes('CostIncludesTax') ? [{ value: 'false' }]
+      : sql.includes('GROUP BY') ? [{ name: 'Melk 2L', quantity: 5, revenue_incl_vat: 115, revenue_excl_vat: 100, cost_excl_vat: 80 }] : [{}])
+    const report = await new PosTools(db, () => sunday).salesReport({ group_by: 'product', limit: 500 })
+    expect(report.by_product).toEqual([{ name: 'Melk 2L', quantity: 5, revenue_incl_vat: 115, revenue_excl_vat: 100, vat: 15, cost_excl_vat: 80, gross_profit_excl_vat: 20, margin_percent: 20 }])
+    expect(report.previous).toBeUndefined()
+    const grouped = calls.find(c => c.sql.includes('GROUP BY'))!
+    expect(param(grouped.params, 'limit')).toBe(100)
+    expect(param(grouped.params, 'costIncl')).toBe(false)
   })
 })
