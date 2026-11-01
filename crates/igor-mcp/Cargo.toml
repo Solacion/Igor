@@ -11,13 +11,16 @@ publish.workspace = true
 [dependencies]
 async-trait.workspace = true
 igor-core = { path = "../igor-core" }
-rmcp = { workspace = true, features = ["client", "transport-child-process"] }
+rmcp = { workspace = true, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest", "reqwest"] }
+reqwest.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "time"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process", "time"] }
+axum = { version = "0.8.4", default-features = false, features = ["http1", "tokio"] }
+rmcp = { workspace = true, features = ["server", "transport-streamable-http-server"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "process", "time"] }
 
 [lints]
 workspace = true

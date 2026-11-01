@@ -318,7 +318,7 @@ impl DesktopRuntime {
             // Keep prior credentials guarded too: earlier messages remain in history.
             let mut added_secrets = Vec::new();
             for server in snapshot.config.servers() {
-                for reference in server.env.values() {
+                for reference in server.secrets() {
                     if let Ok(secret) = reference.resolve() {
                         added_secrets.push(secret);
                     }

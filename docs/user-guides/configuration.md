@@ -25,7 +25,7 @@ api_key = { env = "ANTHROPIC_API_KEY" }
 
 [[servers]]
 id = "sales"                  # [a-z][a-z0-9_-]*, at most 32 characters, unique
-transport = "stdio"           # only stdio is supported
+transport = "stdio"           # "stdio" (local process) or "http" (remote server)
 command = "../target/debug/igor-fixture-server"
 args = ["--fixture", "../crates/igor-fixture-server/fixtures/sales.json"]
 
@@ -54,25 +54,48 @@ Each `[[providers]]` entry has the following keys:
 Secrets are never written in the file. A secret field holds a reference to where the value is kept:
 
 - `{ env = "ANTHROPIC_API_KEY" }`: an environment variable. IGOR reads it when it uses the secret. If it is unset or empty, IGOR reports an error that names the variable.
-- `{ keychain = "claude" }`: an item in your macOS login Keychain, under the service `com.solacion.igor`. The desktop stores a key you paste in **Settings → Model providers** this way. If the item is missing, IGOR reports an error that names it. Only a provider's `api_key` can use the Keychain; MCP server secrets use environment variables.
+- `{ keychain = "claude" }`: an item in your macOS login Keychain, under the service `com.solacion.igor`. The desktop stores a key you paste in **Settings → Model providers** this way. If the item is missing, IGOR reports an error that names it. MCP server secrets (`env`, `headers` and `bearer_token`) can use the Keychain too.
 
 IGOR rejects a literal value in a secret field, and the error does not repeat that value. Resolved secrets are redacted in debug output, display output and serialised output. To remove a stored key outside IGOR, open Keychain Access and delete the `com.solacion.igor` item, or run `security delete-generic-password -s com.solacion.igor -a claude`.
 
 ## MCP servers
 
-Each `[[servers]]` entry starts one stdio child process.
+Each `[[servers]]` entry is a local process (`transport = "stdio"`) or a remote server over Streamable HTTP (`transport = "http"`). Tool discovery, permissions, approvals, connection status, reconnect, timeouts and cancellation work the same for both.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `id` | (required) | A unique server id. Tools are identified by server id and tool name. |
-| `transport` | (required) | Must be `stdio`. |
-| `command` | (required) | The program to run. A relative path with a directory part, such as `./bin/server`, resolves against the configuration directory. A bare name, such as `node`, is looked up on `PATH`. |
+| `transport` | `stdio` | `stdio` or `http`. |
+| `command` | (required for `stdio`) | The program to run. A relative path with a directory part, such as `./bin/server`, resolves against the configuration directory. A bare name, such as `node`, is looked up on `PATH`. |
 | `args` | `[]` | Program arguments. |
 | `cwd` | configuration directory | The working directory. |
 | `env_allowlist` | `[]` | IGOR environment variables that the server may inherit. The server inherits nothing else. A bare command needs `PATH` here. |
 | `env` | `{}` | Variables to set in the server, each as a secret reference: `env = { TOKEN = { env = "IGOR_SALES_TOKEN" } }`. |
-| `startup_timeout_ms` | `10000` | The time limit for `initialize` plus `tools/list`, from 100 to 120000. |
+| `startup_timeout_ms` | `10000` | The time limit for connecting, `initialize` and `tools/list`, from 100 to 120000. |
 | `call_timeout_ms` | `limits.tool_call_timeout_ms` | The time limit for each tool call to this server. |
+
+`command`, `args`, `cwd`, `env_allowlist` and `env` apply to `stdio` only.
+
+### Remote servers
+
+```toml
+[[servers]]
+id = "crm"
+transport = "http"
+url = "https://mcp.example.com/mcp"
+bearer_token = { keychain = "crm-mcp" }
+headers = { "X-Api-Key" = { env = "IGOR_CRM_KEY" } }
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `url` | (required for `http`) | The server's MCP endpoint. It must use `https://`; plain `http://` is allowed only for `localhost`, `127.0.0.1` and `[::1]`. It must not contain a user name or password. |
+| `bearer_token` | none | A secret reference, sent as `Authorization: Bearer <token>`. |
+| `headers` | `{}` | Headers sent with every request, each value a secret reference. Names are HTTP tokens and are case-insensitive. `Host`, `Content-Type`, `Content-Length`, `Accept`, `Mcp-Session-Id`, `Mcp-Protocol-Version` and `Last-Event-Id` are set by IGOR. `Authorization` is not allowed together with `bearer_token`. |
+
+Header and token values are read when the server connects. They never appear in the configuration file, logs, events or exported activity, and IGOR removes them from connection errors. IGOR does not follow redirects, so headers are only ever sent to the configured URL. To store a token in the Keychain, run `security add-generic-password -U -s com.solacion.igor -a crm-mcp -w` and type the token when asked.
+
+OAuth sign-in (#161), legacy HTTP+SSE servers (#162) and editing remote servers in Settings (#163) are planned. Settings lists a remote server by its URL, with its status, tools and permissions, and can reconnect or remove it.
 
 A server can never receive a provider API key. IGOR rejects an allowlist entry or an `env` reference that names a variable used by a provider's `api_key`.
 

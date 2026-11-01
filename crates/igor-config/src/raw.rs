@@ -38,8 +38,13 @@ pub(crate) struct RawProvider {
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawServer {
     pub id: String,
+    #[serde(default = "stdio")]
     pub transport: String,
-    pub command: String,
+    pub command: Option<String>,
+    pub url: Option<String>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, RawSecret>,
+    pub bearer_token: Option<RawSecret>,
     #[serde(default)]
     pub args: Vec<String>,
     pub cwd: Option<PathBuf>,
@@ -49,6 +54,10 @@ pub(crate) struct RawServer {
     pub env: BTreeMap<String, RawSecret>,
     pub startup_timeout_ms: Option<u64>,
     pub call_timeout_ms: Option<u64>,
+}
+
+fn stdio() -> String {
+    "stdio".to_owned()
 }
 
 #[derive(Debug, Default, Deserialize)]

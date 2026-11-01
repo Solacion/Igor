@@ -86,6 +86,8 @@ function statusText(server: ServerView): string {
   }
 }
 function commandLine(entry: ServerEntry): string {
+  if (entry.transport === 'http')
+    return entry.url ?? ''
   return [entry.command, ...entry.args].join(' ')
 }
 function editingEntry(): ServerEntry | null {
@@ -187,7 +189,7 @@ onUnmounted(unsubscribe)
                   </div>
                 </div>
                 <div v-else class="actions">
-                  <button type="button" class="secondary" :disabled="!!busy || editing !== null" @click="editing = server.entry.id">Edit</button>
+                  <button v-if="server.entry.transport !== 'http'" type="button" class="secondary" :disabled="!!busy || editing !== null" @click="editing = server.entry.id">Edit</button>
                   <button type="button" class="secondary" :disabled="!!busy" @click="act(`reconnect:${server.entry.id}`, () => reconnectServer(server.entry.id))">{{ busy === `reconnect:${server.entry.id}` ? 'Connecting…' : 'Reconnect' }}</button>
                   <button type="button" class="link danger" :disabled="!!busy" @click="confirmingRemove = server.entry.id">Remove</button>
                 </div>

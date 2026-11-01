@@ -118,6 +118,7 @@ Choose **Settings** in the top bar. Under **MCP servers** you can:
 
 - **Add server**: give it a name, the program to run and its arguments. **Test connection** starts the server, lists its tools and stops it, without saving. **Save** shows the exact command line and asks you to confirm before Igor runs it.
 - See each server's connection status. A failed start shows the reason. **Reconnect** tries again.
+- See remote servers (`transport = "http"` in the [configuration file](configuration.md#remote-servers)) listed by URL, with the same status, tools, permissions, **Reconnect** and **Remove**. Adding and editing remote servers in Settings is planned (#163).
 - **Edit** or **Remove** a server. Removing also removes its tool permissions.
 - Open **Tools and permissions** to choose what Igor may do with each tool: use it freely (`read`), ask you each time (`write`) or never (`denied`). A new tool is not allowed until you choose. Server descriptions and hints are shown as hints only.
 

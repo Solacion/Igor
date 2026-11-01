@@ -135,11 +135,62 @@ pub struct ProviderConfig {
     pub api_key: Option<SecretRef>,
 }
 
-/// A configured MCP server, started as a stdio child process.
+/// A configured MCP server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerConfig {
     /// Host-assigned server id.
     pub id: ServerId,
+    /// How IGOR reaches the server.
+    pub transport: ServerTransport,
+    /// Bound on `initialize` plus `tools/list`.
+    pub startup_timeout: Duration,
+    /// Bound on each tool call (the server's override or [`Limits::tool_call_timeout`]).
+    pub call_timeout: Duration,
+}
+
+impl ServerConfig {
+    /// The stdio settings, when the server is a local child process.
+    pub fn stdio(&self) -> Option<&StdioServer> {
+        match &self.transport {
+            ServerTransport::Stdio(stdio) => Some(stdio),
+            ServerTransport::Http(_) => None,
+        }
+    }
+
+    /// Every secret reference the server is given: environment variables, headers and the
+    /// bearer token. Hosts resolve these to keep the values out of output.
+    pub fn secrets(&self) -> Vec<&SecretRef> {
+        match &self.transport {
+            ServerTransport::Stdio(stdio) => stdio.env.values().collect(),
+            ServerTransport::Http(http) => http
+                .headers
+                .values()
+                .chain(http.bearer_token.as_ref())
+                .collect(),
+        }
+    }
+
+    /// The HTTP settings, when the server is remote.
+    pub fn http(&self) -> Option<&HttpServer> {
+        match &self.transport {
+            ServerTransport::Http(http) => Some(http),
+            ServerTransport::Stdio(_) => None,
+        }
+    }
+}
+
+/// How IGOR reaches an MCP server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerTransport {
+    /// A local child process speaking MCP over stdin and stdout (`transport = "stdio"`).
+    Stdio(StdioServer),
+    /// A remote server over Streamable HTTP (`transport = "http"`).
+    Http(HttpServer),
+}
+
+/// A server started as a stdio child process.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StdioServer {
     /// Program to run. A relative path with a directory component is resolved against the
     /// configuration directory; a bare name is looked up on `PATH` at spawn time.
     pub command: PathBuf,
@@ -151,10 +202,19 @@ pub struct ServerConfig {
     pub env_allowlist: Vec<String>,
     /// Variables set in the child, each read from a secret reference at spawn time.
     pub env: BTreeMap<String, SecretRef>,
-    /// Bound on `initialize` plus `tools/list`.
-    pub startup_timeout: Duration,
-    /// Bound on each tool call (the server's override or [`Limits::tool_call_timeout`]).
-    pub call_timeout: Duration,
+}
+
+/// A remote server reached over HTTP.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpServer {
+    /// MCP endpoint without credentials: `https`, or plain `http` only for `localhost`,
+    /// `127.0.0.1` or `[::1]`.
+    pub url: String,
+    /// Headers sent with every request, each value read from a secret reference at connect
+    /// time.
+    pub headers: BTreeMap<String, SecretRef>,
+    /// Sent as `Authorization: Bearer <token>`, read at connect time.
+    pub bearer_token: Option<SecretRef>,
 }
 
 /// Host tool classifications, keyed by server and exact tool name.

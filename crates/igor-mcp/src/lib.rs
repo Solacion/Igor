@@ -1,6 +1,8 @@
 //! MCP client for IGOR.
 //!
-//! [`McpBackend`] connects to one MCP server, started as a stdio child process, and implements
+//! [`McpBackend`] connects to one MCP server, either started as a stdio child process
+//! ([`McpBackend::connect`]) or reached over Streamable HTTP ([`McpBackend::connect_http`]), and
+//! implements
 //! [`igor_core::tools::ToolBackend`] over it with `rmcp`. It maps MCP types to core types and MCP
 //! failures to [`BackendError`], so the core never sees the MCP library.
 //!
@@ -8,6 +10,10 @@
 //! [`StdioServerConfig::env_allowlist`] are copied from IGOR's environment, plus those set
 //! explicitly in [`StdioServerConfig::env`]. API keys and other secrets in IGOR's environment are
 //! therefore not inherited.
+//!
+//! A remote server gets only the headers in [`HttpServerConfig`]. Redirects are not followed, so
+//! header secrets are never sent to another address, and secret values are removed from
+//! connection errors.
 //!
 //! The child's stderr is kept as bounded, redacted diagnostics: see [`McpBackend::recent_stderr`]
 //! and [`ConnectError::stderr`].
@@ -32,7 +38,8 @@ use igor_core::tools::{
 use rmcp::model::{CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Tool};
 use rmcp::service::NotificationContext;
 use rmcp::service::{Peer, RunningService, ServiceError};
-use rmcp::transport::TokioChildProcess;
+use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use rmcp::transport::{StreamableHttpClientTransport, TokioChildProcess};
 use rmcp::{ClientHandler, RoleClient, ServiceExt};
 use serde_json::{Map, Value};
 use thiserror::Error;
@@ -119,9 +126,97 @@ impl fmt::Debug for StdioServerConfig {
     }
 }
 
+/// How to reach one remote MCP server over Streamable HTTP.
+#[derive(Clone)]
+pub struct HttpServerConfig {
+    /// MCP endpoint.
+    pub url: String,
+    /// Headers sent with every request, such as resolved API keys. Values never appear in
+    /// `Debug` output or errors.
+    pub headers: Vec<(String, String)>,
+    /// Sent as `Authorization: Bearer <token>`. Never appears in `Debug` output or errors.
+    pub bearer_token: Option<String>,
+    /// Bound on connecting and completing `initialize`.
+    pub startup_timeout: Duration,
+    /// Bound on each request after startup.
+    pub call_timeout: Duration,
+}
+
+impl HttpServerConfig {
+    /// A configuration for `url` with no headers and the default timeouts.
+    pub fn new(url: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            headers: Vec::new(),
+            bearer_token: None,
+            startup_timeout: DEFAULT_STARTUP_TIMEOUT,
+            call_timeout: DEFAULT_CALL_TIMEOUT,
+        }
+    }
+
+    /// The secret values sent to the server, which errors must not reveal.
+    fn secret_values(&self) -> Vec<String> {
+        self.headers
+            .iter()
+            .map(|(_, value)| value.clone())
+            .chain(self.bearer_token.clone())
+            .collect()
+    }
+
+    fn transport_config(&self) -> Result<StreamableHttpClientTransportConfig, String> {
+        let mut headers = std::collections::HashMap::new();
+        for (name, value) in &self.headers {
+            let name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
+                .map_err(|_| format!("invalid header name {name:?}"))?;
+            let mut value = reqwest::header::HeaderValue::from_str(value)
+                .map_err(|_| format!("the value for header {name} is not a valid header value"))?;
+            value.set_sensitive(true);
+            headers.insert(name, value);
+        }
+        let mut config = StreamableHttpClientTransportConfig::with_uri(self.url.as_str())
+            .custom_headers(headers);
+        if let Some(token) = &self.bearer_token {
+            config = config.auth_header(token.clone());
+        }
+        Ok(config)
+    }
+}
+
+impl fmt::Debug for HttpServerConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let header_names: Vec<&str> = self.headers.iter().map(|(name, _)| name.as_str()).collect();
+        f.debug_struct("HttpServerConfig")
+            .field("url", &self.url)
+            .field("headers", &header_names)
+            .field(
+                "bearer_token",
+                &self.bearer_token.as_ref().map(|_| REDACTED),
+            )
+            .field("startup_timeout", &self.startup_timeout)
+            .field("call_timeout", &self.call_timeout)
+            .finish()
+    }
+}
+
+/// `text` with each secret value replaced by [`REDACTED`].
+fn redact(mut text: String, secrets: &[String]) -> String {
+    for secret in secrets.iter().filter(|secret| !secret.is_empty()) {
+        text = text.replace(secret.as_str(), REDACTED);
+    }
+    text
+}
+
 /// The server could not be started or did not complete `initialize`.
 #[derive(Debug, Error)]
 pub enum ConnectError {
+    /// The HTTP client could not be set up, for example because a header value is invalid.
+    #[error("cannot connect to server {server}: {reason}")]
+    Http {
+        /// Server being connected.
+        server: ServerId,
+        /// What went wrong, without secret values.
+        reason: String,
+    },
     /// The process could not be spawned, for example because the command does not exist.
     #[error("cannot start server {server}: {source}")]
     Spawn {
@@ -157,7 +252,7 @@ impl ConnectError {
     /// start. Untrusted server output: display as plain text only.
     pub fn stderr(&self) -> &[String] {
         match self {
-            Self::Spawn { .. } => &[],
+            Self::Spawn { .. } | Self::Http { .. } => &[],
             Self::Initialize { stderr, .. } | Self::Timeout { stderr, .. } => stderr,
         }
     }
@@ -187,11 +282,20 @@ async fn last_lines(
     log.snapshot()
 }
 
+/// What [`McpBackend::start`] needs besides the transport.
+struct Started<'a> {
+    startup_timeout: Duration,
+    call_timeout: Duration,
+    stderr: stderr::StderrLog,
+    reader: Option<tokio::task::JoinHandle<()>>,
+    secrets: &'a [String],
+}
+
 /// Bound on [`McpBackend::shutdown`]: how long the server gets to exit after its input closes
 /// before it is killed, plus the wait for the kill.
 pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// One connected stdio MCP server.
+/// One connected MCP server, local or remote.
 ///
 /// [`McpBackend::shutdown`] stops the server and waits until its process has exited. Dropping
 /// the backend also stops it, but in the background: a process that is exiting may not wait for
@@ -240,24 +344,89 @@ impl McpBackend {
             }
             None => (stderr::StderrLog::default(), None),
         };
+        let secrets = config.secret_values();
+        Self::start(
+            server_id,
+            transport,
+            Started {
+                startup_timeout: config.startup_timeout,
+                call_timeout: config.call_timeout,
+                stderr,
+                reader,
+                secrets: &secrets,
+            },
+        )
+        .await
+    }
+
+    /// Connects to a remote server over Streamable HTTP and completes the MCP `initialize`
+    /// handshake. Redirects are not followed.
+    pub async fn connect_http(
+        server_id: ServerId,
+        config: &HttpServerConfig,
+    ) -> Result<Self, ConnectError> {
+        let secrets = config.secret_values();
+        let http_error = |reason: String| ConnectError::Http {
+            server: server_id.clone(),
+            reason: redact(reason, &secrets),
+        };
+        let transport_config = config.transport_config().map_err(http_error)?;
+        // A redirect could carry header secrets to another address, so none are followed.
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|error| http_error(error.to_string()))?;
+        let transport = StreamableHttpClientTransport::with_client(client, transport_config);
+        Self::start(
+            server_id,
+            transport,
+            Started {
+                startup_timeout: config.startup_timeout,
+                call_timeout: config.call_timeout,
+                stderr: stderr::StderrLog::default(),
+                reader: None,
+                secrets: &secrets,
+            },
+        )
+        .await
+    }
+
+    /// Runs the MCP client over `transport` and waits, up to the startup timeout, for
+    /// `initialize` to complete.
+    async fn start<T, E, A>(
+        server_id: ServerId,
+        transport: T,
+        started: Started<'_>,
+    ) -> Result<Self, ConnectError>
+    where
+        T: rmcp::transport::IntoTransport<RoleClient, E, A>,
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        let Started {
+            startup_timeout,
+            call_timeout,
+            stderr,
+            reader,
+            secrets,
+        } = started;
         let tool_list_version = Arc::new(AtomicU64::new(0));
         let client = Client {
             tool_list_version: Arc::clone(&tool_list_version),
         };
-        let started = tokio::time::timeout(config.startup_timeout, client.serve(transport)).await;
+        let started = tokio::time::timeout(startup_timeout, client.serve(transport)).await;
         let service = match started {
             Ok(Ok(service)) => service,
             Ok(Err(error)) => {
                 return Err(ConnectError::Initialize {
                     server: server_id,
-                    reason: error.to_string(),
+                    reason: redact(error.to_string(), secrets),
                     stderr: last_lines(reader, &stderr).await,
                 });
             }
             Err(_elapsed) => {
                 return Err(ConnectError::Timeout {
                     server: server_id,
-                    timeout: config.startup_timeout,
+                    timeout: startup_timeout,
                     stderr: last_lines(reader, &stderr).await,
                 });
             }
@@ -268,7 +437,7 @@ impl McpBackend {
             service: Mutex::new(Some(service)),
             tool_list_version,
             stderr,
-            call_timeout: config.call_timeout,
+            call_timeout,
         })
     }
 
