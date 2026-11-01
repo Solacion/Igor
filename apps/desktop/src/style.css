@@ -268,6 +268,8 @@ details.activity-line { display: block; }
 .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; color: var(--muted); }
 .status-detail { color: var(--unavailable); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
 .tools summary, .advanced summary, .server-output summary { cursor: default; font-size: 13px; font-weight: 500; min-height: 26px; color: var(--link); }
+.tool-search { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.tool-search input { flex: 1; max-width: 320px; border-radius: 7px; }
 .tool-rows { list-style: none; margin: 8px 0 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); }
 .tool-row { display: flex; align-items: center; gap: 14px; padding: 8px 12px; border-top: 1px solid var(--line); }
 .tool-row:first-child { border-top: 0; }

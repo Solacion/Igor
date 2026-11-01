@@ -129,7 +129,7 @@ Choose **Settings** (the gear icon) in the conversation toolbar. Settings opens 
 - **Add server**: give it a name, the program to run and its arguments. **Test connection** starts the server, lists its tools and stops it, without saving. **Save** shows the exact command line and asks you to confirm before Igor runs it.
 - See each server's connection status. A failed start shows the reason. **Reconnect** tries again.
 - **Edit** or **Remove** a server. Removing also removes its tool permissions.
-- Open **Tools and permissions** to choose what Igor may do with each tool: **Always allow** (`read`), **Ask first** (`write`) or **Never** (`denied`). A new tool is not allowed until you choose. A tool the server says may change data still asks for approval under Always allow. Server descriptions and hints are shown as hints only.
+- Open **Tools and permissions** to choose what Igor may do with each tool: **Always allow** (`read`), **Ask first** (`write`) or **Never** (`denied`). A new tool is not allowed until you choose. When a server has more than five tools, a search box filters them by name or description. A tool the server says may change data still asks for approval under Always allow. Server descriptions and hints are shown as hints only.
 
 Under **Advanced**, set the working directory, the environment variables the server may inherit (such as `PATH`), secrets and timeouts. A secret is written as `NAME=IGOR_VARIABLE`: the server gets `NAME`, read from Igor's own environment variable `IGOR_VARIABLE`. Only the variable name is saved.
 

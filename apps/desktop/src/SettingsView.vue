@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useSettingsStore } from './stores/settings'
 import VoiceSettings from './VoiceSettings.vue'
 import ServerForm from './ServerForm.vue'
@@ -76,6 +76,13 @@ function permission(server: string, tool: string, value: string) {
   void act(`permission:${server}:${tool}`, () => setPermission(server, tool, cls))
 }
 /** Live tools, plus tools that have a permission but are not currently reported. */
+/** Search text per server for its tool list. */
+const toolSearch = reactive<Record<string, string>>({})
+/** The server's tools whose name or description contains every word of its search. */
+function shownTools(server: ServerView): ToolView[] {
+  const words = (toolSearch[server.entry.id] ?? '').toLowerCase().split(/\s+/).filter(Boolean)
+  return tools(server).filter(tool => words.every(word => `${tool.name} ${tool.description ?? ''}`.toLowerCase().includes(word)))
+}
 function tools(server: ServerView): ToolView[] {
   const live = new Set(server.tools.map((tool) => tool.name))
   const configuredOnly = Object.keys(server.permissions)
@@ -155,8 +162,14 @@ onUnmounted(unsubscribe)
 
                 <details v-if="tools(server).length" class="tools">
                   <summary>Tools and permissions ({{ tools(server).length }})</summary>
-                  <ul class="tool-rows">
-                    <li v-for="tool in tools(server)" :key="tool.name" class="tool-row">
+                  <div v-if="tools(server).length > 5" class="tool-search">
+                    <label :for="`tool-search-${server.entry.id}`" class="sr-only">Search tools of {{ server.entry.id }}</label>
+                    <input :id="`tool-search-${server.entry.id}`" v-model="toolSearch[server.entry.id]" type="search" placeholder="Search tools" autocomplete="off" spellcheck="false" />
+                    <span class="hint" role="status">{{ shownTools(server).length }} of {{ tools(server).length }}</span>
+                  </div>
+                  <p v-if="!shownTools(server).length" class="hint">No tools match.</p>
+                  <ul v-else class="tool-rows">
+                    <li v-for="tool in shownTools(server)" :key="tool.name" class="tool-row">
                       <div class="tool-info">
                         <strong>{{ tool.name }}</strong>
                         <p v-if="tool.description" class="hint">{{ tool.description }}</p>

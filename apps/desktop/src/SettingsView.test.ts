@@ -259,4 +259,22 @@ it('does not offer process output before a server has started', async () => {
   const wrapper = mount(SettingsView); await flushPromises()
   expect(wrapper.find('.server-output').exists()).toBe(false)
   wrapper.unmount()
+
+})
+
+it('filters a long tool list by name or description', async () => {
+  const many = Array.from({ length: 8 }, (_, i) => ({ name: `tool_${i}`, description: i === 3 ? 'Stock on hand' : null, read_only_hint: true, destructive_hint: null }))
+  backend({ settings_view: () => view([{ ...pos, tools: many }]) })
+  const wrapper = mount(SettingsView)
+  await flushPromises()
+  const search = wrapper.get('.tool-search input')
+  await search.setValue('stock')
+  expect(wrapper.findAll('.tool-row').map(row => row.get('strong').text())).toEqual(['tool_3'])
+  expect(wrapper.get('.tool-search').text()).toContain('1 of 9')
+  await search.setValue('tool 5')
+  expect(wrapper.findAll('.tool-row').map(row => row.get('strong').text())).toEqual(['tool_5'])
+  await search.setValue('nothing')
+  expect(wrapper.findAll('.tool-row')).toHaveLength(0)
+  expect(wrapper.text()).toContain('No tools match.')
+  wrapper.unmount()
 })
