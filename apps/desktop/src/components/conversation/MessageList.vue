@@ -3,6 +3,7 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 import type { ApprovalDecision } from '../../session'
 import type { TimelineEntry } from '../../conversationDisplay'
 import { approvalSummary } from '../../conversationDisplay'
+import { renderMarkdown } from '../../markdown'
 import ToolActivity from './ToolActivity.vue'
 import ApprovalCard from './ApprovalCard.vue'
 import ClarificationCard from './ClarificationCard.vue'
@@ -83,7 +84,7 @@ watch(() => props.entries, async entries => {
   <ol ref="container" class="messages timeline" aria-label="Conversation timeline" aria-live="polite" aria-relevant="additions" @scroll="scrolled">
     <li v-for="entry in entries" :key="`${entry.kind}:${entry.key}`" :data-entry-key="`${entry.kind}:${entry.key}`" :data-kind="entry.kind" :data-role="entry.kind === 'message' ? entry.message.role : undefined" :class="rowClass(entry)">
       <button v-if="runs.get(`${entry.kind}:${entry.key}`)?.latest && runs.get(`${entry.kind}:${entry.key}`)!.size > 1" type="button" class="link activity-toggle" :aria-expanded="expanded.has(runs.get(`${entry.kind}:${entry.key}`)!.run)" @click="toggle(runs.get(`${entry.kind}:${entry.key}`)!.run)">{{ expanded.has(runs.get(`${entry.kind}:${entry.key}`)!.run) ? 'Hide steps' : `${runs.get(`${entry.kind}:${entry.key}`)!.size} steps` }}</button>
-      <template v-if="entry.kind === 'message'"><strong class="message-role">{{ entry.message.role }}</strong><p class="literal message-text">{{ entry.message.text }}</p></template>
+      <template v-if="entry.kind === 'message'"><strong class="message-role sr-only">{{ entry.message.role }}</strong><!-- Igor's replies are Markdown; renderMarkdown escapes HTML and drops links and images. --><div v-if="entry.message.role === 'Igor'" class="message-text markdown" v-html="renderMarkdown(entry.message.text)"></div><p v-else class="literal message-text">{{ entry.message.text }}</p></template>
       <ToolActivity v-else-if="entry.kind === 'tool'" :call="entry.call" />
       <ToolActivity v-else-if="entry.kind === 'connection'" :connection="entry.connection" />
       <p v-else-if="entry.kind === 'session-grant'" class="literal activity-line session-grant"><span class="activity-icon" aria-hidden="true"></span>{{ entry.tool.server }} · {{ entry.tool.name }}: Ran without asking — allowed for this conversation</p>
@@ -91,5 +92,5 @@ watch(() => props.entries, async entries => {
       <ClarificationCard v-else-if="entry.kind === 'question'" :item="entry.item" :busy="busy" @answer="emit('answer', entry.item)" />
     </li>
   </ol>
-  <button v-if="!following" type="button" class="secondary jump-latest" @click="scrollToLatest">Jump to latest</button>
+  <button v-if="!following" type="button" class="jump-latest" aria-label="Jump to latest" @click="scrollToLatest"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg></button>
 </template>

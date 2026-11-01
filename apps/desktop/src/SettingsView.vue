@@ -65,6 +65,12 @@ function remove(id: string) {
   confirmingRemove.value = null
   void act(`remove:${id}`, () => removeServer(id))
 }
+/** Permission choices as the operator sees them. "Always allow" is the `read` class. */
+const permissionOptions: { value: PermissionClass, label: string }[] = [
+  { value: 'read', label: 'Always allow' },
+  { value: 'write', label: 'Ask first' },
+  { value: 'denied', label: 'Never' },
+]
 function permission(server: string, tool: string, value: string) {
   const cls = value === '' ? null : (value as PermissionClass)
   void act(`permission:${server}:${tool}`, () => setPermission(server, tool, cls))
@@ -100,20 +106,17 @@ onUnmounted(unsubscribe)
 
 <template>
   <section class="settings" aria-labelledby="settings-title">
-    <header class="settings-header">
-      <h1 id="settings-title">Settings</h1>
-      <button type="button" class="secondary" @click="emit('close')">Done</button>
-    </header>
-
     <div class="settings-layout">
       <nav class="settings-nav" aria-label="Settings sections">
-        <a href="#mcp-servers" :class="{ 'is-active': section === 'mcp-servers' }" :aria-current="section === 'mcp-servers' ? 'location' : undefined" @click.prevent="focusSection('mcp-servers')">MCP servers</a>
-        <a href="#model-providers" :class="{ 'is-active': section === 'model-providers' }" :aria-current="section === 'model-providers' ? 'location' : undefined" @click.prevent="focusSection('model-providers')">Model providers</a>
-        <a href="#voice" :class="{ 'is-active': section === 'voice' }" :aria-current="section === 'voice' ? 'location' : undefined" @click.prevent="focusSection('voice')">Voice</a>
+        <button type="button" class="settings-back" @click="emit('close')"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 2.5L4 6l3.5 3.5"/></svg>Conversation</button>
+        <h1 id="settings-title">Settings</h1>
+        <a href="#mcp-servers" :class="{ 'is-active': section === 'mcp-servers' }" :aria-current="section === 'mcp-servers' ? 'location' : undefined" @click.prevent="focusSection('mcp-servers')"><span class="nav-icon" data-icon="servers" aria-hidden="true">S</span>MCP servers</a>
+        <a href="#model-providers" :class="{ 'is-active': section === 'model-providers' }" :aria-current="section === 'model-providers' ? 'location' : undefined" @click.prevent="focusSection('model-providers')"><span class="nav-icon" data-icon="models" aria-hidden="true">M</span>Model providers</a>
+        <a href="#voice" :class="{ 'is-active': section === 'voice' }" :aria-current="section === 'voice' ? 'location' : undefined" @click.prevent="focusSection('voice')"><span class="nav-icon" data-icon="voice" aria-hidden="true">V</span>Voice</a>
       </nav>
 
       <div class="settings-body">
-        <section id="mcp-servers" aria-labelledby="servers-title">
+        <section v-show="section === 'mcp-servers'" id="mcp-servers" aria-labelledby="servers-title">
           <div class="section-head">
             <div>
               <h2 id="servers-title">MCP servers</h2>
@@ -152,31 +155,26 @@ onUnmounted(unsubscribe)
 
                 <details v-if="tools(server).length" class="tools">
                   <summary>Tools and permissions ({{ tools(server).length }})</summary>
-                  <table>
-                    <thead><tr><th scope="col">Tool</th><th scope="col">Igor may</th></tr></thead>
-                    <tbody>
-                      <tr v-for="tool in tools(server)" :key="tool.name">
-                        <td>
-                          <strong>{{ tool.name }}</strong>
-                          <p v-if="tool.description" class="hint">{{ tool.description }}</p>
-                          <p class="hint">
-                            <span v-if="tool.read_only_hint">Server says: read-only. </span>
-                            <span v-if="tool.destructive_hint">Server says: may change or delete data. </span>
-                            <span v-if="!server.tools.some((live) => live.name === tool.name)">Not reported by the server right now.</span>
-                          </p>
-                        </td>
-                        <td>
-                          <select :aria-label="`Permission for ${tool.name}`" :value="server.permissions[tool.name] ?? ''" :disabled="!!busy" @change="permission(server.entry.id, tool.name, ($event.target as HTMLSelectElement).value)">
-                            <option value="">Not allowed (not set)</option>
-                            <option value="read">Use it freely (read)</option>
-                            <option value="write">Ask me each time (write)</option>
-                            <option value="denied">Never (denied)</option>
-                          </select>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                  <p class="hint">Server descriptions are hints only. Use "Ask me each time" for anything that changes data.</p>
+                  <ul class="tool-rows">
+                    <li v-for="tool in tools(server)" :key="tool.name" class="tool-row">
+                      <div class="tool-info">
+                        <strong>{{ tool.name }}</strong>
+                        <p v-if="tool.description" class="hint">{{ tool.description }}</p>
+                        <p class="hint">
+                          <span v-if="tool.read_only_hint">Server says: read-only. </span>
+                          <span v-if="tool.destructive_hint">Server says: may change or delete data. </span>
+                          <span v-if="!server.tools.some((live) => live.name === tool.name)">Not reported by the server right now.</span>
+                          <span v-if="!server.permissions[tool.name]">Not allowed yet. </span>
+                        </p>
+                      </div>
+                      <div class="segmented" role="radiogroup" :aria-label="`Permission for ${tool.name}`">
+                        <label v-for="option in permissionOptions" :key="option.value" :class="{ 'is-on': server.permissions[tool.name] === option.value }">
+                          <input type="radio" :name="`permission-${server.entry.id}-${tool.name}`" :value="option.value" :checked="server.permissions[tool.name] === option.value" :disabled="!!busy" @change="permission(server.entry.id, tool.name, option.value)" />{{ option.label }}
+                        </label>
+                      </div>
+                    </li>
+                  </ul>
+                  <p class="hint">Server descriptions are hints only. Use Ask first for anything that changes data.</p>
                 </details>
 
                 <div v-if="confirmingRemove === server.entry.id" class="confirm" role="alertdialog" :aria-label="`Remove ${server.entry.id}`">
@@ -197,8 +195,8 @@ onUnmounted(unsubscribe)
 
           <p v-if="view" class="hint config-path">Saved in {{ view.config_path }}</p>
         </section>
-        <ProviderSettings />
-        <VoiceSettings />
+        <ProviderSettings v-show="section === 'model-providers'" />
+        <VoiceSettings v-show="section === 'voice'" />
       </div>
     </div>
   </section>

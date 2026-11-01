@@ -10,12 +10,12 @@ const emit = defineEmits<{
 }>()
 </script>
 <template>
-      <article class="activity-row">
+      <article class="question-card">
         <h2>Igor needs your answer</h2><p class="literal">{{ item.question }}</p>
-        <form v-if="busy && (item.state === 'pending' || item.state === 'sending')" class="composer" @submit.prevent="emit('answer')">
+        <form v-if="busy && (item.state === 'pending' || item.state === 'sending')" class="answer-form" @submit.prevent="emit('answer')">
           <label :for="`answer-${item.key}`">Your answer</label>
           <textarea :id="`answer-${item.key}`" v-model="item.answer" :disabled="item.state !== 'pending'" maxlength="32768" rows="2" />
-          <button type="submit" :disabled="item.state !== 'pending' || !item.answer.trim()">Send answer</button>
+          <div class="card-actions"><button type="submit" :disabled="item.state !== 'pending' || !item.answer.trim()">Send answer</button></div>
         </form>
         <p role="status">{{ item.state === 'sending' ? 'Answer sent; waiting for the runtime.' : item.state === 'pending' ? 'Waiting for your answer. You can stop the turn.' : item.state }}</p>
       </article>

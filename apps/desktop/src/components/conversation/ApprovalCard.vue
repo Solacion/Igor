@@ -14,7 +14,10 @@ const lines = computed(() => {
 </script>
 <template>
   <article class="approval-card">
-    <h2>Review write action</h2>
+    <header class="approval-head">
+      <span class="approval-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg></span>
+      <div><h2>Review write action</h2><p class="approval-tool">{{ item.request.tool.server }} · {{ item.request.tool.name }} · changes data</p></div>
+    </header>
     <p class="approval-summary">{{ approvalSummary(item.request) }}</p>
     <table v-if="lines.length"><thead><tr><th scope="col">SKU</th><th scope="col">Quantity</th><th scope="col">Rationale</th></tr></thead>
       <tbody><tr v-for="(line, index) in lines" :key="index"><td>{{ displayValue(line.sku) }}</td><td>{{ displayValue(line.quantity) }}</td><td>{{ displayValue(line.rationale) }}</td></tr></tbody>
@@ -27,10 +30,11 @@ const lines = computed(() => {
       <h3>Action hash</h3><p class="literal">{{ item.request.action_hash }}</p>
     </details>
     <p role="status">{{ item.state === 'pending' ? 'Waiting for your decision. Nothing runs until you approve.' : item.state === 'sending' ? 'Decision sent; waiting for the runtime.' : item.state === 'approved_for_session' ? 'Allowed for this conversation' : item.state }}</p>
-    <div v-if="busy && (item.state === 'pending' || item.state === 'sending')" class="composer-actions">
-      <button type="button" :disabled="item.state !== 'pending'" @click="emit('decide', 'approve')">Approve</button>
-      <button type="button" class="secondary" :disabled="item.state !== 'pending'" @click="emit('decide', 'deny')">Deny</button>
-      <button v-if="item.request.session_grant_allowed === true" type="button" class="secondary" :disabled="item.state !== 'pending'" @click="emit('decide', 'approve_for_session')">Allow for this conversation</button>
+    <!-- DOM order keeps Approve first for focus; CSS order puts it on the right. -->
+    <div v-if="busy && (item.state === 'pending' || item.state === 'sending')" class="card-actions approval-actions">
+      <button type="button" class="approve" :disabled="item.state !== 'pending'" @click="emit('decide', 'approve')">Approve</button>
+      <button type="button" class="secondary deny" :disabled="item.state !== 'pending'" @click="emit('decide', 'deny')">Deny</button>
+      <button v-if="item.request.session_grant_allowed === true" type="button" class="link session-grant-button" :disabled="item.state !== 'pending'" @click="emit('decide', 'approve_for_session')">Allow for this conversation</button>
     </div>
   </article>
 </template>
