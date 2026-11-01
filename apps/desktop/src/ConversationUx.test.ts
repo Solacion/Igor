@@ -132,3 +132,37 @@ it('follows content unless scrolled up, with an explicit jump back to the latest
   expect(list.scrollTop).toBe(1000)
   wrapper.unmount()
 })
+
+it('keeps following the bottom when content grows without a new entry, unless scrolled up', async () => {
+  const observers: { callback: () => void, targets: Set<Element> }[] = []
+  vi.stubGlobal('ResizeObserver', class {
+    targets = new Set<Element>()
+    constructor(private callback: () => void) { observers.push(this) }
+    observe(target: Element) { this.targets.add(target) }
+    disconnect() { this.targets.clear() }
+    unobserve(target: Element) { this.targets.delete(target) }
+  })
+  const entries: TimelineEntry[] = [{ kind: 'message', key: 'one', message: { role: 'Igor', text: 'First' } }]
+  const wrapper = mount(MessageList, { props: { entries, busy: true } })
+  const list = wrapper.get('.timeline').element
+  let height = 1000
+  Object.defineProperties(list, { scrollHeight: { get: () => height, configurable: true }, clientHeight: { value: 100, configurable: true } })
+  await wrapper.setProps({ entries: [...entries] })
+  await flushPromises()
+  expect(list.scrollTop).toBe(1000)
+  const observer = observers[0]!
+  expect(observer.targets.has(list)).toBe(true)
+  expect(observer.targets.size).toBe(2)
+  height = 1400
+  observer.callback()
+  expect(list.scrollTop).toBe(1400)
+  list.scrollTop = 200
+  await wrapper.get('.timeline').trigger('scroll')
+  height = 1800
+  observer.callback()
+  expect(list.scrollTop).toBe(200)
+  wrapper.unmount()
+  expect(observer.targets.size).toBe(0)
+  vi.unstubAllGlobals()
+})
+

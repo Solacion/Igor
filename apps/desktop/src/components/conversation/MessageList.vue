@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import type { ApprovalDecision } from '../../session'
 import type { TimelineEntry } from '../../conversationDisplay'
 import { approvalSummary } from '../../conversationDisplay'
@@ -62,8 +62,32 @@ function scrollToLatest() {
   if (element) element.scrollTop = element.scrollHeight
   following.value = true
 }
+/** The newest content can grow without a new entry: a reply rendering taller, a step line
+ * expanding, or the message box below growing and shrinking this list. While following, any
+ * size change keeps the bottom in view. */
+let resizes: ResizeObserver | undefined
+function observeSizes() {
+  const element = container.value
+  if (!resizes || !element)
+    return
+  resizes.disconnect()
+  resizes.observe(element)
+  for (const row of Array.from(element.children))
+    resizes.observe(row)
+}
+onMounted(() => {
+  if (typeof ResizeObserver === 'undefined')
+    return
+  resizes = new ResizeObserver(() => {
+    if (following.value)
+      scrollToLatest()
+  })
+  observeSizes()
+})
+onUnmounted(() => resizes?.disconnect())
 watch(() => props.entries, async entries => {
   await nextTick()
+  observeSizes()
   let action: TimelineEntry | undefined
   for (const entry of entries) {
     if ((entry.kind === 'approval' || entry.kind === 'question') && entry.item.state === 'pending' && !announced.has(`${entry.kind}:${entry.key}`)) {
