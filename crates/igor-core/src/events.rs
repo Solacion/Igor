@@ -120,6 +120,14 @@ pub enum RuntimeEvent {
         /// The tool approved for the session.
         tool: ToolId,
     },
+    /// A call runs without asking, because the operator set its tool to Always allow
+    /// ([`crate::policy::Classification::Allow`]), even if its server says it may change data.
+    AlwaysAllowed {
+        /// Call identifier.
+        call_id: String,
+        /// The tool set to Always allow.
+        tool: ToolId,
+    },
     /// A pending approval ended.
     ApprovalResolved {
         /// The approval.

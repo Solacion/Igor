@@ -653,6 +653,13 @@ impl Session {
                 });
                 permit
             }
+            Ok(Admission::AlwaysAllowed(permit)) => {
+                self.emit(RuntimeEvent::AlwaysAllowed {
+                    call_id: permit.call_id().to_owned(),
+                    tool: permit.tool().clone(),
+                });
+                permit
+            }
             Err(error) => {
                 return self.call_failed(
                     call_id,

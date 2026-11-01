@@ -52,6 +52,10 @@ export type RuntimeEvent = {
   call_id: string
   tool: ToolId
 } | {
+  event: 'always_allowed'
+  call_id: string
+  tool: ToolId
+} | {
   event: 'approval_resolved'
   approval_id: string
   call_id: string
@@ -131,6 +135,9 @@ export function isApprovalRequested(v: unknown): v is Variant<'approval_requeste
 export function isApprovedForSession(v: unknown): v is Variant<'approved_for_session'> {
   return kind(v, 'approved_for_session') && typeof v.call_id === 'string' && tool(v.tool)
 }
+export function isAlwaysAllowed(v: unknown): v is Variant<'always_allowed'> {
+  return kind(v, 'always_allowed') && typeof v.call_id === 'string' && tool(v.tool)
+}
 export function isApprovalResolved(v: unknown): v is Variant<'approval_resolved'> {
   return kind(v, 'approval_resolved') && typeof v.approval_id === 'string' && typeof v.call_id === 'string' && ['approved', 'approved_for_session', 'denied', 'cancelled', 'invalidated'].includes(typeof v.outcome === 'string' ? v.outcome : '')
 }
@@ -146,7 +153,7 @@ export function isInputRejected(v: unknown): v is Variant<'input_rejected'> {
 export function isTurnFinished(v: unknown): v is Variant<'turn_finished'> {
   return kind(v, 'turn_finished') && 'outcome' in v
 }
-export const eventGuards = [isConnectionChanged, isToolsChanged, isToolCallProposed, isToolCallRejected, isToolCallStarted, isToolCallCompleted, isToolCallFailed, isAssistantText, isApprovalRequested, isApprovedForSession, isApprovalResolved, isClarificationRequested, isClarificationAnswered, isInputRejected, isTurnFinished]
+export const eventGuards = [isConnectionChanged, isToolsChanged, isToolCallProposed, isToolCallRejected, isToolCallStarted, isToolCallCompleted, isToolCallFailed, isAssistantText, isApprovalRequested, isApprovedForSession, isAlwaysAllowed, isApprovalResolved, isClarificationRequested, isClarificationAnswered, isInputRejected, isTurnFinished]
 export function parseEvent(value: unknown): RuntimeEvent | undefined {
   for (const guard of eventGuards) {
     if (guard(value))

@@ -488,6 +488,7 @@ fn permissions(
             }
             let class = match class.as_str() {
                 "read" => Classification::Read,
+                "allow" => Classification::Allow,
                 "write" => Classification::Write,
                 "denied" => Classification::Denied,
                 _ => return Err((field(), Problem::UnknownPermissionClass(class))),

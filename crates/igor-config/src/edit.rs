@@ -102,8 +102,11 @@ impl Default for ServerEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionClass {
-    /// The model may call the tool without approval.
+    /// The model may call the tool without approval, unless its server says it may change data.
     Read,
+    /// The model may call the tool without approval, even if its server says it may change data
+    /// ("Always allow").
+    Allow,
     /// Each call needs operator approval.
     Write,
     /// Hidden from the model and refused.
@@ -114,6 +117,7 @@ impl PermissionClass {
     fn as_str(self) -> &'static str {
         match self {
             Self::Read => "read",
+            Self::Allow => "allow",
             Self::Write => "write",
             Self::Denied => "denied",
         }

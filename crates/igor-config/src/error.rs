@@ -171,8 +171,10 @@ pub enum Problem {
     /// A tool name is malformed.
     #[error("invalid tool name {0:?}: use 1 to 128 ASCII letters, digits, '_', '-' or '.'")]
     InvalidToolName(String),
-    /// A permission class is not one of `read`, `write` or `denied`.
-    #[error("unknown permission class {0:?}: expected \"read\", \"write\" or \"denied\"")]
+    /// A permission class is not one of `read`, `allow`, `write` or `denied`.
+    #[error(
+        "unknown permission class {0:?}: expected \"read\", \"allow\", \"write\" or \"denied\""
+    )]
     UnknownPermissionClass(String),
     /// A number is outside its allowed range.
     #[error("{value} is out of range: expected {min} to {max}")]
