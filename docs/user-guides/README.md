@@ -9,7 +9,8 @@ IGOR runs as a desktop application or as the `igor-cli` command-line harness. Bo
 3. Run the demo:
    - [Desktop](desktop.md): `pnpm run desktop:demo`, with the click-by-click demo script and fixture facts to check.
    - [Command line](cli.md): the scripted offline run, or a live provider.
-4. [Troubleshooting and cleanup](troubleshooting.md): unavailable providers and servers, missing keys, and removing local state.
+4. [RedTill POS server](pos.md): connect IGOR to a RedTill point-of-sale database (read-only).
+5. [Troubleshooting and cleanup](troubleshooting.md): unavailable providers and servers, missing keys, and removing local state.
 
 ## Demo workflow
 

@@ -72,3 +72,6 @@ jobs:
 
       - name: Build docs
         run: pnpm run docs:build
+
+      - name: Check the POS MCP server
+        run: pnpm --filter @igor/pos-mcp check
