@@ -27,18 +27,18 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
 
       - name: Cache build
+        id: cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          # piper-phonemize-sys downloads its native library here, outside what the cache keeps.
-          cache-directories: target/piper-phonemize-prebuilt
 
-      - name: Re-download native libraries missing from the cache
-        # A cache restored without the download would skip piper-phonemize-sys's build script and
-        # fail to link. Removing its cached output makes cargo run the script again.
+      - name: Re-run native library downloads after a partial cache restore
+        # sherpa-onnx-sys and piper-phonemize-sys download prebuilt libraries into target/. A cache
+        # restored from another lockfile can hold their build output without the libraries, and
+        # linking then fails. Removing that output makes cargo run their build scripts again,
+        # which download anything missing.
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          if [ ! -d target/piper-phonemize-prebuilt ]; then
-            rm -rf target/debug/build/piper-phonemize-sys-* target/debug/.fingerprint/piper-phonemize-sys-*
-          fi
+          rm -rf target/debug/build/sherpa-onnx-sys-* target/debug/.fingerprint/sherpa-onnx-sys-* \
+            target/debug/build/piper-phonemize-sys-* target/debug/.fingerprint/piper-phonemize-sys-*
 
       - name: Check formatting
         run: cargo fmt --all --check

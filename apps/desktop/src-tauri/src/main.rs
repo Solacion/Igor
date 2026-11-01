@@ -339,7 +339,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .setup(|app| {
             let settings = Arc::clone(app.state::<Arc<Settings>>().inner());
-            tauri::async_runtime::spawn(async move { settings.connect_all().await });
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                // Each server's result reaches the window as soon as it is known.
+                settings
+                    .connect_all(move || {
+                        let _ = handle.emit_to("main", "settings-changed", ());
+                    })
+                    .await;
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
