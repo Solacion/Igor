@@ -250,9 +250,9 @@ With voice enabled, Igor talks like a person rather than reading a report:
 
 Igor speaks assistant text after the turn finishes and reads approval requests as a short summary ending “Approve on screen?”. Markdown formatting is removed before speaking. Approval still requires the on-screen button and exact action hash; speech never grants approval. **Stop speaking**, **Stop turn** and **New conversation** cancel speech. Voice works independently of the selected AI provider; LM Studio with local Whisper is the intended voice test setup. Available system voices and native playback still need a manual check on the demo Mac.
 
-### Voice input preview
+### Voice input
 
-The push-to-talk UI is built behind a transcription adapter until the native Whisper `transcribe` contract is available. This build therefore shows **Voice input is not available in this build. You can still type.** and disables the mic. No audio is captured by that disabled preview. The UI and speech output remain independent of the selected AI provider; LM Studio plus local Whisper is the intended integration setup.
+In **Settings → Voice**, choose **Download speech input (574 MB)** to consent to downloading Whisper. The model is saved to `~/Library/Application Support/igor/models/ggml-large-v3-turbo-q5_0.bin`. Input and output share a downloader that checks size and SHA-256 before renaming a `.part` file; failed checks remove the partial file. Audio stays on this Mac. The model loads once in the background with **Preparing speech…** shown while it loads; the microphone becomes available when ready. You can keep typing while the model downloads or prepares.
 
 Once the adapter is connected, hold **Hold to talk** (mouse/touch, or Space on the focused button), or hold **Space** outside text fields and interactive controls. Release to transcribe. Listening shows a level meter; the visible state moves through Idle, Listening, Transcribing, Thinking and Speaking. Recording stops on release, window blur, leaving the conversation or unmount, and is bounded to one minute. Reaching that limit discards the recording and asks for a shorter message; it never auto-sends a truncated recording. Late permission/transcription results are discarded after cancellation. Audio is converted to 16 kHz mono f32 PCM and is not saved in local preferences or the model configuration.
 

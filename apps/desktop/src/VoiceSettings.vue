@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { igorVoicePrefix, useVoiceOutput } from './voice/output'
+import { inputStatus, inputPreparing, inputProgress, inputError, refreshInput, downloadInput } from './voice/transcription'
+onMounted(refreshInput)
 const voice = useVoiceOutput()
 const { preferences, voices, igor, download, error } = voice
 const megabytes = (bytes: number) => Math.round(bytes / 1_000_000)
@@ -11,6 +13,16 @@ const percent = computed(() => download.value?.total ? Math.floor(download.value
     <h2 id="voice-title">Voice</h2>
     <p class="hint">Voice is independent of your AI provider. These preferences stay on this device and are never saved in igor.toml.</p>
     <label><input v-model="preferences.enabled" type="checkbox" :disabled="!voice.supported.value" /> Speak Igor's replies</label>
+    <h3>Speech input</h3>
+    <p class="hint">Whisper transcribes on this Mac. Audio stays on your device. Download its 574 MB model once to enable push-to-talk.</p>
+    <template v-if="inputProgress">
+      <label for="input-download-progress">Downloading speech input: {{ Math.floor(inputProgress.received / inputProgress.total * 100) }}%</label>
+      <progress id="input-download-progress" :value="inputProgress.received" :max="inputProgress.total" />
+    </template>
+    <button v-else-if="!inputStatus?.installed" type="button" @click="downloadInput">Download speech input (574 MB)</button>
+    <p v-if="inputPreparing" role="status">Preparing speech…</p>
+    <p v-else-if="inputStatus?.installed && !inputError" role="status">Speech input is ready.</p>
+    <p v-if="inputError" role="alert">{{ inputError }} <button type="button" @click="refreshInput">Retry preparing speech</button></p>
     <label><input v-model="preferences.reviewBeforeSending" type="checkbox" /> Review before sending</label>
     <p class="hint">Leave recorded text in the composer for review instead of sending it automatically.</p>
     <div v-if="igor && !igor.installed" class="igor-voice-download">
