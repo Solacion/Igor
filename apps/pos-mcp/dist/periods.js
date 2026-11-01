@@ -76,3 +76,24 @@ export function resolveRange(args, now = new Date()) {
 export function sqlDate(day) {
     return day.replaceAll('-', '');
 }
+/** The period to compare `range` with: the same days of the previous month or year for a named
+ * month or year, the same days last week for this week, else as many days just before it. */
+export function previousRange(range, period) {
+    const day = (text) => new Date(Number(text.slice(0, 4)), Number(text.slice(5, 7)) - 1, Number(text.slice(8, 10)));
+    const from = day(range.from);
+    const to = day(range.to);
+    // The day `date` falls on `months` earlier, or the last day of that month when it is shorter.
+    const back = (date, months) => {
+        const last = new Date(date.getFullYear(), date.getMonth() - months + 1, 0);
+        return new Date(last.getFullYear(), last.getMonth(), Math.min(date.getDate(), last.getDate()));
+    };
+    if (period === 'this_month' || period === 'this_year') {
+        const months = period === 'this_month' ? 1 : 12;
+        return { from: iso(back(from, months)), to: iso(back(to, months)) };
+    }
+    if (period === 'last_month')
+        return { from: iso(back(from, 1)), to: iso(new Date(from.getFullYear(), from.getMonth(), 0)) };
+    const length = period === 'this_week' ? 7 : Math.round((to.getTime() - from.getTime()) / DAY_MS) + 1;
+    const shift = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate() - length);
+    return { from: iso(shift(from)), to: iso(shift(to)) };
+}
