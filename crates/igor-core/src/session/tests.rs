@@ -1265,3 +1265,44 @@ async fn a_tool_approved_for_the_session_is_not_asked_about_again() -> TestResul
     assert_eq!(h.sales.calls().len(), 3);
     Ok(())
 }
+
+#[test]
+fn local_days_are_civil_dates_with_weekdays() {
+    use std::time::Duration as D;
+    let at = |seconds: u64| SystemTime::UNIX_EPOCH + D::from_secs(seconds);
+    assert_eq!(local_day(at(0), 0), "Thursday 1 January 1970");
+    // 2026-11-01 22:30 UTC is already Monday in South Africa (UTC+2), still Sunday in New York.
+    let sunday_night = at(1_793_572_200);
+    assert_eq!(local_day(sunday_night, 0), "Sunday 1 November 2026");
+    assert_eq!(local_day(sunday_night, 2 * 3600), "Monday 2 November 2026");
+    assert_eq!(local_day(sunday_night, -5 * 3600), "Sunday 1 November 2026");
+    assert_eq!(local_day(at(1_709_208_000), 0), "Thursday 29 February 2024");
+    assert_eq!(local_day(at(951_782_400), 0), "Tuesday 29 February 2000");
+    assert_eq!(local_day(at(4_107_542_400), 0), "Monday 1 March 2100");
+}
+
+#[tokio::test]
+async fn the_system_prompt_states_the_local_date_when_the_host_gives_an_offset() -> TestResult {
+    let mut h = harness_with(
+        vec![ScriptedTurn::text("Noted.").expecting(|request| {
+            let today = local_day(SystemTime::now(), 7200);
+            let expected = format!("\n- Today is {today} in the operator's local time.");
+            if request.system.starts_with(DEFAULT_SYSTEM_PROMPT)
+                && request.system.contains(&expected)
+            {
+                Ok(())
+            } else {
+                Err(format!("unexpected system prompt: {}", request.system))
+            }
+        })],
+        SessionConfig {
+            utc_offset_seconds: Some(7200),
+            ..SessionConfig::default()
+        },
+        Vec::new(),
+        Vec::new(),
+    )?;
+    run(&mut h, "what day is it?", Operator::default()).await;
+    h.provider.verify()?;
+    Ok(())
+}

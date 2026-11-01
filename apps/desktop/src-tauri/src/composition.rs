@@ -89,6 +89,8 @@ pub async fn prepare(
             model_timeout: Duration::from_secs(120),
             result_limit: ResultSizeLimit::new(limits.max_result_bytes)
                 .map_err(|_| BridgeError::Configuration)?,
+            // The model is told today's local date, so it does not guess dates.
+            utc_offset_seconds: Some(jiff::Zoned::now().offset().seconds()),
             ..SessionConfig::default()
         },
         provider_id: configured.id.clone(),
