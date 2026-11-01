@@ -27,23 +27,18 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
 
       - name: Cache build
+        id: cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
-      - name: Fetch piper's prebuilt library
-        # piper-phonemize-sys otherwise downloads this into target/, and a partly matching build
-        # cache could restore its build output without the library, which then fails to link.
-        # The crate reads PIPER_PHONEMIZE_LIB_DIR instead when it is set.
-        env:
-          ARCHIVE: piper-phonemize-v1.5.9-macos-arm64-static-lib.tar.bz2
-          SHA256: 4ed1ca09d558b2af416dd56b305f60f5bc4d7fd643607acb54c3cf40e1b7bcda
+      - name: Re-run native library downloads after a partial cache restore
+        # sherpa-onnx-sys and piper-phonemize-sys download prebuilt libraries into target/. A cache
+        # restored from another lockfile can hold their build output without the libraries, and
+        # linking then fails. Removing that output makes cargo run their build scripts again,
+        # which download anything missing.
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          dir="$RUNNER_TEMP/piper-phonemize"
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$ARCHIVE" \
-            "https://github.com/csukuangfj/piper-phonemize/releases/download/v1.5.9/$ARCHIVE"
-          echo "$SHA256  $RUNNER_TEMP/$ARCHIVE" | shasum -a 256 -c -
-          mkdir -p "$dir"
-          tar -xjf "$RUNNER_TEMP/$ARCHIVE" -C "$dir"
-          echo "PIPER_PHONEMIZE_LIB_DIR=$dir/lib" >> "$GITHUB_ENV"
+          rm -rf target/debug/build/sherpa-onnx-sys-* target/debug/.fingerprint/sherpa-onnx-sys-* \
+            target/debug/build/piper-phonemize-sys-* target/debug/.fingerprint/piper-phonemize-sys-*
 
       - name: Check formatting
         run: cargo fmt --all --check
