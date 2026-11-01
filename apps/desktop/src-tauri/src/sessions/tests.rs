@@ -83,6 +83,7 @@ fn message(id: &str) -> MessageRequest {
     MessageRequest {
         session_id: id.into(),
         text: "Create an order".into(),
+        spoken: false,
     }
 }
 async fn event(
@@ -124,6 +125,29 @@ async fn streams_ordered_events_and_preserves_conversation() -> TestResult {
     assert!(sequences.windows(2).all(|pair| pair[1] == pair[0] + 1));
     assert!(h.provider.requests()[1].messages.len() > h.provider.requests()[0].messages.len());
     h.provider.verify()?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn spoken_messages_ask_for_spoken_replies_turn_by_turn() -> TestResult {
+    let mut h = harness(
+        vec![ScriptedTurn::text("First"), ScriptedTurn::text("Second")],
+        vec![],
+    )?;
+    let spoken = MessageRequest {
+        spoken: true,
+        ..message(&h.id)
+    };
+    h.runtime.send(spoken).await?;
+    h.runtime.send(message(&h.id)).await?;
+    let requests = h.provider.requests();
+    let prompt = igor_core::session::SPOKEN_REPLY_PROMPT;
+    assert!(requests[0].system.contains(prompt));
+    assert!(!requests[1].system.contains(prompt));
+    let default: MessageRequest = serde_json::from_value(json!({"session_id":"x", "text":"hi"}))?;
+    assert!(!default.spoken);
+    h.provider.verify()?;
+    while h.events.try_recv().is_ok() {}
     Ok(())
 }
 

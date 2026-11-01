@@ -17,7 +17,7 @@ const props = withDefaults(defineProps<{
 }>(), { active: true })
 const confirmingReset = ref(false)
 const voice = useVoiceOutput()
-const conversation = useConversation()
+const conversation = useConversation({ spoken: () => voice.preferences.value.enabled })
 const speech = useConversationSpeech(conversation, voice)
 const { providers, providerId, servers, loaded, busy, text, error, notice, status, toolsUnsupported, exportNotice, exporting, hasSession, timeline, selected, refresh, send, answer, decide, exportActivity, stop, reset } = conversation
 const voiceInput = useVoiceInput({

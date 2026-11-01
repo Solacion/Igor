@@ -35,7 +35,7 @@ export async function startSession(
   const request = { session_id: info.session_id }
   return {
     info,
-    send: (text: string) => invoke<TurnOutcome>('send_message', { request: { ...request, text } }),
+    send: (text: string, spoken = false) => invoke<TurnOutcome>('send_message', { request: { ...request, text, spoken } }),
     approve: (approvalId: string, actionHash: string, decision: ApprovalDecision) =>
       invoke<void>('resolve_approval', { request: { ...request, approval_id: approvalId, action_hash: actionHash, decision } }),
     answer: (requestId: string, answer: string) =>

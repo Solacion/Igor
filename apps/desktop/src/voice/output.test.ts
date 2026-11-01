@@ -6,6 +6,7 @@ import { bestVoice, createVoiceOutput, speechSentences, stripMarkdown, voiceStor
 import VoiceSettings from '../VoiceSettings.vue'
 import ConversationView from '../ConversationView.vue'
 import type { CoreEvent } from '../session'
+import { lookingPhrases, retryPhrases } from '../composables/useConversationSpeech'
 
 const voices = [
   { name: 'French Premium', lang: 'fr-FR', voiceURI: 'fr', default: true, localService: true },
@@ -260,4 +261,53 @@ it('speaks late channel text once when the send reply arrives before the events'
   expect(engine.speak).toHaveBeenCalledTimes(1)
   expect(engine.speak.mock.calls[0]?.[0].text).toBe('Late channel reply')
   wrapper.unmount()
+})
+
+it('says it is looking when tools start and that it is trying again after a failure, then the reply', async () => {
+  const engine = synthesis()
+  localStorage.setItem(voiceStorageKey, JSON.stringify({ enabled: true }))
+  const backend = conversationBackend()
+  const wrapper = mount(ConversationView)
+  await send(wrapper)
+  const tool = { server: 'weather', name: 'get_current_weather' }
+  backend.emit({ event: 'tool_call_proposed', call_id: 'c1', tool, arguments: { city: 'Hopetown' } })
+  backend.emit({ event: 'tool_call_started', call_id: 'c1' })
+  await flushPromises()
+  expect(engine.speak.mock.calls.map(call => call[0].text)).toEqual([lookingPhrases[0]])
+  backend.emit({ event: 'tool_call_failed', call_id: 'c1', outcome: 'not_executed', message: 'timed out' })
+  backend.emit({ event: 'tool_call_proposed', call_id: 'c2', tool, arguments: { city: 'Hopetown, South Africa' } })
+  backend.emit({ event: 'tool_call_started', call_id: 'c2' })
+  backend.emit({ event: 'tool_call_failed', call_id: 'c2', outcome: 'not_executed', message: 'timed out' })
+  backend.emit({ event: 'assistant_text', text: 'It is about 27 degrees and overcast.' })
+  backend.finish()
+  await flushPromises()
+  // The system voice speaks one queued phrase at a time.
+  expect(engine.speak).toHaveBeenCalledTimes(1)
+  const first = engine.speak.mock.calls[0]![0]
+  first.onend?.call(first, new Event('end') as SpeechSynthesisEvent)
+  const second = engine.speak.mock.calls[1]![0]
+  expect(second.text).toBe(retryPhrases[1])
+  second.onend?.call(second, new Event('end') as SpeechSynthesisEvent)
+  expect(engine.speak.mock.calls.map(call => call[0].text)).toEqual([lookingPhrases[0], retryPhrases[1], 'It is about 27 degrees and overcast.'])
+  wrapper.unmount()
+})
+
+it('sends spoken: true only while voice output is on', async () => {
+  synthesis()
+  const requests: { spoken: boolean }[] = []
+  mockIPC((command, args: any) => {
+    if (command === 'conversation_providers') return { providers: [{ id: 'local', model: 'demo', unavailable: null }] }
+    if (command === 'settings_view') return { servers: [] }
+    if (command === 'start_session') return { session_id: 'one', provider_id: 'local', model: 'demo', servers: [] }
+    if (command === 'send_message') { requests.push(args.request); return { outcome: 'completed' } }
+  })
+  localStorage.setItem(voiceStorageKey, JSON.stringify({ enabled: true }))
+  const spoken = mount(ConversationView)
+  await send(spoken)
+  spoken.unmount()
+  localStorage.setItem(voiceStorageKey, JSON.stringify({ enabled: false }))
+  const written = mount(ConversationView)
+  await send(written)
+  written.unmount()
+  expect(requests.map(request => request.spoken)).toEqual([true, false])
 })

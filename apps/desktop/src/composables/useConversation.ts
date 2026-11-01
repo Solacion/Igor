@@ -16,7 +16,8 @@ export interface ApprovalItem {
   request: ApprovalPreview
   state: string
 }
-export function useConversation() {
+/** `spoken` says whether replies will be read aloud, so the model answers in plain speech. */
+export function useConversation(options: { spoken?: () => boolean } = {}) {
   const store = useSettingsStore()
   const providers = store.providers
   const providerId = ref('')
@@ -257,7 +258,7 @@ export function useConversation() {
         return
       appendMessage('You', message)
       text.value = ''
-      const outcome = await active.send(message)
+      const outcome = await active.send(message, options.spoken?.() ?? false)
       finish(outcome)
     }
     catch {
