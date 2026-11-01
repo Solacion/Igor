@@ -1,10 +1,11 @@
 import { computed, inject, onScopeDispose, provide, ref, watch, type InjectionKey } from 'vue'
+import { readSpeechLanguages, type SpeechLanguage } from './transcription'
 import { Channel, invoke } from '@tauri-apps/api/core'
 export interface VoicePreferences {
   enabled: boolean
   voiceURI: string
   rate: number
-  reviewBeforeSending: boolean
+  speechLanguage: string | null
 }
 export const voiceStorageKey = 'igor.desktop.voice.v1'
 /** Prefix of a `voiceURI` that names one of Igor's own (Kokoro) voices rather than a system voice. */
@@ -37,7 +38,7 @@ export function bestVoice(voices: SpeechSynthesisVoice[]) {
   return [...(english.length ? english : voices)].sort((a, b) => score(b) - score(a))[0]
 }
 function loadPreferences(): VoicePreferences {
-  const fallback = { enabled: false, voiceURI: '', rate: 1, reviewBeforeSending: false }
+  const fallback = { enabled: false, voiceURI: '', rate: 1, speechLanguage: null }
   try {
     const saved: unknown = JSON.parse(localStorage.getItem(voiceStorageKey) ?? 'null')
     if (!saved || typeof saved !== 'object')
@@ -45,9 +46,9 @@ function loadPreferences(): VoicePreferences {
     const value = saved as Record<string, unknown>
     return {
       enabled: value.enabled === true,
+      speechLanguage: typeof value.speechLanguage === 'string' && /^[a-z]{2,3}$/.test(value.speechLanguage) ? value.speechLanguage : null,
       voiceURI: typeof value.voiceURI === 'string' ? value.voiceURI : '',
       rate: typeof value.rate === 'number' && Number.isFinite(value.rate) && value.rate >= .5 && value.rate <= 2 ? value.rate : 1,
-      reviewBeforeSending: value.reviewBeforeSending === true,
     }
   }
   catch {
@@ -56,6 +57,8 @@ function loadPreferences(): VoicePreferences {
 }
 export function createVoiceOutput(synthesis = globalThis.speechSynthesis) {
   const preferences = ref(loadPreferences())
+  const speechLanguages = ref<SpeechLanguage[]>([])
+  const languageError = ref('')
   const voices = ref<SpeechSynthesisVoice[]>([])
   const igor = ref<SpeechStatus | null>(null)
   const download = ref<{ received: number, total: number } | null>(null)
@@ -116,6 +119,15 @@ export function createVoiceOutput(synthesis = globalThis.speechSynthesis) {
     }
     finally {
       download.value = null
+    }
+  }
+  async function refreshLanguages() {
+    try {
+      speechLanguages.value = await readSpeechLanguages() ?? []
+      languageError.value = ''
+    }
+    catch {
+      languageError.value = 'Could not load speech languages. Try again.'
     }
   }
   function refreshVoices() {
@@ -280,6 +292,7 @@ export function createVoiceOutput(synthesis = globalThis.speechSynthesis) {
       return
     refreshVoices()
     void refreshIgor()
+    void refreshLanguages()
     if (systemSupported)
       synthesis.addEventListener('voiceschanged', refreshVoices)
   }
@@ -305,7 +318,7 @@ export function createVoiceOutput(synthesis = globalThis.speechSynthesis) {
   }, { deep: true, flush: 'sync' })
   function dispose() { save(); if (systemSupported)
     synthesis.removeEventListener('voiceschanged', refreshVoices); stop(); }
-  return { preferences, voices, igor, igorVoice, download, speaking, selectedVoice, supported, systemSupported, error, speak, stop, connect, disconnect, dispose, downloadIgor }
+  return { preferences, speechLanguages, languageError, refreshLanguages, voices, igor, igorVoice, download, speaking, selectedVoice, supported, systemSupported, error, speak, stop, connect, disconnect, dispose, downloadIgor }
 }
 export type VoiceOutput = ReturnType<typeof createVoiceOutput>
 const voiceKey: InjectionKey<VoiceOutput> = Symbol('voice-output')

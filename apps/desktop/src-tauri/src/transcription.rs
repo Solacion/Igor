@@ -22,6 +22,7 @@ pub struct InputStatus {
 #[derive(Debug, Serialize)]
 pub struct Transcript {
     text: String,
+    language: Option<String>,
 }
 
 pub struct VoiceInput {
@@ -64,7 +65,7 @@ impl VoiceInput {
     }
     fn with_model<T>(
         &self,
-        apply: impl FnOnce(&Transcriber) -> Result<T, SpeechCommandError>,
+        apply: impl FnOnce(&mut Transcriber) -> Result<T, SpeechCommandError>,
     ) -> Result<T, SpeechCommandError> {
         let mut loaded = self
             .loaded
@@ -83,14 +84,18 @@ impl VoiceInput {
         }
         apply(
             loaded
-                .as_ref()
+                .as_mut()
                 .ok_or_else(|| SpeechCommandError::new("Speech input could not load"))?,
         )
     }
     fn prepare(&self) -> Result<(), SpeechCommandError> {
         self.with_model(|_| Ok(()))
     }
-    fn transcribe(&self, samples: &[f32]) -> Result<Transcript, SpeechCommandError> {
+    fn transcribe(
+        &self,
+        samples: &[f32],
+        language: Option<&str>,
+    ) -> Result<Transcript, SpeechCommandError> {
         if samples.is_empty()
             || samples.len() > igor_voice::SAMPLE_RATE * igor_voice::MAX_AUDIO_SECONDS
             || samples
@@ -103,8 +108,14 @@ impl VoiceInput {
         }
         self.with_model(|model| {
             model
+                .set_language(language)
+                .map_err(|error| SpeechCommandError::new(error.to_string()))?;
+            model
                 .transcribe(samples)
-                .map(|result| Transcript { text: result.text })
+                .map(|result| Transcript {
+                    text: result.text,
+                    language: result.language,
+                })
                 .map_err(|error| SpeechCommandError::new(error.to_string()))
         })
     }
@@ -141,6 +152,22 @@ impl VoiceInput {
         result
     }
 }
+#[derive(Serialize)]
+pub struct LanguageView {
+    code: &'static str,
+    name: &'static str,
+}
+#[tauri::command]
+pub fn speech_languages() -> Vec<LanguageView> {
+    igor_voice::languages()
+        .into_iter()
+        .map(|language| LanguageView {
+            code: language.code,
+            name: language.name,
+        })
+        .collect()
+}
+
 #[tauri::command]
 pub fn transcription_status(input: tauri::State<'_, Arc<VoiceInput>>) -> InputStatus {
     input.status()
@@ -164,16 +191,34 @@ pub async fn transcription_prepare(
 #[tauri::command]
 pub async fn transcribe(
     samples: Vec<f32>,
+    language: Option<String>,
     input: tauri::State<'_, Arc<VoiceInput>>,
 ) -> Result<Transcript, SpeechCommandError> {
     let input = Arc::clone(input.inner());
-    tauri::async_runtime::spawn_blocking(move || input.transcribe(&samples))
+    tauri::async_runtime::spawn_blocking(move || input.transcribe(&samples, language.as_deref()))
         .await
         .map_err(|_| SpeechCommandError::new("Speech input could not transcribe"))?
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn languages_and_transcript_include_core_metadata() -> Result<(), serde_json::Error> {
+        assert!(
+            speech_languages()
+                .iter()
+                .any(|language| language.code == "de" && language.name == "german")
+        );
+        let response = serde_json::to_value(Transcript {
+            text: "Guten Tag".into(),
+            language: Some("de".into()),
+        })?;
+        assert_eq!(
+            response,
+            serde_json::json!({ "text": "Guten Tag", "language": "de" })
+        );
+        Ok(())
+    }
     #[test]
     fn missing_model_explains_how_to_download() {
         let input = VoiceInput::new(None);
@@ -185,7 +230,7 @@ mod tests {
         );
         assert!(
             input
-                .transcribe(&[0.1; 160])
+                .transcribe(&[0.1; 160], None)
                 .is_err_and(|error| error.message.contains("Settings → Voice"))
         );
     }
@@ -195,7 +240,7 @@ mod tests {
         for samples in [&[][..], &[f32::NAN], &[f32::INFINITY], &[1.1]] {
             assert!(
                 input
-                    .transcribe(samples)
+                    .transcribe(samples, None)
                     .is_err_and(|error| error.message.contains("16 kHz mono"))
             );
         }

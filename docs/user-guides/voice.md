@@ -2,6 +2,8 @@
 
 IGOR can listen and reply by voice. Everything runs on your Mac: speech is transcribed by an embedded Whisper model and replies are spoken by an embedded Kokoro voice model. No audio leaves the computer and no extra service is needed.
 
+The desktop prepares speech recognition when you open Conversation. Wait for “Preparing speech recognition…” to disappear, then click **Talk** once and speak. After 1.2 seconds of silence, Igor stops listening, transcribes your speech and sends the message automatically. Click **Stop listening** to finish sooner. Pressing Space outside text fields and controls also toggles listening. If no speech is detected within ten seconds, listening stops without sending a message. If preparation fails or takes longer than a minute, Igor shows the error and a **Try again** button. Microphone permission is requested when you first click Talk.
+
 ## Speech-to-text model
 
 IGOR uses Whisper large-v3-turbo, 5-bit quantised (`ggml-large-v3-turbo-q5_0.bin`, 574 MB). Until the desktop downloads it on first use, fetch it once:

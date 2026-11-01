@@ -26,6 +26,7 @@
     "allow-close-session",
     "allow-export-activity",
     "allow-conversation-providers",
+    "allow-speech-languages",
     "allow-speech-status",
     "allow-speech-sentences",
     "allow-speech-download",

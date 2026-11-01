@@ -10,15 +10,22 @@ interface Capture {
   chunks: Float32Array[]
   count: number
   peak: number
+  speechSamples: number
+  silentSamples: number
 }
 export function useVoiceInput(options: {
   active: () => boolean
   busy: () => boolean
+  language?: () => string | null
   onStart: () => void
   onText: (text: string) => void | Promise<void>
   onError: (message: string) => void
 }, transcriber: Transcriber = transcription) {
   const state = ref<'Idle' | 'Listening' | 'Transcribing'>('Idle')
+  const preparing = ref(false)
+  const ready = ref(transcriber.available && !transcriber.prepare)
+  const heardLanguage = ref<string | null>(null)
+  const isAvailable = () => transcriber.refresh ? transcriber.available : ready.value
   const level = ref(0)
   const error = ref('')
   let pressed = false
@@ -27,7 +34,6 @@ export function useVoiceInput(options: {
   let pendingStream: MediaStream | undefined
   let pendingContext: AudioContext | undefined
   let limit: ReturnType<typeof setTimeout> | undefined
-  let spaceHeld = false
   function report(message: string) {
     error.value = message
     options.onError(message)
@@ -58,18 +64,18 @@ export function useVoiceInput(options: {
   function cancel() {
     generation++
     pressed = false
-    spaceHeld = false
     const recording = capture
     capture = undefined
     disposeCapture(recording)
     state.value = 'Idle'
   }
   async function start() {
-    if (pressed || state.value !== 'Idle' || options.busy() || !options.active() || !transcriber.available)
+    if (pressed || state.value !== 'Idle' || options.busy() || !options.active() || !isAvailable())
       return
     pressed = true
     const token = ++generation
     error.value = ''
+    heardLanguage.value = null
     state.value = 'Listening'
     options.onStart()
     let stream: MediaStream | undefined
@@ -95,7 +101,7 @@ export function useVoiceInput(options: {
       const processor = context.createScriptProcessor(4096, 1, 1)
       const mute = context.createGain()
       mute.gain.value = 0
-      const recording: Capture = { stream, context, source, processor, mute, chunks: [], count: 0, peak: 0 }
+      const recording: Capture = { stream, context, source, processor, mute, chunks: [], count: 0, peak: 0, speechSamples: 0, silentSamples: 0 }
       capture = recording
       pendingStream = undefined
       pendingContext = undefined
@@ -113,6 +119,25 @@ export function useVoiceInput(options: {
         const rms = Math.sqrt(power / Math.max(1, chunk.length))
         recording.peak = Math.max(recording.peak, rms)
         level.value = Math.min(1, rms * 4)
+        // Require sustained speech, then allow a natural pause before ending the turn.
+        if (rms >= .01) {
+          recording.speechSamples += chunk.length
+          recording.silentSamples = 0
+        }
+        else {
+          recording.silentSamples += chunk.length
+        }
+        if (recording.speechSamples >= recording.context.sampleRate * .25
+          && recording.silentSamples >= recording.context.sampleRate * 1.2) {
+          void release()
+          return
+        }
+        if (recording.speechSamples < recording.context.sampleRate * .25
+          && recording.count >= recording.context.sampleRate * 10) {
+          cancel()
+          report('No speech heard. Click Talk and try again.')
+          return
+        }
         if (!remaining || chunk.length < frame.length) {
           cancel()
           report('Recording reached the one-minute limit. Try a shorter message.')
@@ -152,7 +177,7 @@ export function useVoiceInput(options: {
     }
     if (recording.count < recording.context.sampleRate * .15 || recording.peak < .005) {
       state.value = 'Idle'
-      report('No speech heard. Hold the talk button while speaking and try again.')
+      report('No speech heard. Click Talk and try again.')
       return
     }
     const combined = new Float32Array(recording.count)
@@ -165,14 +190,16 @@ export function useVoiceInput(options: {
     state.value = 'Transcribing'
     try {
       const samples = resample16k(combined, recording.context.sampleRate)
-      const text = (await transcriber.transcribe({ samples, sampleRate: 16000, channels: 1 })).trim()
+      const result = await transcriber.transcribe({ samples, sampleRate: 16000, channels: 1, language: options.language?.() ?? null })
+      const text = result.text.trim()
       if (token !== generation || !options.active())
         return
       state.value = 'Idle'
       if (!text) {
-        report('No speech heard. Hold the talk button while speaking and try again.')
+        report('No speech heard. Click Talk and try again.')
         return
       }
+      heardLanguage.value = result.language
       await options.onText(text)
     }
     catch {
@@ -186,25 +213,47 @@ export function useVoiceInput(options: {
     return target instanceof Element && !!target.closest('input, textarea, select, button, a, summary, [contenteditable="true"], [role="button"]')
   }
   function keydown(event: KeyboardEvent) {
-    if (event.code !== 'Space' || interactive(event.target) || !options.active() || options.busy() || !transcriber.available)
+    if (event.code !== 'Space' || interactive(event.target) || !options.active() || options.busy() || !isAvailable())
       return
     event.preventDefault()
     if (event.repeat)
       return
-    spaceHeld = true
-    void start()
+    void toggle()
   }
-  function keyup(event: KeyboardEvent) {
-    if (event.code !== 'Space' || !spaceHeld)
+  async function toggle() {
+    if (state.value === 'Listening')
+      await release()
+    else if (state.value === 'Idle')
+      await start()
+  }
+  async function prepare() {
+    if (preparing.value || !transcriber.prepare)
       return
-    event.preventDefault()
-    spaceHeld = false
-    void release()
+    preparing.value = true
+    error.value = ''
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        transcriber.prepare(),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error('Speech recognition took too long to load. Try again.')), 60000)
+        }),
+      ])
+      ready.value = true
+    }
+    catch (cause) {
+      ready.value = false
+      report(typeof cause === 'string' ? cause : cause instanceof Error ? cause.message : 'Could not prepare speech recognition. Try again.')
+    }
+    finally {
+      clearTimeout(timeout)
+      preparing.value = false
+    }
   }
   onMounted(() => {
+    void prepare()
     void transcriber.refresh?.()
     window.addEventListener('keydown', keydown)
-    window.addEventListener('keyup', keyup)
     window.addEventListener('blur', cancel)
   })
   watch(options.active, active => {
@@ -213,9 +262,8 @@ export function useVoiceInput(options: {
   })
   onScopeDispose(() => {
     window.removeEventListener('keydown', keydown)
-    window.removeEventListener('keyup', keyup)
     window.removeEventListener('blur', cancel)
     cancel()
   })
-  return { state, level, error, available: computed(() => transcriber.available), preparing: computed(() => transcriber.preparing === true), start, release, cancel }
+  return { state, heardLanguage, level, error, get available() { return isAvailable() }, preparing: computed(() => preparing.value || transcriber.preparing === true), prepare: () => transcriber.refresh ? transcriber.refresh() : prepare(), toggle, start, release, cancel }
 }

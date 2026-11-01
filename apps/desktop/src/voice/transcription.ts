@@ -5,12 +5,34 @@ export interface TranscriptionAudio {
   samples: Float32Array
   sampleRate: 16000
   channels: 1
+  language: string | null
+}
+export interface TranscriptionAudio {
+  samples: Float32Array
+  sampleRate: 16000
+  channels: 1
+  language: string | null
+}
+export interface Transcript {
+  text: string
+  language: string | null
+}
+export interface SpeechLanguage {
+  code: string
+  name: string
+}
+export function readSpeechLanguages(): Promise<SpeechLanguage[]> {
+  return invoke<SpeechLanguage[]>('speech_languages')
+}
+export function capitaliseLanguage(name: string): string {
+  return name.charAt(0).toUpperCase() + name.slice(1)
 }
 export interface Transcriber {
   readonly available: boolean
   readonly preparing?: boolean
   refresh?(): Promise<void>
-  transcribe(audio: TranscriptionAudio): Promise<string>
+  prepare?(): Promise<void>
+  transcribe(audio: TranscriptionAudio): Promise<Transcript>
 }
 interface InputStatus { installed: boolean; download_bytes: number }
 export const inputStatus = ref<InputStatus | null>(null)
@@ -22,10 +44,16 @@ function prepare() {
   if (preparation) return preparation
   inputError.value = ''
   inputPreparing.value = true
-  preparation = invoke<void>('transcription_prepare').catch(() => {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  preparation = Promise.race([
+    invoke<void>('transcription_prepare'),
+    new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => reject(new Error('Speech preparation timed out')), 60000)
+    }),
+  ]).catch(() => {
     preparation = undefined
     inputError.value = 'Speech input could not load. Try again or type your message.'
-  }).finally(() => { inputPreparing.value = false })
+  }).finally(() => { clearTimeout(timeout); inputPreparing.value = false })
   return preparation
 }
 export async function refreshInput() {
@@ -56,7 +84,6 @@ export const transcription: Transcriber = {
   async transcribe(audio) {
     if (audio.sampleRate !== 16000 || audio.channels !== 1)
       throw new Error('Expected 16 kHz mono speech')
-    const result = await invoke<{ text: string }>('transcribe', { samples: Array.from(audio.samples) })
-    return result.text
+    return invoke<Transcript>('transcribe', { samples: Array.from(audio.samples), language: audio.language })
   },
 }

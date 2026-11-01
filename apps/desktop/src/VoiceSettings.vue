@@ -1,7 +1,7 @@
 <script setup lang="ts">
+import { inputStatus, inputPreparing, inputProgress, inputError, refreshInput, downloadInput, capitaliseLanguage } from './voice/transcription'
 import { computed, onMounted } from 'vue'
 import { igorVoicePrefix, useVoiceOutput } from './voice/output'
-import { inputStatus, inputPreparing, inputProgress, inputError, refreshInput, downloadInput } from './voice/transcription'
 onMounted(refreshInput)
 const voice = useVoiceOutput()
 const { preferences, voices, igor, download, error } = voice
@@ -12,9 +12,16 @@ const percent = computed(() => download.value?.total ? Math.floor(download.value
   <section id="voice" aria-labelledby="voice-title">
     <h2 id="voice-title">Voice</h2>
     <p class="hint">Voice is independent of your AI provider. These preferences stay on this device and are never saved in igor.toml.</p>
+    <label for="speech-language">Speech language</label>
+    <select id="speech-language" v-model="preferences.speechLanguage">
+      <option :value="null">Automatic</option>
+      <option v-for="language in voice.speechLanguages.value" :key="language.code" :value="language.code">{{ capitaliseLanguage(language.name) }}</option>
+    </select>
+    <p v-if="voice.languageError.value" role="status">{{ voice.languageError.value }} <button type="button" @click="voice.refreshLanguages">Try again</button></p>
     <label><input v-model="preferences.enabled" type="checkbox" :disabled="!voice.supported.value" /> Speak Igor's replies</label>
+    <p class="hint">Click Talk to speak. Your message sends automatically when you finish speaking.</p>
     <h3>Speech input</h3>
-    <p class="hint">Whisper transcribes on this Mac. Audio stays on your device. Download its 574 MB model once to enable push-to-talk.</p>
+    <p class="hint">Whisper transcribes on this Mac. Audio stays on your device. Download its 574 MB model once to enable voice input.</p>
     <template v-if="inputProgress">
       <label for="input-download-progress">Downloading speech input: {{ Math.floor(inputProgress.received / inputProgress.total * 100) }}%</label>
       <progress id="input-download-progress" :value="inputProgress.received" :max="inputProgress.total" />
@@ -23,8 +30,6 @@ const percent = computed(() => download.value?.total ? Math.floor(download.value
     <p v-if="inputPreparing" role="status">Preparing speech…</p>
     <p v-else-if="inputStatus?.installed && !inputError" role="status">Speech input is ready.</p>
     <p v-if="inputError" role="alert">{{ inputError }} <button type="button" @click="refreshInput">Retry preparing speech</button></p>
-    <label><input v-model="preferences.reviewBeforeSending" type="checkbox" /> Review before sending</label>
-    <p class="hint">Leave recorded text in the composer for review instead of sending it automatically.</p>
     <div v-if="igor && !igor.installed" class="igor-voice-download">
       <p class="hint">Igor has its own natural voice. It runs on this Mac with no extra service, after a one-time download of {{ megabytes(igor.download_bytes) }} MB. Until then, Igor uses the basic macOS voices.</p>
       <template v-if="download">

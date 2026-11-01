@@ -332,6 +332,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             speech::speech_download,
             speech::speech_prepare,
             speech::speak,
+            transcription::speech_languages,
             transcription::transcription_status,
             transcription::transcription_download,
             transcription::transcription_prepare,
