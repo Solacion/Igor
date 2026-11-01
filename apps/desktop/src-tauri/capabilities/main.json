@@ -25,6 +25,7 @@
     "allow-export-activity",
     "allow-conversation-providers",
     "allow-speech-status",
+    "allow-speech-sentences",
     "allow-speech-download",
     "allow-speech-prepare",
     "allow-speak",

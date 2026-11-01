@@ -300,6 +300,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings_reconnect_server,
             settings_set_permission,
             speech::speech_status,
+            speech::speech_sentences,
             speech::speech_download,
             speech::speech_prepare,
             speech::speak,
