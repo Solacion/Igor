@@ -32,7 +32,8 @@ pub async fn connect(config: &Config, out: &mut impl Write) -> io::Result<Connec
     let mut backends: HashMap<ServerId, Arc<dyn ToolBackend>> = HashMap::new();
     let mut descriptors: Vec<ToolDescriptor> = Vec::new();
     let mut unavailable = Vec::new();
-    for server in config.servers() {
+    // A server the operator turned off is not started, offered or mentioned to the model.
+    for server in config.servers().iter().filter(|server| server.enabled) {
         match connect_one(server).await {
             Ok((backend, tools)) => {
                 writeln!(

@@ -20,6 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "settings_test_server",
             "settings_remove_server",
             "settings_reconnect_server",
+            "settings_set_server_enabled",
             "settings_sign_in_server",
             "settings_sign_out_server",
             "settings_set_permission",

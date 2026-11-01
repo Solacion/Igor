@@ -147,7 +147,7 @@ describe('settings', () => {
       request: {
         replacing: null,
         entry: {
-          id: 'pos', transport: 'stdio', command: '/opt/pos-mcp', args: ['--store', 'main'], cwd: null, env_allowlist: [],
+          id: 'pos', enabled: true, transport: 'stdio', command: '/opt/pos-mcp', args: ['--store', 'main'], cwd: null, env_allowlist: [],
           env: { POS_TOKEN: 'IGOR_POS_TOKEN' }, startup_timeout_ms: null, call_timeout_ms: null,
         },
         secret: null,
@@ -303,7 +303,7 @@ it('adds a remote server with its key in the Keychain and edits it without retyp
     request: {
       replacing: null,
       entry: {
-        id: 'crm', transport: 'http', url: 'https://mcp.example.com/mcp', headers: {}, auth: null, bearer_token: { keychain: 'mcp-crm' },
+        id: 'crm', enabled: true, transport: 'http', url: 'https://mcp.example.com/mcp', headers: {}, auth: null, bearer_token: { keychain: 'mcp-crm' },
         command: '', args: [], cwd: null, env_allowlist: [], env: {}, startup_timeout_ms: null, call_timeout_ms: null,
       },
       secret: 'tok-ui-sentinel',
@@ -379,6 +379,23 @@ it('adds a legacy SSE server with the protocol choice', async () => {
   const save = calls.find(call => call.command === 'settings_save_server')?.args as { request: { entry: ServerEntry } }
   expect(save.request.entry.transport).toBe('sse')
   expect(save.request.entry.url).toBe('https://mcp.example.com/sse')
+  wrapper.unmount()
+})
+
+it('turns a server off and on from its card without removing it', async () => {
+  const calls = backend({
+    settings_view: () => view(),
+    settings_set_server_enabled: () => view([{ ...pos, status: { state: 'disabled' }, entry: { ...pos.entry, enabled: false } }]),
+  })
+  const wrapper = mount(SettingsView)
+  await flushPromises()
+  const toggle = wrapper.get('.server-card input[role="switch"]')
+  expect((toggle.element as HTMLInputElement).checked).toBe(true)
+  await toggle.setValue(false)
+  await flushPromises()
+  expect(calls.find(call => call.command === 'settings_set_server_enabled')?.args).toEqual({ request: { id: 'pos', enabled: false } })
+  expect(wrapper.get('.server-card .status').text()).toBe('Off')
+  expect((wrapper.get('.server-card input[role="switch"]').element as HTMLInputElement).checked).toBe(false)
   wrapper.unmount()
 })
 

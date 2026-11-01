@@ -75,6 +75,8 @@ function entry(): ServerEntry | null {
   }
   const common = {
     id: form.id.trim(),
+    // Editing keeps the server on or off as it was.
+    enabled: props.original?.enabled ?? true,
     startup_timeout_ms: timeout(form.startupTimeout, 'startupTimeout'),
     call_timeout_ms: timeout(form.callTimeout, 'callTimeout'),
   }

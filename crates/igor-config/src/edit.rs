@@ -45,6 +45,9 @@ pub struct ProviderEntry {
 pub struct ServerEntry {
     /// Host-assigned server id.
     pub id: String,
+    /// False when the server is turned off. Written only when false.
+    #[serde(default = "enabled")]
+    pub enabled: bool,
     /// `stdio` for a local process, `http` for a remote server, or `sse` for a remote server on
     /// the legacy HTTP+SSE transport.
     #[serde(default = "stdio_transport")]
@@ -117,6 +120,10 @@ impl SecretEntry {
     }
 }
 
+fn enabled() -> bool {
+    true
+}
+
 fn stdio_transport() -> String {
     "stdio".to_owned()
 }
@@ -125,6 +132,7 @@ impl Default for ServerEntry {
     fn default() -> Self {
         Self {
             id: String::new(),
+            enabled: true,
             transport: stdio_transport(),
             url: None,
             bearer_token: None,
@@ -195,6 +203,8 @@ struct ListedProvider {
 struct ListedServer {
     #[serde(default)]
     id: String,
+    #[serde(default = "enabled")]
+    enabled: bool,
     #[serde(default = "stdio_transport")]
     transport: String,
     url: Option<String>,
@@ -267,6 +277,7 @@ impl ConfigDocument {
             .into_iter()
             .map(|server| ServerEntry {
                 id: server.id,
+                enabled: server.enabled,
                 transport: server.transport,
                 url: server.url,
                 bearer_token: server
@@ -398,6 +409,14 @@ impl ConfigDocument {
             self.rename_permissions(old, &entry.id);
         }
         Ok(())
+    }
+
+    /// Turns the server with `id` on or off, leaving the rest of its entry as written. Returns
+    /// whether it is configured.
+    pub fn set_server_enabled(&mut self, id: &str, enabled: bool) -> bool {
+        self.put_entry("servers", Some(id), |table| {
+            set(table, "enabled", (!enabled).then(|| Value::from(false)));
+        })
     }
 
     /// Removes the server with `id` and its permissions. Returns whether it was configured.
@@ -588,6 +607,11 @@ fn write_provider(table: &mut Table, entry: &ProviderEntry) {
 /// unchanged keys survive.
 fn write_server(table: &mut Table, entry: &ServerEntry) {
     set(table, "id", Some(Value::from(entry.id.as_str())));
+    set(
+        table,
+        "enabled",
+        (!entry.enabled).then(|| Value::from(false)),
+    );
     set(
         table,
         "transport",
@@ -1095,6 +1119,33 @@ command = "./sales-server"
             Some("IGOR_CRM_TENANT")
         );
         assert_eq!(ConfigDocument::open(doc.path())?.servers()?, [entry]);
+        Ok(())
+    }
+
+    #[test]
+    fn turning_a_server_off_keeps_its_entry_and_permissions() -> TestResult {
+        let mut doc = document(
+            "enabled",
+            "[[servers]]\nid = \"pos\"\ntransport = \"stdio\"\ncommand = \"./pos\"\n\n[permissions.pos]\nlookup = \"read\"\n",
+        )?;
+        assert!(doc.servers()?[0].enabled);
+        assert!(doc.set_server_enabled("pos", false));
+        assert!(!doc.set_server_enabled("missing", false));
+        let config = doc.save()?;
+        assert!(!config.servers()[0].enabled);
+        assert!(!doc.servers()?[0].enabled);
+        assert_eq!(doc.permissions("pos")?["lookup"], "read");
+        let text = std::fs::read_to_string(doc.path())?;
+        assert!(text.contains("enabled = false"), "{text}");
+        assert!(text.contains(r#"command = "./pos""#), "{text}");
+        doc.set_server_enabled("pos", true);
+        let text = std::fs::read_to_string(doc.path())?;
+        let config = doc.save()?;
+        assert!(config.servers()[0].enabled);
+        assert!(
+            !std::fs::read_to_string(doc.path())?.contains("enabled"),
+            "{text}"
+        );
         Ok(())
     }
 
