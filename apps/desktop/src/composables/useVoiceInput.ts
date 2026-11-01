@@ -1,4 +1,4 @@
-import { onMounted, onScopeDispose, ref, watch } from 'vue'
+import { computed, onMounted, onScopeDispose, ref, watch } from 'vue'
 import { monoFrame, resample16k } from '../voice/audio'
 import { transcription, type Transcriber } from '../voice/transcription'
 interface Capture {
@@ -202,6 +202,7 @@ export function useVoiceInput(options: {
     void release()
   }
   onMounted(() => {
+    void transcriber.refresh?.()
     window.addEventListener('keydown', keydown)
     window.addEventListener('keyup', keyup)
     window.addEventListener('blur', cancel)
@@ -216,5 +217,5 @@ export function useVoiceInput(options: {
     window.removeEventListener('blur', cancel)
     cancel()
   })
-  return { state, level, error, available: transcriber.available, start, release, cancel }
+  return { state, level, error, available: computed(() => transcriber.available), preparing: computed(() => transcriber.preparing === true), start, release, cancel }
 }

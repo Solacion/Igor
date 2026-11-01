@@ -145,6 +145,7 @@ it('persists only local voice preferences, accepts async voice lists and plays a
   let ipc = 0
   mockIPC(command => {
     if (command === 'speech_status') return notInstalled
+    if (command === 'transcription_status') return { installed: false, download_bytes: 574041195 }
     ipc++
     throw new Error('Voice settings must not use native configuration')
   })

@@ -23,6 +23,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "speech_download",
             "speech_prepare",
             "speak",
+            "transcription_status",
+            "transcription_download",
+            "transcription_prepare",
+            "transcribe",
         ]),
     ))?;
     Ok(())

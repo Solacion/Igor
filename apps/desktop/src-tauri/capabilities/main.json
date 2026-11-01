@@ -28,6 +28,10 @@
     "allow-speech-download",
     "allow-speech-prepare",
     "allow-speak",
+    "allow-transcription-status",
+    "allow-transcription-download",
+    "allow-transcription-prepare",
+    "allow-transcribe",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

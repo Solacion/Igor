@@ -35,7 +35,7 @@ const voiceInput = useVoiceInput({
   },
   onError: message => voice.speak(message, { interrupt: true }),
 })
-const voiceState = computed(() => voiceInput.state.value !== 'Idle' ? voiceInput.state.value : voice.speaking.value ? 'Speaking' : busy.value ? 'Thinking' : 'Idle')
+const voiceState = computed(() => voiceInput.preparing.value ? 'Preparing speech…' : voiceInput.state.value !== 'Idle' ? voiceInput.state.value : voice.speaking.value ? 'Speaking' : busy.value ? 'Thinking' : 'Idle')
 function hold(event: PointerEvent) {
   const button = event.currentTarget
   if (button instanceof HTMLElement)
@@ -103,8 +103,8 @@ async function stopTurn() {
     <section class="voice-input" aria-label="Voice input">
       <p role="status" aria-live="polite">{{ voiceState }}</p>
       <meter v-if="voiceInput.state.value === 'Listening'" :value="voiceInput.level.value" min="0" max="1" aria-label="Microphone level" />
-      <button type="button" class="secondary mic-button" :disabled="!voiceInput.available || busy || !loaded || !selected || !!selected.unavailable || confirmingReset || voiceInput.state.value === 'Transcribing'" :aria-pressed="voiceInput.state.value === 'Listening'" @pointerdown.prevent="hold" @pointerup.prevent="voiceInput.release" @pointercancel="voiceInput.cancel" @lostpointercapture="lostCapture" @keydown.space.prevent="keyHold" @keyup.space.prevent="voiceInput.release">Hold to talk</button>
-      <p v-if="!voiceInput.available" class="hint">Voice input is not available in this build. You can still type.</p>
+      <button type="button" class="secondary mic-button" :disabled="!voiceInput.available.value || busy || !loaded || !selected || !!selected.unavailable || confirmingReset || voiceInput.state.value === 'Transcribing'" :aria-pressed="voiceInput.state.value === 'Listening'" @pointerdown.prevent="hold" @pointerup.prevent="voiceInput.release" @pointercancel="voiceInput.cancel" @lostpointercapture="lostCapture" @keydown.space.prevent="keyHold" @keyup.space.prevent="voiceInput.release">Hold to talk</button>
+      <p v-if="!voiceInput.available.value" class="hint">Download speech input in Settings → Voice to use the microphone. You can still type.</p>
       <p v-else class="hint">Hold the button, or hold Space outside text fields and controls. Release to transcribe.</p>
       <p v-if="voiceInput.error.value" role="alert">{{ voiceInput.error.value }}</p>
     </section>
