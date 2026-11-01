@@ -38,6 +38,7 @@ pub(crate) struct RawProvider {
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawServer {
     pub id: String,
+    pub enabled: Option<bool>,
     #[serde(default = "stdio")]
     pub transport: String,
     pub command: Option<String>,

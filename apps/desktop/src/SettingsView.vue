@@ -4,7 +4,7 @@ import { useSettingsStore } from './stores/settings'
 import VoiceSettings from './VoiceSettings.vue'
 import ServerForm from './ServerForm.vue'
 import ProviderSettings from './ProviderSettings.vue'
-import { isCommandError, reconnectServer, removeServer, setPermission, signInServer, signOutServer } from './bridge'
+import { isCommandError, reconnectServer, removeServer, setPermission, setServerEnabled, signInServer, signOutServer } from './bridge'
 import type { PermissionClass, ServerEntry, ServerView, SettingsView, ToolView, SettingsSection } from './bridge'
 const props = withDefaults(defineProps<{
   initialSection?: SettingsSection
@@ -114,6 +114,7 @@ function statusText(server: ServerView): string {
   switch (server.status.state) {
     case 'connected': return 'Connected'
     case 'starting': return 'Starting…'
+    case 'disabled': return 'Off'
     case 'sign_in_needed': return 'Sign-in needed'
     case 'failed': return 'Not connected'
     default: return 'Not connected yet'
@@ -171,10 +172,13 @@ onUnmounted(unsubscribe)
                     <h3>{{ server.entry.id }}</h3>
                     <code class="command-line">{{ commandLine(server.entry) }}</code>
                   </div>
-                  <span class="status" :data-state="server.status.state">
-                    <span class="readiness-dot" :class="{ 'is-ready': server.status.state === 'connected', 'is-unavailable': server.status.state === 'failed' }" aria-hidden="true"></span>
-                    {{ statusText(server) }}
-                  </span>
+                  <div class="server-head-controls">
+                    <span class="status" :data-state="server.status.state">
+                      <span class="readiness-dot" :class="{ 'is-ready': server.status.state === 'connected', 'is-unavailable': server.status.state === 'failed', 'is-off': server.status.state === 'disabled' }" aria-hidden="true"></span>
+                      {{ statusText(server) }}
+                    </span>
+                    <input type="checkbox" role="switch" class="switch" :checked="server.entry.enabled !== false" :disabled="!!busy" :aria-label="`Use ${server.entry.id}`" :title="server.entry.enabled !== false ? 'Turn off: keeps its settings, stops offering its tools' : 'Turn on'" @change="act(`enabled:${server.entry.id}`, () => setServerEnabled(server.entry.id, ($event.target as HTMLInputElement).checked))" />
+                  </div>
                 </div>
                 <p v-if="server.status.state === 'failed'" class="status-detail">{{ server.status.detail }}</p>
 

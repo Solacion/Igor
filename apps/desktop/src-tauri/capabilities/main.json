@@ -17,6 +17,7 @@
     "allow-settings-test-server",
     "allow-settings-remove-server",
     "allow-settings-reconnect-server",
+    "allow-settings-set-server-enabled",
     "allow-settings-sign-in-server",
     "allow-settings-sign-out-server",
     "allow-settings-set-permission",

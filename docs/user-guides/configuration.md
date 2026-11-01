@@ -65,6 +65,7 @@ Each `[[servers]]` entry is a local process (`transport = "stdio"`) or a remote 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `id` | (required) | A unique server id. Tools are identified by server id and tool name. |
+| `enabled` | `true` | `false` turns the server off without deleting it: IGOR does not start it, offer its tools or mention it to the model, and its settings and permissions stay. Useful with a small, fast model that cannot take every server's tools. |
 | `transport` | `stdio` | `stdio`, `http` (Streamable HTTP) or `sse` (the legacy HTTP+SSE transport of MCP 2024-11-05). |
 | `command` | (required for `stdio`) | The program to run. A relative path with a directory part, such as `./bin/server`, resolves against the configuration directory. A bare name, such as `node`, is looked up on `PATH`. |
 | `args` | `[]` | Program arguments. |

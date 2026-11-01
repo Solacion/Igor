@@ -90,6 +90,12 @@ progress { width: 160px; accent-color: var(--accent); }
 .readiness-dot { display: inline-block; width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--pending); }
 .readiness-dot.is-ready { background: var(--ready); }
 .readiness-dot.is-unavailable { background: var(--unavailable); }
+.readiness-dot.is-off { background: var(--fill-strong); }
+.switch.small { width: 30px; height: 18px; }
+.switch.small::after { width: 14px; height: 14px; }
+.switch.small:checked::after { left: 14px; }
+.connection-row[data-enabled="false"] .connection-name { color: var(--muted); }
+.server-head-controls { display: flex; align-items: center; gap: 12px; }
 
 /* Window */
 .app-shell { height: 100vh; display: flex; flex-direction: column; }

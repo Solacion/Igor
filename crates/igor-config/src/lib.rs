@@ -140,6 +140,9 @@ pub struct ProviderConfig {
 pub struct ServerConfig {
     /// Host-assigned server id.
     pub id: ServerId,
+    /// False when the operator turned the server off (`enabled = false`): hosts do not start it,
+    /// offer its tools or mention it to the model, but keep its settings and permissions.
+    pub enabled: bool,
     /// How IGOR reaches the server.
     pub transport: ServerTransport,
     /// Bound on `initialize` plus `tools/list`.

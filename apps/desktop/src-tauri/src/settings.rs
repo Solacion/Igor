@@ -39,6 +39,8 @@ pub enum Status {
     Starting,
     /// Connected; tools listed.
     Connected,
+    /// The operator turned the server off. It is not started and its tools are not offered.
+    Disabled,
     /// The server needs OAuth sign-in: none was done, or it expired.
     SignInNeeded,
     /// The last attempt failed.
@@ -388,7 +390,8 @@ impl Settings {
         let mut backends = HashMap::new();
         let mut servers = Vec::new();
         let mut unavailable_servers = Vec::new();
-        for server in config.servers() {
+        // A server the operator turned off is neither offered nor mentioned to the model.
+        for server in config.servers().iter().filter(|server| server.enabled) {
             let unavailable = connections.get(server.id.as_str()).and_then(|connection| {
                 match connection.current_status() {
                     Status::Failed { detail } => Some(detail),
@@ -610,6 +613,24 @@ impl Settings {
         Ok(tools.iter().map(ToolView::from).collect())
     }
 
+    /// Turns the server `id` on, connecting it, or off, disconnecting it. Its settings and
+    /// permissions stay.
+    pub async fn set_enabled(&self, id: &str, enabled: bool) -> Result<SettingsView, CommandError> {
+        let config = {
+            let _edit = self.edits.lock().await;
+            let mut doc = self.document()?;
+            if !doc.set_server_enabled(id, enabled) {
+                return Err(CommandError::message(format!("no server {id:?}")));
+            }
+            doc.save()
+                .map_err(|error| CommandError::config(&error, None))?
+        };
+        if let Some(server) = config.servers().iter().find(|s| s.id.as_str() == id) {
+            self.connect(server).await;
+        }
+        self.view().await
+    }
+
     /// Reconnects the server `id`.
     pub async fn reconnect(&self, id: &str) -> Result<SettingsView, CommandError> {
         let config = self
@@ -700,6 +721,14 @@ impl Settings {
 
     async fn connect(&self, server: &ServerConfig) {
         let id = server.id.as_str().to_owned();
+        if !server.enabled {
+            // Dropping a running connection disconnects it once no turn still holds it.
+            self.connections
+                .lock()
+                .await
+                .insert(id, Connection::new(Status::Disabled));
+            return;
+        }
         self.connections
             .lock()
             .await
@@ -840,6 +869,16 @@ pub struct SaveServerRequest {
 pub struct ServerRequest {
     /// Server id.
     pub id: String,
+}
+
+/// Request to turn one server on or off.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServerEnabledRequest {
+    /// Server id.
+    pub id: String,
+    /// True to turn the server on.
+    pub enabled: bool,
 }
 
 /// Request to set or clear one tool's class.
@@ -1353,6 +1392,31 @@ mod tests {
             .err()
             .ok_or("signed out of a removed server")?;
         assert_eq!(error.message, "This server does not use sign-in.");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_server_turned_off_is_kept_but_not_started_or_mentioned() -> TestResult {
+        let settings = Settings::new(Some(temp_config("enabled")?));
+        let entry = ServerEntry {
+            id: "pos".into(),
+            command: "/nonexistent/pos".into(),
+            ..ServerEntry::default()
+        };
+        settings.save_server(None, entry, None).await?;
+        let snapshot = settings.snapshot().await?;
+        assert_eq!(snapshot.unavailable_servers.len(), 1);
+
+        let view = settings.set_enabled("pos", false).await?;
+        assert_eq!(view.servers[0].status, Status::Disabled);
+        assert!(!view.servers[0].entry.enabled);
+        let snapshot = settings.snapshot().await?;
+        assert!(snapshot.unavailable_servers.is_empty());
+
+        let view = settings.set_enabled("pos", true).await?;
+        assert!(view.servers[0].entry.enabled);
+        assert!(matches!(view.servers[0].status, Status::Failed { .. }));
+        assert!(settings.set_enabled("missing", false).await.is_err());
         Ok(())
     }
 }

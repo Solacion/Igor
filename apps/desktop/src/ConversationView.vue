@@ -4,6 +4,7 @@ import { useVoiceOutput } from './voice/output'
 import { useConversationSpeech } from './composables/useConversationSpeech'
 import { useVoiceInput } from './composables/useVoiceInput'
 import { computed, ref } from 'vue'
+import { setServerEnabled } from './bridge'
 import { useConversation } from './composables/useConversation'
 import type { SettingsSection } from './bridge'
 import MessageList from './components/conversation/MessageList.vue'
@@ -37,8 +38,23 @@ const heardLanguage = computed(() => {
   if (!code || code === 'en') return ''
   return capitaliseLanguage(voice.speechLanguages.value.find(language => language.code === code)?.name ?? code)
 })
-const connected = computed(() => servers.value.filter(server => server.status.state === 'connected').length)
-const connectionState = computed(() => !servers.value.length ? 'none' : connected.value === servers.value.length ? 'ready' : servers.value.some(server => server.status.state === 'failed') ? 'problem' : 'pending')
+/** Servers the operator has turned on; the others keep their settings but are not used. */
+const enabledServers = computed(() => servers.value.filter(server => server.entry.enabled !== false))
+const connected = computed(() => enabledServers.value.filter(server => server.status.state === 'connected').length)
+const connectionState = computed(() => !enabledServers.value.length ? 'none' : connected.value === enabledServers.value.length ? 'ready' : enabledServers.value.some(server => server.status.state === 'failed') ? 'problem' : 'pending')
+const switching = ref<string | null>(null)
+async function toggleServer(id: string, enabled: boolean) {
+  if (switching.value)
+    return
+  switching.value = id
+  try {
+    await setServerEnabled(id, enabled)
+  } catch {
+    notice.value = `Could not turn ${id} ${enabled ? 'on' : 'off'}. Try again in Settings.`
+  } finally {
+    switching.value = null
+  }
+}
 const voiceState = computed(() => voiceInput.state.value !== 'Idle' ? voiceInput.state.value : voice.speaking.value ? 'Speaking' : busy.value ? 'Thinking' : 'Idle')
 function newConversation() {
   voiceInput.cancel()
@@ -70,9 +86,9 @@ async function stopTurn() {
           <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.id }} · {{ provider.model }}</option>
         </select>
         <details class="connections" :data-state="connectionState">
-          <summary :aria-label="`Server connections: ${connected} of ${servers.length} connected`"><span class="readiness-dot" :class="{ 'is-ready': connectionState === 'ready', 'is-unavailable': connectionState === 'problem' }" aria-hidden="true"></span>{{ servers.length === 1 ? '1 server' : `${servers.length} servers` }}</summary>
+          <summary :aria-label="`Server connections: ${connected} of ${enabledServers.length} connected`"><span class="readiness-dot" :class="{ 'is-ready': connectionState === 'ready', 'is-unavailable': connectionState === 'problem' }" aria-hidden="true"></span>{{ enabledServers.length === 1 ? '1 server' : `${enabledServers.length} servers` }}</summary>
           <div class="conversation-servers popover" aria-label="Server connections">
-            <span v-for="server in servers" :key="server.entry.id" class="connection-row"><span class="readiness-dot" :class="{ 'is-ready': server.status.state === 'connected', 'is-unavailable': server.status.state === 'failed' }" aria-hidden="true"></span><span class="connection-name">{{ server.entry.id }}</span><span class="connection-state">{{ server.status.state.replaceAll('_', ' ') }}</span></span>
+            <span v-for="server in servers" :key="server.entry.id" class="connection-row" :data-enabled="server.entry.enabled !== false"><span class="readiness-dot" :class="{ 'is-ready': server.status.state === 'connected', 'is-unavailable': server.status.state === 'failed', 'is-off': server.status.state === 'disabled' }" aria-hidden="true"></span><span class="connection-name">{{ server.entry.id }}</span><span class="connection-state">{{ server.status.state === 'disabled' ? 'off' : server.status.state.replaceAll('_', ' ') }}</span><input type="checkbox" role="switch" class="switch small" :checked="server.entry.enabled !== false" :disabled="!!switching || busy" :aria-label="`Use ${server.entry.id}`" @change="toggleServer(server.entry.id, ($event.target as HTMLInputElement).checked)" /></span>
             <p v-if="loaded && !servers.length">No MCP servers configured. <button class="link" @click="emit('settings', 'mcp-servers')">Open Settings</button></p>
             <button v-else type="button" class="link" @click="emit('settings', 'mcp-servers')">Manage servers…</button>
           </div>

@@ -273,6 +273,7 @@ fn servers(
             };
             Ok(ServerConfig {
                 id,
+                enabled: raw.enabled.unwrap_or(true),
                 transport,
                 startup_timeout,
                 call_timeout,

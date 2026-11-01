@@ -299,6 +299,17 @@ async fn settings_sign_out_server(
 }
 
 #[tauri::command]
+async fn settings_set_server_enabled(
+    app: tauri::AppHandle,
+    settings: State<'_, Arc<Settings>>,
+    request: settings::ServerEnabledRequest,
+) -> Result<SettingsView, CommandError> {
+    let result = settings.set_enabled(&request.id, request.enabled).await?;
+    let _ = app.emit_to("main", "settings-changed", ());
+    Ok(result)
+}
+
+#[tauri::command]
 async fn settings_reconnect_server(
     app: tauri::AppHandle,
     settings: State<'_, Arc<Settings>>,
@@ -370,6 +381,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings_test_server,
             settings_remove_server,
             settings_reconnect_server,
+            settings_set_server_enabled,
             settings_sign_in_server,
             settings_sign_out_server,
             settings_set_permission,

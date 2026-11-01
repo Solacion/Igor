@@ -17,6 +17,8 @@ export type SecretEntry = { env: string } | { keychain: string }
 
 export interface ServerEntry {
   id: string
+  /** False when the operator turned the server off. Absent means on. */
+  enabled?: boolean
   /** `stdio` for a local process, `http` for a remote server, `sse` for a remote server on the
    * legacy HTTP+SSE transport. Absent means `stdio`. */
   transport?: 'stdio' | 'http' | 'sse'
@@ -41,6 +43,7 @@ export type ServerStatus =
   | { state: 'not_connected' }
   | { state: 'starting' }
   | { state: 'connected' }
+  | { state: 'disabled' }
   | { state: 'sign_in_needed' }
   | { state: 'failed'; detail: string }
 
@@ -98,6 +101,11 @@ export function removeServer(id: string): Promise<SettingsView> {
 
 export function reconnectServer(id: string): Promise<SettingsView> {
   return invoke<SettingsView>('settings_reconnect_server', { request: { id } })
+}
+
+/** Turns a server on (connecting it) or off, keeping its settings and permissions. */
+export function setServerEnabled(id: string, enabled: boolean): Promise<SettingsView> {
+  return invoke<SettingsView>('settings_set_server_enabled', { request: { id, enabled } })
 }
 
 /** Opens the server's sign-in page in the browser and waits for it to finish. */
