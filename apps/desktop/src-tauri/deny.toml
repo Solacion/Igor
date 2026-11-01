@@ -9,8 +9,14 @@ confidence-threshold = 0.95
 allow = [
     "Apache-2.0",
     "BSD-3-Clause",
+    # libbz2-rs-sys, used at build time to unpack sherpa-onnx's native libraries (igor-tts).
+    # A BSD-style permissive licence; GPL-compatible.
+    "bzip2-1.0.6",
     "CDLA-Permissive-2.0",
     "GPL-3.0-only",
+    # piper-phonemize (espeak-ng phonemes for embedded text-to-speech, igor-tts). Allows use under
+    # GPL-3.0-only, the project's licence.
+    "GPL-3.0-or-later",
     "ISC",
     "MIT",
     "MIT-0",

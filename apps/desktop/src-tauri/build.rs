@@ -19,6 +19,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "settings_remove_server",
             "settings_reconnect_server",
             "settings_set_permission",
+            "speech_status",
+            "speech_download",
+            "speech_prepare",
+            "speak",
         ]),
     ))?;
     Ok(())
