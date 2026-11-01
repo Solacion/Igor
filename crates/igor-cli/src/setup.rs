@@ -5,11 +5,14 @@ use std::ffi::OsString;
 use std::io::{self, Write};
 use std::sync::Arc;
 
-use igor_config::{Config, HttpServer, SecretError, ServerConfig, ServerTransport};
+use igor_config::{
+    Config, HttpServer, KeyStore, Secret, SecretError, ServerConfig, ServerTransport,
+    SystemKeychain,
+};
 use igor_core::registry::ToolRegistry;
 use igor_core::session::UnavailableServer;
 use igor_core::tools::{ServerId, ToolBackend, ToolDescriptor};
-use igor_mcp::{HttpServerConfig, McpBackend, StdioServerConfig};
+use igor_mcp::{HttpServerConfig, McpBackend, StdioServerConfig, TokenStore};
 
 use crate::render::sanitize;
 
@@ -211,5 +214,33 @@ fn http_config(
     if let Some(token) = &remote.bearer_token {
         http.bearer_token = Some(token.resolve()?.expose().to_owned());
     }
+    if remote.oauth {
+        http.oauth = Some(Arc::new(KeychainTokens(HttpServer::oauth_item(&server.id))));
+    }
     Ok(http)
+}
+
+/// A server's OAuth tokens, kept in a login Keychain item.
+pub(crate) struct KeychainTokens(pub(crate) String);
+
+impl TokenStore for KeychainTokens {
+    fn load(&self) -> Result<Option<String>, String> {
+        SystemKeychain
+            .get(&self.0)
+            .map(|found| found.map(|secret| secret.expose().to_owned()))
+            .map_err(|error| error.to_string())
+    }
+
+    fn save(&self, value: &str) -> Result<(), String> {
+        SystemKeychain
+            .set(&self.0, &Secret::new(value.to_owned()))
+            .map_err(|error| error.to_string())
+    }
+
+    fn clear(&self) -> Result<(), String> {
+        SystemKeychain
+            .delete(&self.0)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
 }

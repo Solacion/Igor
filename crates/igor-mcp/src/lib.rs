@@ -18,8 +18,10 @@
 //! The child's stderr is kept as bounded, redacted diagnostics: see [`McpBackend::recent_stderr`]
 //! and [`ConnectError::stderr`].
 
+mod oauth;
 mod stderr;
 
+pub use oauth::{DEFAULT_SIGN_IN_TIMEOUT, SignInError, TokenStore, sign_in};
 pub use stderr::{MAX_STDERR_LINE_CHARS, MAX_STDERR_LINES, REDACTED};
 
 use std::ffi::OsString;
@@ -136,6 +138,9 @@ pub struct HttpServerConfig {
     pub headers: Vec<(String, String)>,
     /// Sent as `Authorization: Bearer <token>`. Never appears in `Debug` output or errors.
     pub bearer_token: Option<String>,
+    /// Where the server's OAuth tokens are kept, for a server that needs sign-in. Without stored
+    /// tokens, [`McpBackend::connect_http`] fails with [`ConnectError::SignInNeeded`].
+    pub oauth: Option<Arc<dyn TokenStore>>,
     /// Bound on connecting and completing `initialize`.
     pub startup_timeout: Duration,
     /// Bound on each request after startup.
@@ -149,6 +154,7 @@ impl HttpServerConfig {
             url: url.into(),
             headers: Vec::new(),
             bearer_token: None,
+            oauth: None,
             startup_timeout: DEFAULT_STARTUP_TIMEOUT,
             call_timeout: DEFAULT_CALL_TIMEOUT,
         }
@@ -217,6 +223,13 @@ pub enum ConnectError {
         /// What went wrong, without secret values.
         reason: String,
     },
+    /// The server needs OAuth sign-in and no tokens are stored, or they can no longer be
+    /// refreshed. Sign in with [`sign_in`], then connect again.
+    #[error("server {server} needs you to sign in")]
+    SignInNeeded {
+        /// Server being connected.
+        server: ServerId,
+    },
     /// The process could not be spawned, for example because the command does not exist.
     #[error("cannot start server {server}: {source}")]
     Spawn {
@@ -252,7 +265,7 @@ impl ConnectError {
     /// start. Untrusted server output: display as plain text only.
     pub fn stderr(&self) -> &[String] {
         match self {
-            Self::Spawn { .. } | Self::Http { .. } => &[],
+            Self::Spawn { .. } | Self::Http { .. } | Self::SignInNeeded { .. } => &[],
             Self::Initialize { stderr, .. } | Self::Timeout { stderr, .. } => stderr,
         }
     }
@@ -376,19 +389,50 @@ impl McpBackend {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| http_error(error.to_string()))?;
-        let transport = StreamableHttpClientTransport::with_client(client, transport_config);
-        Self::start(
-            server_id,
-            transport,
-            Started {
-                startup_timeout: config.startup_timeout,
-                call_timeout: config.call_timeout,
-                stderr: stderr::StderrLog::default(),
-                reader: None,
-                secrets: &secrets,
-            },
+        let started = Started {
+            startup_timeout: config.startup_timeout,
+            call_timeout: config.call_timeout,
+            stderr: stderr::StderrLog::default(),
+            reader: None,
+            secrets: &secrets,
+        };
+        let Some(store) = &config.oauth else {
+            let transport = StreamableHttpClientTransport::with_client(client, transport_config);
+            return Self::start(server_id, transport, started).await;
+        };
+        let manager = tokio::time::timeout(
+            config.startup_timeout,
+            oauth::signed_in(&config.url, client.clone(), Arc::clone(store)),
         )
         .await
+        .map_err(|_| ConnectError::Timeout {
+            server: server_id.clone(),
+            timeout: config.startup_timeout,
+            stderr: Vec::new(),
+        })?
+        .map_err(http_error)?
+        .ok_or_else(|| ConnectError::SignInNeeded {
+            server: server_id.clone(),
+        })?;
+        let client = rmcp::transport::auth::AuthClient::new(client, manager);
+        let transport = StreamableHttpClientTransport::with_client(client, transport_config);
+        let connected = Self::start(server_id.clone(), transport, started).await;
+        // A refused or expired sign-in shows up as an initialize failure; rmcp reports it only
+        // as text ("Auth required", "OAuth authorization required", a rejected refresh token).
+        match connected {
+            Err(ConnectError::Initialize { reason, .. })
+                if [
+                    "Auth required",
+                    "OAuth authorization required",
+                    "refresh token was rejected",
+                ]
+                .iter()
+                .any(|text| reason.contains(text)) =>
+            {
+                Err(ConnectError::SignInNeeded { server: server_id })
+            }
+            other => other,
+        }
     }
 
     /// Runs the MCP client over `transport` and waits, up to the startup timeout, for

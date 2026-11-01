@@ -25,6 +25,8 @@ export interface ServerEntry {
   bearer_token?: SecretEntry | null
   /** Headers sent with every request, for `http`. */
   headers?: Record<string, SecretEntry>
+  /** `oauth` when the remote server needs sign-in. */
+  auth?: 'oauth' | null
   command: string
   args: string[]
   cwd: string | null
@@ -38,6 +40,7 @@ export type ServerStatus =
   | { state: 'not_connected' }
   | { state: 'starting' }
   | { state: 'connected' }
+  | { state: 'sign_in_needed' }
   | { state: 'failed'; detail: string }
 
 /** A tool reported by a server. Every text field is untrusted server output. */
@@ -94,6 +97,15 @@ export function removeServer(id: string): Promise<SettingsView> {
 
 export function reconnectServer(id: string): Promise<SettingsView> {
   return invoke<SettingsView>('settings_reconnect_server', { request: { id } })
+}
+
+/** Opens the server's sign-in page in the browser and waits for it to finish. */
+export function signInServer(id: string): Promise<SettingsView> {
+  return invoke<SettingsView>('settings_sign_in_server', { request: { id } })
+}
+
+export function signOutServer(id: string): Promise<SettingsView> {
+  return invoke<SettingsView>('settings_sign_out_server', { request: { id } })
 }
 
 export function setPermission(server: string, tool: string, cls: PermissionClass | null): Promise<SettingsView> {

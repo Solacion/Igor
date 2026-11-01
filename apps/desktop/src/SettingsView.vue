@@ -4,7 +4,7 @@ import { useSettingsStore } from './stores/settings'
 import VoiceSettings from './VoiceSettings.vue'
 import ServerForm from './ServerForm.vue'
 import ProviderSettings from './ProviderSettings.vue'
-import { isCommandError, reconnectServer, removeServer, setPermission } from './bridge'
+import { isCommandError, reconnectServer, removeServer, setPermission, signInServer, signOutServer } from './bridge'
 import type { PermissionClass, ServerEntry, ServerView, SettingsView, ToolView, SettingsSection } from './bridge'
 const props = withDefaults(defineProps<{
   initialSection?: SettingsSection
@@ -114,6 +114,7 @@ function statusText(server: ServerView): string {
   switch (server.status.state) {
     case 'connected': return 'Connected'
     case 'starting': return 'Starting…'
+    case 'sign_in_needed': return 'Sign-in needed'
     case 'failed': return 'Not connected'
     default: return 'Not connected yet'
   }
@@ -223,6 +224,8 @@ onUnmounted(unsubscribe)
                 </div>
                 <div v-else class="actions">
                   <button type="button" class="secondary" :disabled="!!busy || editing !== null" @click="editing = server.entry.id">Edit</button>
+                  <button v-if="server.entry.auth === 'oauth' && server.status.state !== 'connected'" type="button" :disabled="!!busy" @click="act(`sign-in:${server.entry.id}`, () => signInServer(server.entry.id))">{{ busy === `sign-in:${server.entry.id}` ? 'Waiting for the browser…' : 'Sign in' }}</button>
+                  <button v-if="server.entry.auth === 'oauth' && server.status.state === 'connected'" type="button" class="secondary" :disabled="!!busy" @click="act(`sign-out:${server.entry.id}`, () => signOutServer(server.entry.id))">Sign out</button>
                   <button type="button" class="secondary" :disabled="!!busy" @click="act(`reconnect:${server.entry.id}`, () => reconnectServer(server.entry.id))">{{ busy === `reconnect:${server.entry.id}` ? 'Connecting…' : 'Reconnect' }}</button>
                   <button type="button" class="link danger" :disabled="!!busy" @click="confirmingRemove = server.entry.id">Remove</button>
                 </div>
