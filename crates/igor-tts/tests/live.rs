@@ -17,9 +17,15 @@ use igor_voice::{SAMPLE_RATE, Transcriber};
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 fn env_path(name: &str) -> Result<PathBuf, String> {
-    std::env::var_os(name)
+    let path = std::env::var_os(name)
         .map(PathBuf::from)
-        .ok_or_else(|| format!("set {name}"))
+        .ok_or_else(|| format!("set {name}"))?;
+    if !path.exists() {
+        return Err(format!(
+            "{name} is {path:?}, which does not exist; give the full path (is $MODELS set in this shell?)"
+        ));
+    }
+    Ok(path)
 }
 
 /// Linear resampling to Whisper's rate; good enough for a recognition check.

@@ -234,7 +234,13 @@ New approvals/questions are announced, scrolled into view and focused on their f
 
 ### Voice output
 
-In **Settings → Voice**, turn **Speak Igor's replies** on or off, choose a device voice and adjust the speaking rate. Automatic selection prefers an available English Premium/Enhanced voice. Voice lists may arrive after the panel opens. **Test voice** plays a sample, including when normal reply speech is off. Preferences stay in this desktop webview's local settings, never in `igor.toml` or provider configuration.
+In **Settings → Voice**, turn **Speak Igor's replies** on or off, choose a voice and adjust the speaking rate.
+
+Igor has its own natural voice, the embedded Kokoro model from `igor-tts`. It runs on the Mac with no extra service. The model is about 354 MB and is not bundled: **Download Igor's voice** fetches it once, with a progress bar, into `~/Library/Application Support/igor/models/kokoro-multi-lang-v1_0/`. Each file is written as `<name>.part`, checked against its pinned size and SHA-256, and only then renamed; a failed check deletes the partial file. The model loads in the background once voice output is on (about a third of a second).
+
+The voice picker lists Igor's 28 English voices first, such as **Heart — American** and **Emma — British**. The basic macOS voices follow under a separator. **Automatic** uses Igor's voice (Heart) once it is downloaded, and until then prefers an available English Premium/Enhanced macOS voice. System voice lists may arrive after the panel opens.
+
+With Igor's voice, replies are spoken one sentence at a time: the next sentence is synthesized while the current one plays, so speech starts about 0.2 seconds after the turn finishes. **Test voice** plays a sample, including when normal reply speech is off. Preferences stay in this desktop webview's local settings, never in `igor.toml` or provider configuration.
 
 With voice enabled, Igor speaks assistant text after the turn finishes and reads approval requests as a short summary ending “Approve on screen?”. Markdown formatting is removed before speaking. Approval still requires the on-screen button and exact action hash; speech never grants approval. **Stop speaking**, **Stop turn** and **New conversation** cancel speech. Voice works independently of the selected AI provider; LM Studio with local Whisper is the intended voice test setup. Available system voices and native playback still need a manual check on the demo Mac.
 

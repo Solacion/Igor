@@ -15,7 +15,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let [model, voice, out, text] = args.as_slice() else {
         return Err("usage: say <model dir> <voice> <out.wav> <text>".into());
     };
-    let tts = Synthesizer::load(Path::new(model))?;
+    let model = Path::new(model);
+    if !model.is_dir() {
+        return Err(format!(
+            "no voice model directory at {model:?}; pass the full path to kokoro-multi-lang-v1_0 \
+             (is $MODELS set in this shell?)"
+        )
+        .into());
+    }
+    let tts = Synthesizer::load(model)?;
     let mut speech = igor_tts::Speech {
         samples: Vec::new(),
         sample_rate: 0,

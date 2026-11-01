@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "The main window may read desktop/core version metadata and manage MCP servers in Settings.",
+  "description": "The main window may read desktop/core version metadata and manage MCP servers in Settings, and speak with Igor's embedded voice.",
   "windows": [
     "main"
   ],
@@ -24,6 +24,10 @@
     "allow-close-session",
     "allow-export-activity",
     "allow-conversation-providers",
+    "allow-speech-status",
+    "allow-speech-download",
+    "allow-speech-prepare",
+    "allow-speak",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

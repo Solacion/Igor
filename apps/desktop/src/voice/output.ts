@@ -1,4 +1,5 @@
 import { computed, inject, onScopeDispose, provide, ref, watch, type InjectionKey } from 'vue'
+import { Channel, invoke } from '@tauri-apps/api/core'
 export interface VoicePreferences {
   enabled: boolean
   voiceURI: string
@@ -6,6 +7,25 @@ export interface VoicePreferences {
   reviewBeforeSending: boolean
 }
 export const voiceStorageKey = 'igor.desktop.voice.v1'
+/** Prefix of a `voiceURI` that names one of Igor's own (Kokoro) voices rather than a system voice. */
+export const igorVoicePrefix = 'igor:'
+export interface IgorVoice {
+  id: string
+  name: string
+  accent: 'American' | 'British'
+}
+/** Igor's embedded voice model, as reported by the native `speech_status` command. */
+export interface SpeechStatus {
+  installed: boolean
+  download_bytes: number
+  default_voice: string
+  voices: IgorVoice[]
+}
+/** Mirrors `igor_tts::sentences`: one synthesis request per sentence, at most 300 characters. */
+export function speechSentences(text: string): string[] {
+  const sentences = text.split(/(?<=[.!?])\s+|\n+/).map(part => part.trim()).filter(Boolean)
+  return sentences.flatMap(sentence => sentence.match(/.{1,300}(?:\s|$)|\S{1,300}/g)?.map(part => part.trim()).filter(Boolean) ?? [])
+}
 export function stripMarkdown(text: string): string {
   return text.replace(/```[^\n]*\n([\s\S]*?)```/g, '$1')
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
@@ -42,25 +62,144 @@ function loadPreferences(): VoicePreferences {
 export function createVoiceOutput(synthesis = globalThis.speechSynthesis) {
   const preferences = ref(loadPreferences())
   const voices = ref<SpeechSynthesisVoice[]>([])
+  const igor = ref<SpeechStatus | null>(null)
+  const download = ref<{ received: number, total: number } | null>(null)
   const speaking = ref(false)
   const error = ref('')
-  const supported = !!synthesis && typeof globalThis.SpeechSynthesisUtterance === 'function'
+  const systemSupported = !!synthesis && typeof globalThis.SpeechSynthesisUtterance === 'function'
+  /** Igor's own voice, when downloaded: the chosen one, or the model default for Automatic. */
+  const igorVoice = computed(() => {
+    if (!igor.value?.installed)
+      return undefined
+    const uri = preferences.value.voiceURI
+    if (uri.startsWith(igorVoicePrefix))
+      return igor.value.voices.find(voice => igorVoicePrefix + voice.id === uri) ?? igor.value.voices.find(voice => voice.id === igor.value?.default_voice)
+    return uri ? undefined : igor.value.voices.find(voice => voice.id === igor.value?.default_voice)
+  })
   const selectedVoice = computed(() => voices.value.find(voice => voice.voiceURI === preferences.value.voiceURI) ?? bestVoice(voices.value))
+  const supported = computed(() => systemSupported || !!igor.value?.installed)
   let users = 0
   let generation = 0
   const queue: string[] = []
   let current: SpeechSynthesisUtterance | undefined
+  /** Igor-voice playback: the running queue, the playing sentence and how to end it early. */
+  let igorRunning = false
+  let audio: HTMLAudioElement | undefined
+  let endAudio: (() => void) | undefined
+  let prepared = false
+  async function refreshIgor() {
+    try {
+      igor.value = await invoke<SpeechStatus>('speech_status')
+      if (igor.value.installed && preferences.value.enabled)
+        prepareIgor()
+    }
+    catch {
+      igor.value = null
+    }
+  }
+  function prepareIgor() {
+    if (prepared)
+      return
+    prepared = true
+    // Loading takes about a third of a second; do it before the first reply needs it.
+    invoke('speech_prepare').catch(() => { prepared = false })
+  }
+  async function downloadIgor() {
+    if (download.value)
+      return
+    error.value = ''
+    download.value = { received: 0, total: igor.value?.download_bytes ?? 0 }
+    const progress = new Channel<{ received: number, total: number }>()
+    progress.onmessage = update => { download.value = update }
+    try {
+      igor.value = await invoke<SpeechStatus>('speech_download', { progress })
+      prepareIgor()
+    }
+    catch (cause) {
+      error.value = typeof cause === 'object' && cause && 'message' in cause ? String(cause.message) : 'Igor\'s voice could not be downloaded. Try again.'
+    }
+    finally {
+      download.value = null
+    }
+  }
   function refreshVoices() {
-    if (supported)
+    if (systemSupported)
       voices.value = synthesis.getVoices()
   }
   function stop() {
     generation++
     queue.length = 0
     current = undefined
+    igorRunning = false
     speaking.value = false
-    if (supported)
+    audio?.pause()
+    endAudio?.()
+    if (systemSupported)
       synthesis.cancel()
+  }
+  function synthesize(text: string, voice: IgorVoice) {
+    return invoke<ArrayBuffer>('speak', { request: { text, voice: voice.id, speed: preferences.value.rate } })
+  }
+  function play(wav: ArrayBuffer, token: number) {
+    return new Promise<void>((resolve, reject) => {
+      if (generation !== token)
+        return resolve()
+      const url = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }))
+      const element = new Audio(url)
+      audio = element
+      const finish = (failed: boolean) => {
+        URL.revokeObjectURL(url)
+        if (audio === element) {
+          audio = undefined
+          endAudio = undefined
+        }
+        if (failed)
+          reject(new Error('playback failed'))
+        else
+          resolve()
+      }
+      endAudio = () => finish(false)
+      element.onended = () => finish(false)
+      element.onerror = () => finish(true)
+      element.play().catch(() => finish(true))
+    })
+  }
+  /** Plays queued sentences in order, synthesizing the next while the current one plays. */
+  async function runIgor(voice: IgorVoice) {
+    igorRunning = true
+    speaking.value = true
+    const token = generation
+    const take = () => {
+      const text = queue.shift()
+      return text ? synthesize(text, voice) : undefined
+    }
+    try {
+      let pending = take()
+      while (pending) {
+        const wav = await pending
+        if (generation !== token)
+          return
+        const following = take()
+        // A rejected look-ahead is reported when awaited, not as an unhandled rejection.
+        following?.catch(() => {})
+        await play(wav, token)
+        if (generation !== token)
+          return
+        pending = following ?? take()
+      }
+    }
+    catch (cause) {
+      if (generation === token) {
+        stop()
+        error.value = typeof cause === 'object' && cause && 'message' in cause ? `Igor's voice could not speak: ${String(cause.message)}` : 'Igor\'s voice could not speak. Try another voice.'
+      }
+    }
+    finally {
+      if (generation === token) {
+        igorRunning = false
+        speaking.value = false
+      }
+    }
   }
   function next() {
     const text = queue.shift()
@@ -98,7 +237,20 @@ export function createVoiceOutput(synthesis = globalThis.speechSynthesis) {
   } = {}) {
     if (!preferences.value.enabled && !options.test)
       return
-    if (!supported) {
+    const voice = igorVoice.value
+    if (voice) {
+      const text = stripMarkdown(source)
+      if (!text)
+        return
+      if (options.interrupt)
+        stop()
+      error.value = ''
+      queue.push(...speechSentences(text))
+      if (!igorRunning)
+        void runIgor(voice)
+      return
+    }
+    if (!systemSupported) {
       error.value = 'Voice output is unavailable in this window.'
       return
     }
@@ -119,14 +271,15 @@ export function createVoiceOutput(synthesis = globalThis.speechSynthesis) {
     if (users !== 1)
       return
     refreshVoices()
-    if (supported)
+    void refreshIgor()
+    if (systemSupported)
       synthesis.addEventListener('voiceschanged', refreshVoices)
   }
   function disconnect() {
     users--
     if (users)
       return
-    if (supported)
+    if (systemSupported)
       synthesis.removeEventListener('voiceschanged', refreshVoices)
     stop()
   }
@@ -139,10 +292,12 @@ export function createVoiceOutput(synthesis = globalThis.speechSynthesis) {
     }
     if (!value.enabled)
       stop()
+    else if (igor.value?.installed)
+      prepareIgor()
   }, { deep: true, flush: 'sync' })
-  function dispose() { save(); if (supported)
+  function dispose() { save(); if (systemSupported)
     synthesis.removeEventListener('voiceschanged', refreshVoices); stop(); }
-  return { preferences, voices, speaking, selectedVoice, supported, error, speak, stop, connect, disconnect, dispose }
+  return { preferences, voices, igor, igorVoice, download, speaking, selectedVoice, supported, systemSupported, error, speak, stop, connect, disconnect, dispose, downloadIgor }
 }
 export type VoiceOutput = ReturnType<typeof createVoiceOutput>
 const voiceKey: InjectionKey<VoiceOutput> = Symbol('voice-output')

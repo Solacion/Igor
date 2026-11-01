@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { mockIPC, clearMocks } from '@tauri-apps/api/mocks'
 import type { Channel } from '@tauri-apps/api/core'
-import { bestVoice, createVoiceOutput, stripMarkdown, voiceStorageKey } from './output'
+import { bestVoice, createVoiceOutput, speechSentences, stripMarkdown, voiceStorageKey } from './output'
 import VoiceSettings from '../VoiceSettings.vue'
 import ConversationView from '../ConversationView.vue'
 import type { CoreEvent } from '../session'
@@ -33,6 +33,107 @@ function synthesis() {
   return engine
 }
 afterEach(() => { localStorage.clear(); vi.unstubAllGlobals(); clearMocks() })
+const igorVoices = [
+  { id: 'af_heart', name: 'Heart', accent: 'American' },
+  { id: 'bf_emma', name: 'Emma', accent: 'British' },
+]
+const notInstalled = { installed: false, download_bytes: 354_000_000, default_voice: 'af_heart', voices: igorVoices }
+const installed = { ...notInstalled, installed: true }
+/** Audio elements that finish only when the test says so. */
+function audioPlayer() {
+  const played: { src: string, onended: (() => void) | null, pause: ReturnType<typeof vi.fn> }[] = []
+  vi.stubGlobal('Audio', class {
+    src: string
+    onended: (() => void) | null = null
+    onerror: (() => void) | null = null
+    pause = vi.fn()
+    constructor(src: string) { this.src = src; played.push(this) }
+    play() { return Promise.resolve() }
+  })
+  let blobs = 0
+  vi.stubGlobal('URL', Object.assign(Object.create(URL), { createObjectURL: () => `blob:${blobs++}`, revokeObjectURL: vi.fn() }))
+  return played
+}
+function igorBackend(status = installed) {
+  const spoken: { text: string, voice: string, speed: number }[] = []
+  const calls: string[] = []
+  mockIPC((command, args: any) => {
+    calls.push(command)
+    if (command === 'speech_status') return status
+    if (command === 'speech_prepare') return null
+    if (command === 'speak') { spoken.push(args.request); return new ArrayBuffer(8) }
+    if (command === 'speech_download') {
+      args.progress.onmessage({ received: 177_000_000, total: 354_000_000 })
+      return installed
+    }
+    throw new Error(`unexpected ${command}`)
+  })
+  return { spoken, calls }
+}
+it('splits speech into sentences like igor_tts::sentences', () => {
+  expect(speechSentences('Hi Pieter. Is it 3.5 degrees? Yes!\nDone')).toEqual(['Hi Pieter.', 'Is it 3.5 degrees?', 'Yes!', 'Done'])
+  expect(speechSentences('word '.repeat(100)).every(part => part.length <= 300)).toBe(true)
+})
+it('lists Igor\'s voices first and the basic system voices last, after a separator', async () => {
+  synthesis()
+  igorBackend()
+  const wrapper = mount(VoiceSettings)
+  await flushPromises()
+  const options = wrapper.findAll('#voice-picker option').map(option => option.text())
+  expect(options).toEqual(['Automatic (Igor\'s voice)', 'Heart — American', 'Emma — British', '──────────', 'French Premium · fr-FR', 'English Basic · en-US', 'English Enhanced · en-GB'])
+  expect(wrapper.findAll('#voice-picker optgroup').map(group => group.attributes('label'))).toEqual(['Igor\'s voices', 'macOS voices (basic)'])
+  expect(wrapper.text()).not.toContain('Download Igor')
+  wrapper.unmount()
+})
+it('speaks sentence by sentence with Igor\'s voice, synthesizing ahead, and stop drops the rest', async () => {
+  const engine = synthesis()
+  const played = audioPlayer()
+  const { spoken, calls } = igorBackend()
+  localStorage.setItem(voiceStorageKey, JSON.stringify({ enabled: true, voiceURI: 'igor:bf_emma', rate: 1.2 }))
+  const voice = createVoiceOutput()
+  voice.connect()
+  await flushPromises()
+  expect(calls).toContain('speech_prepare')
+  voice.speak('**First** sentence. Second sentence. Third sentence.')
+  await flushPromises()
+  expect(engine.speak).not.toHaveBeenCalled()
+  expect(spoken).toEqual([
+    { text: 'First sentence.', voice: 'bf_emma', speed: 1.2 },
+    { text: 'Second sentence.', voice: 'bf_emma', speed: 1.2 },
+  ])
+  expect(played).toHaveLength(1)
+  expect(voice.speaking.value).toBe(true)
+  played[0]!.onended?.()
+  await flushPromises()
+  expect(played).toHaveLength(2)
+  expect(spoken.map(request => request.text)).toContain('Third sentence.')
+  voice.stop()
+  await flushPromises()
+  expect(played[1]!.pause).toHaveBeenCalled()
+  expect(played).toHaveLength(2)
+  expect(voice.speaking.value).toBe(false)
+  voice.speak('After stop.', { interrupt: true })
+  await flushPromises()
+  expect(spoken.at(-1)?.text).toBe('After stop.')
+  expect(played).toHaveLength(3)
+  voice.dispose()
+})
+it('uses the system voice until Igor\'s voice is downloaded, and downloads it with progress', async () => {
+  const engine = synthesis()
+  const { calls } = igorBackend(notInstalled)
+  localStorage.setItem(voiceStorageKey, JSON.stringify({ enabled: true }))
+  const wrapper = mount(VoiceSettings)
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Test voice')!.trigger('click')
+  expect(engine.speak).toHaveBeenCalledTimes(1)
+  expect(calls).not.toContain('speak')
+  await wrapper.findAll('button').find(button => button.text().startsWith('Download Igor'))!.trigger('click')
+  await flushPromises()
+  expect(calls).toContain('speech_download')
+  expect(wrapper.text()).not.toContain('Download Igor')
+  expect(wrapper.find('#voice-picker optgroup').attributes('label')).toBe('Igor\'s voices')
+  wrapper.unmount()
+})
 it('prefers available English Enhanced/Premium voices and strips Markdown without speaking link targets', () => {
   expect(bestVoice(voices as SpeechSynthesisVoice[])?.voiceURI).toBe('enhanced')
   expect(stripMarkdown('# Hello **operator**\n[stock](https://example.com) `done`')).toBe('Hello operator stock done')
@@ -41,14 +142,20 @@ it('persists only local voice preferences, accepts async voice lists and plays a
   const engine = synthesis()
   engine.getVoices.mockReturnValueOnce([])
   let ipc = 0
-  mockIPC(() => { ipc++; throw new Error('Voice settings must not use native configuration') })
+  mockIPC(command => {
+    if (command === 'speech_status') return notInstalled
+    ipc++
+    throw new Error('Voice settings must not use native configuration')
+  })
   const wrapper = mount(VoiceSettings)
   await flushPromises()
   expect(wrapper.findAll('#voice-picker option')).toHaveLength(1)
   const changed = engine.addEventListener.mock.calls[0]?.[1]
   changed()
   await flushPromises()
-  expect(wrapper.findAll('#voice-picker option')).toHaveLength(4)
+  // Automatic, the separator and the three system voices.
+  expect(wrapper.findAll('#voice-picker option')).toHaveLength(5)
+  expect(wrapper.text()).toContain('Download Igor\'s voice (354 MB)')
   await wrapper.findAll('input[type=checkbox]')[0]!.setValue(true)
   await wrapper.get('#voice-picker').setValue('enhanced')
   await wrapper.get('#voice-rate').setValue('1.3')
