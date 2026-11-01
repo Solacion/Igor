@@ -717,7 +717,9 @@ fn http_server_settings_are_checked() -> TestResult {
 
 #[test]
 fn allow_is_a_permission_class() -> TestResult {
-    let config = parse(&format!("{BASE}\n[permissions.sales]\nopen_page = \"allow\"\n"))?;
+    let config = parse(&format!(
+        "{BASE}\n[permissions.sales]\nopen_page = \"allow\"\n"
+    ))?;
     assert_eq!(
         config.permissions().classify(&tool("sales", "open_page")?),
         igor_core::policy::Classification::Allow
