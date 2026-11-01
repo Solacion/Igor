@@ -133,7 +133,7 @@ fn provider_options(settings: &Settings) -> Result<ProvidersView, BridgeError> {
         .provider_choices()
         .map_err(|_| BridgeError::Configuration)?;
     let providers = configured.iter().map(|p| ProviderView {
-        revision: settings::provider_revision(p),
+        revision: format!("{}:{}", settings::provider_revision(p), settings.credential_version(&p.id)),
         id: p.id.clone(), model: p.model.clone(),
         unavailable: p.api_key.as_ref().and_then(|key| key.env_var()).filter(|var| settings::key_variable_missing(var)).map(|var| format!("Environment variable {var} is missing or unavailable. Set it before starting Igor.")),
     }).collect();
@@ -167,6 +167,29 @@ async fn settings_remove_provider(
     let result = settings.remove_provider(&request.id).await?;
     let _ = app.emit_to("main", "settings-changed", ());
     Ok(result)
+}
+
+#[tauri::command]
+async fn settings_save_provider_key(
+    app: tauri::AppHandle,
+    settings: State<'_, Arc<Settings>>,
+    request: settings::SaveProviderKeyRequest,
+) -> Result<settings::ProviderSettingsView, CommandError> {
+    let view = settings
+        .save_provider_key(request.replacing.as_deref(), request.entry, request.key)
+        .await?;
+    let _ = app.emit_to("main", "settings-changed", ());
+    Ok(view)
+}
+#[tauri::command]
+async fn settings_remove_provider_key(
+    app: tauri::AppHandle,
+    settings: State<'_, Arc<Settings>>,
+    request: settings::ProviderRequest,
+) -> Result<settings::ProviderSettingsView, CommandError> {
+    let view = settings.remove_provider_key(&request.id).await?;
+    let _ = app.emit_to("main", "settings-changed", ());
+    Ok(view)
 }
 
 #[derive(Debug, Deserialize)]
@@ -292,6 +315,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             export_activity,
             settings_providers,
             settings_save_provider,
+            settings_save_provider_key,
+            settings_remove_provider_key,
             settings_remove_provider,
             settings_view,
             settings_save_server,

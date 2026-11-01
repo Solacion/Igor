@@ -9,6 +9,8 @@
     "allow-desktop-status",
     "allow-settings-providers",
     "allow-settings-save-provider",
+    "allow-settings-save-provider-key",
+    "allow-settings-remove-provider-key",
     "allow-settings-remove-provider",
     "allow-settings-view",
     "allow-settings-save-server",

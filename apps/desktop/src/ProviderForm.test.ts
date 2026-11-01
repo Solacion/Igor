@@ -20,7 +20,7 @@ it('requires valid identifiers, a model, a local or HTTPS URL and a key name for
   await wrapper.get('[name=provider-id]').setValue('claude'); await wrapper.get('[name=provider-model]').setValue('model')
   await wrapper.get('[name=provider-url]').setValue('http://example.com/v1')
   await wrapper.get('form').trigger('submit'); await flushPromises()
-  expect(wrapper.text()).toContain('environment variable name'); expect(wrapper.text()).toContain('Use HTTPS')
+  expect(wrapper.text()).toContain('Enter an API key'); expect(wrapper.text()).toContain('Use HTTPS')
   expect(calls).toHaveLength(0); wrapper.unmount()
 })
 it.each(['sk-ant-private-value', '{ env = "IGOR_KEY" }', 'IGOR KEY', 'IGOR_KEY=value'])('shows the backend key-field rejection: %s', async (key) => {
@@ -55,4 +55,54 @@ it('lists the missing variable by name and requires confirmation to remove a pro
   expect(calls.some(call => call.command === 'settings_remove_provider')).toBe(false)
   await wrapper.findAll('button').find(button => button.text() === 'Confirm removal')!.trigger('click'); await flushPromises()
   expect(calls.find(call => call.command === 'settings_remove_provider')?.args).toEqual({ request: { id: 'claude' } }); wrapper.unmount()
+})
+
+it('sends a pasted key once and clears the password before the save completes', async () => {
+  let finish: ((value: unknown) => void) | undefined
+  let payload: any
+  mockIPC((command, args) => {
+    expect(command).toBe('settings_save_provider_key')
+    payload = args
+    return new Promise(resolve => { finish = resolve })
+  })
+  const wrapper = mount(ProviderForm, { props: { original: { ...claude, api_key_env: null } } })
+  const input = wrapper.get<HTMLInputElement>('[name=provider-api-key]')
+  await input.setValue('sk-private-sentinel-20261101')
+  expect(wrapper.text()).not.toContain('sk-private-sentinel-20261101')
+  await wrapper.get('form').trigger('submit')
+  expect(input.element.value).toBe('')
+  expect(payload.request.key).toBe('sk-private-sentinel-20261101')
+  expect(payload.request.entry.api_key_env).toBeNull()
+  finish?.({ providers: [] })
+  await flushPromises()
+  expect(input.element.value).toBe('')
+  expect(wrapper.emitted('saved')).toHaveLength(1)
+  wrapper.unmount()
+})
+it('clears a pasted key even when Keychain rejects the save', async () => {
+  mockIPC(() => { throw { message: 'Could not save the key in Keychain. Try again.' } })
+  const wrapper = mount(ProviderForm, { props: { original: { ...claude, api_key_env: null } } })
+  await wrapper.get('[name=provider-api-key]').setValue('sk-sentinel')
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  expect(wrapper.get<HTMLInputElement>('[name=provider-api-key]').element.value).toBe('')
+  expect(wrapper.text()).toContain('Could not save the key in Keychain')
+  wrapper.unmount()
+})
+it('shows saved Keychain status with Replace and Remove key actions', async () => {
+  const calls: string[] = []
+  const entry = { ...claude, api_key_env: null, api_key_keychain: 'claude' }
+  mockIPC(command => {
+    calls.push(command)
+    return { providers: [{ entry, key_missing: null, key_saved: command !== 'settings_remove_provider_key' }] }
+  })
+  const wrapper = mount(ProviderSettings)
+  await flushPromises()
+  expect(wrapper.text()).toContain('Key saved in Keychain')
+  expect(wrapper.findAll('button').some(button => button.text() === 'Replace')).toBe(true)
+  await wrapper.findAll('button').find(button => button.text() === 'Remove key')!.trigger('click')
+  await flushPromises()
+  expect(calls).toContain('settings_remove_provider_key')
+  expect(wrapper.text()).toContain('No key saved in Keychain')
+  wrapper.unmount()
 })

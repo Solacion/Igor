@@ -43,7 +43,7 @@ pub async fn prepare(
         .provider(&request.provider_id)
         .ok_or(BridgeError::Provider)?;
     let mut secrets = Vec::new();
-    let provider = provider(configured, &mut secrets)?;
+    let provider = provider(configured, &mut secrets, settings)?;
     for server in config.servers() {
         for reference in server.env.values() {
             // Missing server credentials are a connection failure, not a reason to lose
@@ -103,12 +103,10 @@ pub async fn prepare(
 fn provider(
     config: &ProviderConfig,
     secrets: &mut Vec<Secret>,
+    settings: &crate::settings::Settings,
 ) -> Result<Arc<dyn Provider>, BridgeError> {
-    let key = config
-        .api_key
-        .as_ref()
-        .map(|reference| reference.resolve())
-        .transpose()
+    let key = settings
+        .resolve_provider_key(config)
         .map_err(|_| BridgeError::Provider)?;
     if let Some(key) = &key {
         secrets.push(Secret::new(key.expose()));

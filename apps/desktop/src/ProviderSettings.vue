@@ -2,7 +2,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useSettingsStore } from './stores/settings'
 import ProviderForm from './ProviderForm.vue'
-import { removeProvider, type ProviderSettingsView } from './providers'
+import { removeProvider, removeProviderKey, type ProviderSettingsView } from './providers'
 const store = useSettingsStore()
 const view = store.providerSettings
 const unsubscribe = store.subscribe(() => { void refresh(); })
@@ -20,6 +20,14 @@ async function refresh() {
   }
 }
 function saved(next: ProviderSettingsView) { view.value = next; editing.value = null; }
+async function removeKey(id: string) {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
+  try { view.value = await removeProviderKey(id) }
+  catch { error.value = 'Could not remove the Keychain key. Try again.' }
+  finally { busy.value = false }
+}
 async function remove(id: string) {
   if (busy.value)
     return
@@ -51,8 +59,10 @@ onUnmounted(unsubscribe)
         <template v-else>
           <h3>{{ provider.entry.id }}</h3>
           <p>{{ provider.entry.kind }} · {{ provider.entry.model }}</p><p class="literal">{{ provider.entry.base_url ?? 'default' }}</p>
-          <p role="status">{{ provider.key_missing ? `Key variable ${provider.key_missing} is not set` : provider.entry.api_key_env ? 'Key variable is set' : 'No key required' }}</p>
+          <p v-if="provider.entry.api_key_keychain" role="status">{{ provider.key_saved === false ? 'No key saved in Keychain. Replace it to start a session.' : provider.key_saved ? 'Key saved in Keychain' : 'Keychain configured; checked when a session starts.' }}</p>
+          <p v-else role="status">{{ provider.key_missing ? `Key variable ${provider.key_missing} is not set` : provider.entry.api_key_env ? 'Key variable is set' : 'No key required' }}</p>
           <p v-if="provider.entry.api_key_env" class="hint">Variable name: {{ provider.entry.api_key_env }}. Only the variable name is saved, never the value</p>
+          <div v-if="provider.entry.api_key_keychain" class="form-actions"><button type="button" class="secondary" :disabled="busy || editing !== null" @click="editing = provider.entry.id">Replace</button><button type="button" class="secondary danger" :disabled="busy || editing !== null || provider.key_saved === false" @click="removeKey(provider.entry.id)">Remove key</button></div>
           <div class="form-actions"><button class="secondary" :disabled="busy || editing !== null" @click="editing = provider.entry.id">Edit</button><button class="secondary danger" :disabled="busy || editing !== null" @click="removing = provider.entry.id">Remove</button></div>
           <div v-if="removing === provider.entry.id" role="group" :aria-label="`Remove provider ${provider.entry.id}`"><p>Remove {{ provider.entry.id }}? The next message will use another selected provider.</p><button class="danger" :disabled="busy" @click="remove(provider.entry.id)">Confirm removal</button> <button class="secondary" :disabled="busy" @click="removing = null">Cancel</button></div>
         </template>
