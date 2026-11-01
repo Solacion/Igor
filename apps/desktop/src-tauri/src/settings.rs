@@ -8,8 +8,8 @@
 
 mod providers;
 pub use providers::{
-    ProviderRequest, ProviderSettingsView, SaveProviderRequest, key_variable_missing,
-    provider_revision,
+    ProviderRequest, ProviderSettingsView, SaveProviderKeyRequest, SaveProviderRequest,
+    key_variable_missing, provider_revision,
 };
 
 use std::collections::BTreeMap;
@@ -232,13 +232,23 @@ pub struct Settings {
     owned: Mutex<Vec<Arc<McpBackend>>>,
     starts: RwLock<()>,
     closing: AtomicBool,
+    key_store: Arc<dyn igor_config::KeyStore>,
+    key_status: std::sync::Mutex<HashMap<String, bool>>,
+    credential_versions: std::sync::Mutex<HashMap<String, u64>>,
 }
 
 impl Settings {
     /// Settings for the configuration file at `path`; `None` when no location applies.
     pub fn new(path: Option<PathBuf>) -> Self {
+        Self::with_key_store(path, Arc::new(igor_config::SystemKeychain))
+    }
+
+    fn with_key_store(path: Option<PathBuf>, key_store: Arc<dyn igor_config::KeyStore>) -> Self {
         Self {
             path,
+            key_store,
+            key_status: std::sync::Mutex::new(HashMap::new()),
+            credential_versions: std::sync::Mutex::new(HashMap::new()),
             connections: Mutex::new(BTreeMap::new()),
             edits: Mutex::new(()),
             tool_lists: Mutex::new(()),

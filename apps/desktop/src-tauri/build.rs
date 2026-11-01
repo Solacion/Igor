@@ -12,6 +12,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "export_activity",
             "settings_providers",
             "settings_save_provider",
+            "settings_save_provider_key",
+            "settings_remove_provider_key",
             "settings_remove_provider",
             "settings_view",
             "settings_save_server",
