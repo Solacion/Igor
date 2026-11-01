@@ -203,7 +203,7 @@ async function send(wrapper: ReturnType<typeof mount>) {
   await wrapper.get('form').trigger('submit')
   await flushPromises()
 }
-it('speaks each assistant text only after completion, with queued order and a visible stop control', async () => {
+it('speaks each assistant text as it arrives, in order, with a visible stop control', async () => {
   const engine = synthesis()
   localStorage.setItem(voiceStorageKey, JSON.stringify({ enabled: true }))
   const backend = conversationBackend()
@@ -212,18 +212,35 @@ it('speaks each assistant text only after completion, with queued order and a vi
   backend.emit({ event: 'assistant_text', text: '**First** response' })
   backend.emit({ event: 'assistant_text', text: 'Second response' })
   await flushPromises()
-  expect(engine.speak).not.toHaveBeenCalled()
-  backend.finish()
-  await flushPromises()
+  // Heard while the turn is still running, not after it.
   expect(engine.speak.mock.calls[0]?.[0].text).toBe('First response')
   const first = engine.speak.mock.calls[0]![0]
   first.onend?.call(first, new Event('end') as SpeechSynthesisEvent)
   expect(engine.speak.mock.calls[1]?.[0].text).toBe('Second response')
   expect(wrapper.findAll('button').some(button => button.text() === 'Stop speaking')).toBe(true)
+  backend.finish()
+  await flushPromises()
+  expect(engine.speak).toHaveBeenCalledTimes(2)
   await wrapper.findAll('button').find(button => button.text() === 'New conversation')!.trigger('click')
   expect(engine.cancel).toHaveBeenCalled()
   wrapper.unmount()
 })
+
+it('says the model\'s own sentence before a tool runs instead of a stock phrase', async () => {
+  const engine = synthesis()
+  localStorage.setItem(voiceStorageKey, JSON.stringify({ enabled: true }))
+  const backend = conversationBackend()
+  const wrapper = mount(ConversationView)
+  await send(wrapper)
+  backend.emit({ event: 'assistant_text', text: 'Let me check the weather in Hopetown.' })
+  const tool = { server: 'weather', name: 'get_current_weather' }
+  backend.emit({ event: 'tool_call_proposed', call_id: 'c1', tool, arguments: { city: 'Hopetown' } })
+  backend.emit({ event: 'tool_call_started', call_id: 'c1' })
+  await flushPromises()
+  expect(engine.speak.mock.calls.map(call => call[0].text)).toEqual(['Let me check the weather in Hopetown.'])
+  wrapper.unmount()
+})
+
 it('speaks an approval summary but never accepts spoken approval, and suppresses speech after Stop turn', async () => {
   const engine = synthesis()
   localStorage.setItem(voiceStorageKey, JSON.stringify({ enabled: true }))
