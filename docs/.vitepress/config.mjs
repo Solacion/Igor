@@ -32,6 +32,7 @@ export default defineConfig({
         items: [
           { text: 'Overview', link: '/user-guides/' },
           { text: 'Configuration', link: '/user-guides/configuration' },
+          { text: 'RedTill POS server', link: '/user-guides/pos' },
           { text: 'Verify a checkout', link: '/user-guides/verification' },
           { text: 'Evidence template', link: '/verification/run-template' }
         ]
