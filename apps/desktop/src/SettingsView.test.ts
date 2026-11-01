@@ -4,7 +4,7 @@ import { clearMocks, mockIPC } from '@tauri-apps/api/mocks'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App.vue'
 import SettingsView from './SettingsView.vue'
-import type { ServerView, SettingsView as View } from './bridge'
+import type { ServerEntry, ServerView, SettingsView as View } from './bridge'
 
 afterEach(() => {
   clearMocks()
@@ -147,9 +147,10 @@ describe('settings', () => {
       request: {
         replacing: null,
         entry: {
-          id: 'pos', command: '/opt/pos-mcp', args: ['--store', 'main'], cwd: null, env_allowlist: [],
+          id: 'pos', transport: 'stdio', command: '/opt/pos-mcp', args: ['--store', 'main'], cwd: null, env_allowlist: [],
           env: { POS_TOKEN: 'IGOR_POS_TOKEN' }, startup_timeout_ms: null, call_timeout_ms: null,
         },
+        secret: null,
       },
     })
     expect(wrapper.find('form').exists()).toBe(false)
@@ -279,14 +280,47 @@ it('filters a long tool list by name or description', async () => {
   wrapper.unmount()
 })
 
-it('shows a remote server by its URL and does not offer the local server form for it', async () => {
-  backend({ settings_view: () => view([{ ...pos, entry: { ...pos.entry, transport: 'http', url: 'https://mcp.example.com/mcp', command: '', args: [] } }]) })
+it('adds a remote server with its key in the Keychain and edits it without retyping the key', async () => {
+  const remote: ServerView = { ...pos, entry: { ...pos.entry, transport: 'http', url: 'https://mcp.example.com/mcp', command: '', args: [], bearer_token: { keychain: 'mcp-crm' }, headers: { 'X-Tenant': { env: 'IGOR_TENANT' } }, id: 'crm' } }
+  const calls = backend({ settings_view: () => view([]), settings_save_server: () => view([remote]) })
   const wrapper = mount(SettingsView)
   await flushPromises()
+  await wrapper.get('#mcp-servers .section-head button').trigger('click')
+  await wrapper.get('input[value="http"]').setValue(true)
+  await wrapper.get('input[name="id"]').setValue('crm')
+  await wrapper.get('input[name="url"]').setValue('https://mcp.example.com/mcp')
+  await wrapper.get('select[name="auth"]').setValue('bearer')
+  await wrapper.get('form').trigger('submit')
+  expect(wrapper.text()).toContain('Enter the key.')
+  await wrapper.get('input[name="key"]').setValue('tok-ui-sentinel')
+  await wrapper.get('form').trigger('submit')
+  const confirm = wrapper.get('[role="alertdialog"]')
+  expect(confirm.text()).toContain('Connect to this server?')
+  expect(confirm.get('code').text()).toBe('https://mcp.example.com/mcp')
+  await confirm.get('button').trigger('click')
+  await flushPromises()
+  expect(calls.find(call => call.command === 'settings_save_server')?.args).toEqual({
+    request: {
+      replacing: null,
+      entry: {
+        id: 'crm', transport: 'http', url: 'https://mcp.example.com/mcp', headers: {}, bearer_token: { keychain: 'mcp-crm' },
+        command: '', args: [], cwd: null, env_allowlist: [], env: {}, startup_timeout_ms: null, call_timeout_ms: null,
+      },
+      secret: 'tok-ui-sentinel',
+    },
+  })
+  // The card shows the URL; editing keeps the saved key and the hand-written header.
   const card = wrapper.get('.server-card')
   expect(card.get('.command-line').text()).toBe('https://mcp.example.com/mcp')
-  expect(card.findAll('button').map(b => b.text())).not.toContain('Edit')
-  expect(card.findAll('button').map(b => b.text())).toContain('Reconnect')
+  expect(wrapper.text()).not.toContain('tok-ui-sentinel')
+  await card.findAll('button').find(b => b.text() === 'Edit')!.trigger('click')
+  expect(wrapper.get('input[name="key"]').attributes('placeholder')).toContain('Saved in Keychain')
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  const edit = calls.filter(call => call.command === 'settings_save_server').at(-1)?.args as { request: { entry: ServerEntry, secret: string | null } }
+  expect(edit.request.secret).toBeNull()
+  expect(edit.request.entry.bearer_token).toEqual({ keychain: 'mcp-crm' })
+  expect(edit.request.entry.headers).toEqual({ 'X-Tenant': { env: 'IGOR_TENANT' } })
   wrapper.unmount()
 })
 

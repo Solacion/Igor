@@ -95,7 +95,7 @@ headers = { "X-Api-Key" = { env = "IGOR_CRM_KEY" } }
 
 Header and token values are read when the server connects. They never appear in the configuration file, logs, events or exported activity, and IGOR removes them from connection errors. IGOR does not follow redirects, so headers are only ever sent to the configured URL. To store a token in the Keychain, run `security add-generic-password -U -s com.solacion.igor -a crm-mcp -w` and type the token when asked.
 
-OAuth sign-in (#161), legacy HTTP+SSE servers (#162) and editing remote servers in Settings (#163) are planned. Settings lists a remote server by its URL, with its status, tools and permissions, and can reconnect or remove it.
+You can also add and edit remote servers in **Settings → MCP servers**: a key typed there is stored in the Keychain item `mcp-<id>` and referenced as `{ keychain = "mcp-<id>" }`. OAuth sign-in (#161) and legacy HTTP+SSE servers (#162) are planned.
 
 A server can never receive a provider API key. IGOR rejects an allowlist entry or an `env` reference that names a variable used by a provider's `api_key`.
 

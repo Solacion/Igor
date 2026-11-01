@@ -20,8 +20,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use igor_config::{
-    ConfigDocument, ConfigError, HttpServer, PermissionClass, SecretError, ServerConfig,
-    ServerEntry, ServerTransport,
+    ConfigDocument, ConfigError, HttpServer, PermissionClass, Secret, SecretEntry, SecretError,
+    ServerConfig, ServerEntry, ServerTransport,
 };
 use igor_core::tools::{ServerId, ToolBackend, ToolDescriptor};
 use igor_mcp::{HttpServerConfig, McpBackend, StdioServerConfig};
@@ -288,11 +288,20 @@ impl Settings {
         &self,
         server: &ServerConfig,
     ) -> Result<(Arc<McpBackend>, Vec<ToolDescriptor>), StartError> {
+        self.start_with(server, None).await
+    }
+
+    /// Starts `server`, reading `pasted` in place of its Keychain item when given.
+    async fn start_with(
+        &self,
+        server: &ServerConfig,
+        pasted: Option<&PastedKey<'_>>,
+    ) -> Result<(Arc<McpBackend>, Vec<ToolDescriptor>), StartError> {
         let _start = self.starts.read().await;
         if self.closing.load(Ordering::Acquire) {
             return Err("Desktop is closing".into());
         }
-        start(server, &self.owned).await
+        start(server, &self.owned, pasted).await
     }
 
     fn document(&self) -> Result<ConfigDocument, CommandError> {
@@ -455,15 +464,53 @@ impl Settings {
         &self,
         replacing: Option<&str>,
         entry: ServerEntry,
+        secret: Option<String>,
     ) -> Result<SettingsView, CommandError> {
+        let secret = pasted_secret(secret)?;
         let config = {
             let _edit = self.edits.lock().await;
             let mut doc = self.document()?;
             let index = position(&doc, replacing)?;
             doc.put_server(replacing, &entry)
                 .map_err(|problem| CommandError::message(problem.to_string()))?;
-            doc.save()
-                .map_err(|error| CommandError::config(&error, Some(index)))?
+            match &secret {
+                // Validate everything before touching the Keychain, and put the previous key
+                // back if the configuration cannot be saved.
+                Some(secret) => {
+                    let item = server_key_item(&entry.id);
+                    if !entry_names_item(&entry, &item) {
+                        return Err(CommandError::message(
+                            "Choose how the key is sent before saving it.",
+                        ));
+                    }
+                    doc.validate()
+                        .map_err(|error| CommandError::config(&error, Some(index)))?;
+                    let previous = self.key_store.get(&item).map_err(|_| {
+                        CommandError::message("Could not access Keychain. Try again.")
+                    })?;
+                    self.key_store.set(&item, secret).map_err(|_| {
+                        CommandError::message("Could not save the key in Keychain. Try again.")
+                    })?;
+                    match doc.save() {
+                        Ok(config) => config,
+                        Err(error) => {
+                            let restored = match previous {
+                                Some(previous) => self.key_store.set(&item, &previous),
+                                None => self.key_store.delete(&item).map(|_| ()),
+                            };
+                            if restored.is_err() {
+                                return Err(CommandError::message(
+                                    "Configuration save failed and the Keychain key could not be restored. Enter the key again.",
+                                ));
+                            }
+                            return Err(CommandError::config(&error, Some(index)));
+                        }
+                    }
+                }
+                None => doc
+                    .save()
+                    .map_err(|error| CommandError::config(&error, Some(index)))?,
+            }
         };
         if let Some(old) = replacing
             && old != entry.id
@@ -481,11 +528,21 @@ impl Settings {
         {
             let _edit = self.edits.lock().await;
             let mut doc = self.document()?;
+            let item = server_key_item(id);
+            let stored_key = doc
+                .servers()
+                .ok()
+                .and_then(|servers| servers.into_iter().find(|server| server.id == id))
+                .is_some_and(|server| entry_names_item(&server, &item));
             if !doc.remove_server(id) {
                 return Err(CommandError::message(format!("no server {id:?}")));
             }
             doc.save()
                 .map_err(|error| CommandError::config(&error, None))?;
+            // The key typed for this server in Settings goes with it.
+            if stored_key {
+                let _ = self.key_store.delete(&item);
+            }
         }
         self.connections.lock().await.remove(id);
         self.view().await
@@ -513,7 +570,10 @@ impl Settings {
         &self,
         replacing: Option<&str>,
         entry: ServerEntry,
+        secret: Option<String>,
     ) -> Result<Vec<ToolView>, CommandError> {
+        let secret = pasted_secret(secret)?;
+        let item = server_key_item(&entry.id);
         let mut doc = self.document()?;
         let index = position(&doc, replacing)?;
         doc.put_server(replacing, &entry)
@@ -525,8 +585,12 @@ impl Settings {
             .servers()
             .get(index)
             .ok_or_else(|| CommandError::message("the server was not added"))?;
+        let pasted = secret.as_ref().map(|secret| PastedKey {
+            item: &item,
+            secret,
+        });
         let (backend, tools) = self
-            .start(server)
+            .start_with(server, pasted.as_ref())
             .await
             .map_err(|error| CommandError::message(error.detail))?;
         // Keep exit's startup barrier until this temporary connection is fully reaped.
@@ -633,6 +697,7 @@ impl From<&str> for StartError {
 async fn start(
     server: &ServerConfig,
     owned: &Mutex<Vec<Arc<McpBackend>>>,
+    pasted: Option<&PastedKey<'_>>,
 ) -> Result<(Arc<McpBackend>, Vec<ToolDescriptor>), StartError> {
     let id: ServerId = server.id.clone();
     let connected = match &server.transport {
@@ -652,7 +717,7 @@ async fn start(
             McpBackend::connect(id, &stdio).await
         }
         ServerTransport::Http(remote) => {
-            let http = http_config(server, remote).map_err(|e| e.to_string())?;
+            let http = http_config(server, remote, pasted).map_err(|e| e.to_string())?;
             McpBackend::connect_http(id, &http).await
         }
     };
@@ -683,6 +748,10 @@ pub struct SaveServerRequest {
     pub replacing: Option<String>,
     /// The entry to save.
     pub entry: ServerEntry,
+    /// A key typed for a remote server, stored in the Keychain item [`server_key_item`] that the
+    /// entry names. Never echoed back.
+    #[serde(default)]
+    pub secret: Option<String>,
 }
 
 /// Request naming one server.
@@ -705,20 +774,60 @@ pub struct PermissionRequest {
     pub class: Option<PermissionClass>,
 }
 
-/// The connection settings for a remote server, with its header secrets read now.
+/// A typed key, or `None` when none was typed. A blank key is an error.
+fn pasted_secret(secret: Option<String>) -> Result<Option<Secret>, CommandError> {
+    match secret.map(Secret::new) {
+        Some(secret) if secret.expose().trim().is_empty() => Err(CommandError {
+            field: Some("secret".into()),
+            message: "Enter the key.".into(),
+        }),
+        other => Ok(other),
+    }
+}
+
+/// True when the entry's bearer token or a header reads Keychain item `item`.
+fn entry_names_item(entry: &ServerEntry, item: &str) -> bool {
+    let names =
+        |secret: &SecretEntry| matches!(secret, SecretEntry::Keychain(name) if name == item);
+    entry.bearer_token.as_ref().is_some_and(names) || entry.headers.values().any(names)
+}
+
+/// A server key typed into Settings, used in place of its Keychain item before it is saved.
+pub(crate) struct PastedKey<'a> {
+    /// The Keychain item the configuration names.
+    pub item: &'a str,
+    /// The value typed.
+    pub secret: &'a Secret,
+}
+
+/// The Keychain item holding the key typed for server `id` in Settings.
+pub(crate) fn server_key_item(id: &str) -> String {
+    format!("mcp-{id}")
+}
+
+/// The connection settings for a remote server, with its header secrets read now. A secret that
+/// names `pasted`'s Keychain item gets the pasted value instead.
 fn http_config(
     server: &ServerConfig,
     remote: &HttpServer,
+    pasted: Option<&PastedKey<'_>>,
 ) -> Result<HttpServerConfig, SecretError> {
+    let read = |secret: &igor_config::SecretRef| -> Result<String, SecretError> {
+        match pasted {
+            Some(key) if secret.keychain_name() == Some(key.item) => {
+                Ok(key.secret.expose().to_owned())
+            }
+            _ => Ok(secret.resolve()?.expose().to_owned()),
+        }
+    };
     let mut http = HttpServerConfig::new(remote.url.as_str());
     http.startup_timeout = server.startup_timeout;
     http.call_timeout = server.call_timeout;
     for (name, secret) in &remote.headers {
-        http.headers
-            .push((name.clone(), secret.resolve()?.expose().to_owned()));
+        http.headers.push((name.clone(), read(secret)?));
     }
     if let Some(token) = &remote.bearer_token {
-        http.bearer_token = Some(token.resolve()?.expose().to_owned());
+        http.bearer_token = Some(read(token)?);
     }
     Ok(http)
 }
@@ -799,7 +908,7 @@ mod tests {
             env: [("TOKEN".into(), "IGOR_STDERR_SECRET".into())].into(),
             ..ServerEntry::default()
         };
-        let view = settings.save_server(None, entry).await?;
+        let view = settings.save_server(None, entry, None).await?;
         assert!(matches!(view.servers[0].status, Status::Failed { .. }));
         assert_eq!(view.servers[0].recent_stderr, ["x [REDACTED]"]);
         let payload = serde_json::to_string(&view)?;
@@ -822,7 +931,7 @@ mod tests {
         args.extend(entry.args.clone());
         entry.command = "/bin/sh".into();
         entry.args = args;
-        settings.save_server(None, entry.clone()).await?;
+        settings.save_server(None, entry.clone(), None).await?;
         let mut lines = Vec::new();
         for _ in 0..100 {
             lines = settings.view().await?.servers[0].recent_stderr.clone();
@@ -839,7 +948,7 @@ mod tests {
             "SharedBackend must forward stderr"
         );
         entry.args = vec!["-c".into(), "echo 'startup failed' >&2; exit 3".into()];
-        let view = settings.save_server(Some("pos"), entry).await?;
+        let view = settings.save_server(Some("pos"), entry, None).await?;
         assert!(matches!(view.servers[0].status, Status::Failed { .. }));
         assert_eq!(view.servers[0].recent_stderr, ["startup failed"]);
         settings.shutdown().await;
@@ -853,7 +962,9 @@ mod tests {
         let settings = Settings::new(Some(path.clone()));
         assert!(settings.view().await?.servers.is_empty());
 
-        let tools = settings.test_server(None, sales_entry(&server)).await?;
+        let tools = settings
+            .test_server(None, sales_entry(&server), None)
+            .await?;
         let names: Vec<_> = tools.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(
             names,
@@ -865,7 +976,9 @@ mod tests {
         );
         assert!(!path.exists(), "testing must not save");
 
-        let view = settings.save_server(None, sales_entry(&server)).await?;
+        let view = settings
+            .save_server(None, sales_entry(&server), None)
+            .await?;
         let pos = &view.servers[0];
         assert_eq!(pos.status, Status::Connected);
         assert_eq!(pos.tools.len(), 3);
@@ -929,6 +1042,7 @@ mod tests {
                     ],
                     ..ServerEntry::default()
                 },
+                None,
             )
             .await?;
         let view = settings.view().await?;
@@ -971,7 +1085,7 @@ mod tests {
             ..ServerEntry::default()
         };
         let error = settings
-            .save_server(None, entry)
+            .save_server(None, entry, None)
             .await
             .err()
             .ok_or("saved an invalid entry")?;
@@ -985,7 +1099,7 @@ mod tests {
             ..ServerEntry::default()
         };
         let error = settings
-            .test_server(None, entry)
+            .test_server(None, entry, None)
             .await
             .err()
             .ok_or("accepted a bad reference")?;
@@ -1003,8 +1117,64 @@ mod tests {
             command: "/nonexistent/igor-server".to_owned(),
             ..ServerEntry::default()
         };
-        let view = settings.save_server(None, entry).await?;
+        let view = settings.save_server(None, entry, None).await?;
         assert!(matches!(view.servers[0].status, Status::Failed { .. }));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn remote_server_keys_go_to_the_keychain_and_leave_with_the_server() -> TestResult {
+        let store = Arc::new(igor_config::MemoryKeyStore::default());
+        let path = temp_config("remote-key")?;
+        let settings = Settings::with_key_store(Some(path.clone()), store.clone());
+        let entry = ServerEntry {
+            id: "crm".into(),
+            transport: "http".into(),
+            // Nothing listens here, so the connection fails quickly.
+            url: Some("http://127.0.0.1:9/mcp".into()),
+            bearer_token: Some(SecretEntry::Keychain(server_key_item("crm"))),
+            ..ServerEntry::default()
+        };
+        let blank = settings
+            .save_server(None, entry.clone(), Some("  ".to_owned()))
+            .await
+            .err()
+            .ok_or("saved a blank key")?;
+        assert_eq!(blank.message, "Enter the key.");
+        let unnamed = ServerEntry {
+            bearer_token: None,
+            ..entry.clone()
+        };
+        let error = settings
+            .save_server(None, unnamed, Some("tok-remote-sentinel-5d2e".into()))
+            .await
+            .err()
+            .ok_or("saved a key nothing reads")?;
+        assert_eq!(
+            error.message,
+            "Choose how the key is sent before saving it."
+        );
+        assert!(igor_config::KeyStore::get(store.as_ref(), "mcp-crm")?.is_none());
+
+        let view = settings
+            .save_server(None, entry, Some("tok-remote-sentinel-5d2e".into()))
+            .await?;
+        let stored = igor_config::KeyStore::get(store.as_ref(), "mcp-crm")?.ok_or("not stored")?;
+        assert_eq!(stored.expose(), "tok-remote-sentinel-5d2e");
+        let text = std::fs::read_to_string(&path)?;
+        assert!(
+            text.contains(r#"bearer_token = { keychain = "mcp-crm" }"#),
+            "{text}"
+        );
+        assert!(!text.contains("tok-remote-sentinel-5d2e"));
+        assert!(!serde_json::to_string(&view)?.contains("tok-remote-sentinel-5d2e"));
+        assert_eq!(
+            view.servers[0].entry.url.as_deref(),
+            Some("http://127.0.0.1:9/mcp")
+        );
+
+        settings.remove_server("crm").await?;
+        assert!(igor_config::KeyStore::get(store.as_ref(), "mcp-crm")?.is_none());
         Ok(())
     }
 }
@@ -1063,6 +1233,7 @@ mod exit_tests {
                         ],
                         ..ServerEntry::default()
                     },
+                    None,
                 )
                 .await?;
         }

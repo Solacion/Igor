@@ -12,12 +12,19 @@ export async function readDesktopStatus(): Promise<DesktopStatus> {
 
 /** An MCP server entry as written in the configuration file. `env` maps each variable the
  * server receives to the name of the environment variable holding its value, never a value. */
+/** Where a server secret is read from: an environment variable or a Keychain item. */
+export type SecretEntry = { env: string } | { keychain: string }
+
 export interface ServerEntry {
   id: string
   /** `stdio` for a local process, `http` for a remote server. Absent means `stdio`. */
   transport?: 'stdio' | 'http'
-  /** Remote endpoint, for `http`. Its headers and tokens stay in the configuration file. */
+  /** Remote endpoint, for `http`. */
   url?: string | null
+  /** Sent as `Authorization: Bearer <token>`, for `http`. */
+  bearer_token?: SecretEntry | null
+  /** Headers sent with every request, for `http`. */
+  headers?: Record<string, SecretEntry>
   command: string
   args: string[]
   cwd: string | null
@@ -72,12 +79,13 @@ export function readSettings(): Promise<SettingsView> {
   return invoke<SettingsView>('settings_view')
 }
 
-export function saveServer(replacing: string | null, entry: ServerEntry): Promise<SettingsView> {
-  return invoke<SettingsView>('settings_save_server', { request: { replacing, entry } })
+/** `secret` is a key typed for a remote server; the backend stores it in the Keychain. */
+export function saveServer(replacing: string | null, entry: ServerEntry, secret: string | null = null): Promise<SettingsView> {
+  return invoke<SettingsView>('settings_save_server', { request: { replacing, entry, secret } })
 }
 
-export function testServer(replacing: string | null, entry: ServerEntry): Promise<ToolView[]> {
-  return invoke<ToolView[]>('settings_test_server', { request: { replacing, entry } })
+export function testServer(replacing: string | null, entry: ServerEntry, secret: string | null = null): Promise<ToolView[]> {
+  return invoke<ToolView[]>('settings_test_server', { request: { replacing, entry, secret } })
 }
 
 export function removeServer(id: string): Promise<SettingsView> {

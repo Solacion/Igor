@@ -1,15 +1,29 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { isCommandError, saveServer, testServer } from './bridge'
-import type { ServerEntry, SettingsView, ToolView } from './bridge'
+import type { SecretEntry, ServerEntry, SettingsView, ToolView } from './bridge'
 
 const props = defineProps<{ original: ServerEntry | null }>()
 const emit = defineEmits<{ saved: [view: SettingsView]; cancel: [] }>()
 
 const lines = (text: string) => text.split('\n').map((line) => line.trim()).filter(Boolean)
 
+/** The Keychain item that holds the key typed here for server `id`. */
+const keyItem = (id: string) => `mcp-${id}`
+const inKeychain = (secret: SecretEntry | null | undefined, item: string) => !!secret && 'keychain' in secret && secret.keychain === item
+const originalItem = keyItem(props.original?.id ?? '')
+/** The header that carries the key typed here, when the original sends it as a header. */
+const originalHeader = Object.entries(props.original?.headers ?? {}).find(([, secret]) => inKeychain(secret, originalItem))?.[0]
+/** True when a key typed here earlier is in the Keychain, so the field may stay empty. */
+const keySaved = inKeychain(props.original?.bearer_token, originalItem) || !!originalHeader
+
 const form = reactive({
   id: props.original?.id ?? '',
+  transport: (props.original?.transport ?? 'stdio') as 'stdio' | 'http',
+  url: props.original?.url ?? '',
+  auth: (inKeychain(props.original?.bearer_token, originalItem) ? 'bearer' : originalHeader ? 'header' : 'none') as 'none' | 'bearer' | 'header',
+  header: originalHeader ?? 'X-API-Key',
+  key: '',
   command: props.original?.command ?? '',
   args: (props.original?.args ?? []).join('\n'),
   cwd: props.original?.cwd ?? '',
@@ -31,6 +45,7 @@ function formField(field: string | null): string {
   const known: Record<string, string> = {
     id: 'id', command: 'command', args: 'args', cwd: 'cwd', env_allowlist: 'envAllowlist', env: 'env',
     startup_timeout_ms: 'startupTimeout', call_timeout_ms: 'callTimeout',
+    url: 'url', headers: 'header', bearer_token: 'key', secret: 'key',
   }
   return known[key] ?? 'form'
 }
@@ -57,15 +72,36 @@ function entry(): ServerEntry | null {
     }
     env[name] = from
   }
-  const result: ServerEntry = {
+  const common = {
     id: form.id.trim(),
-    command: form.command.trim(),
-    args: lines(form.args),
-    cwd: form.cwd.trim() || null,
-    env_allowlist: lines(form.envAllowlist),
-    env,
     startup_timeout_ms: timeout(form.startupTimeout, 'startupTimeout'),
     call_timeout_ms: timeout(form.callTimeout, 'callTimeout'),
+  }
+  let result: ServerEntry
+  if (form.transport === 'http') {
+    const item = keyItem(common.id)
+    // Hand-written headers stay; the one that carried the typed key is replaced.
+    const headers = Object.fromEntries(Object.entries(props.original?.headers ?? {}).filter(([name]) => name !== originalHeader))
+    if (form.auth === 'header') {
+      if (!form.header.trim()) errors.value.header = 'Enter the header name, such as X-API-Key.'
+      headers[form.header.trim()] = { keychain: item }
+    }
+    if (form.auth !== 'none' && !form.key && !(keySaved && common.id === props.original?.id))
+      errors.value.key = 'Enter the key. It is saved in Keychain, never in the configuration file.'
+    result = {
+      ...common, transport: 'http', url: form.url.trim(), headers,
+      bearer_token: form.auth === 'bearer' ? { keychain: item } : props.original?.bearer_token && !inKeychain(props.original.bearer_token, originalItem) ? props.original.bearer_token : null,
+      command: '', args: [], cwd: null, env_allowlist: [], env: {},
+    }
+  } else {
+    result = {
+      ...common, transport: 'stdio',
+      command: form.command.trim(),
+      args: lines(form.args),
+      cwd: form.cwd.trim() || null,
+      env_allowlist: lines(form.envAllowlist),
+      env,
+    }
   }
   return Object.keys(errors.value).length ? null : result
 }
@@ -75,13 +111,18 @@ function showError(error: unknown) {
   else errors.value = { form: 'Igor could not complete this. Try again in the desktop window.' }
 }
 
-/** The program and arguments that will run, as one line. */
-const commandLine = computed(() => [form.command.trim(), ...lines(form.args)].join(' '))
+/** The program and arguments that will run, or the URL Igor connects to, as one line. */
+const commandLine = computed(() => form.transport === 'http' ? form.url.trim() : [form.command.trim(), ...lines(form.args)].join(' '))
 const runsSomethingNew = computed(() =>
   !props.original ||
-  props.original.command !== form.command.trim() ||
-  props.original.args.join('\n') !== lines(form.args).join('\n') ||
-  (props.original.cwd ?? '') !== form.cwd.trim())
+  (props.original.transport ?? 'stdio') !== form.transport ||
+  (form.transport === 'http'
+    ? (props.original.url ?? '') !== form.url.trim()
+    : props.original.command !== form.command.trim() ||
+      props.original.args.join('\n') !== lines(form.args).join('\n') ||
+      (props.original.cwd ?? '') !== form.cwd.trim()))
+/** The typed key, sent only for a remote server that uses one. */
+const typedKey = () => form.transport === 'http' && form.auth !== 'none' && form.key ? form.key : null
 
 async function test() {
   const value = entry()
@@ -89,7 +130,7 @@ async function test() {
   busy.value = 'test'
   tested.value = null
   try {
-    tested.value = await testServer(props.original?.id ?? null, value)
+    tested.value = await testServer(props.original?.id ?? null, value, typedKey())
   } catch (error) {
     showError(error)
   } finally {
@@ -109,7 +150,8 @@ async function save() {
   if (!value || busy.value) return
   busy.value = 'save'
   try {
-    emit('saved', await saveServer(props.original?.id ?? null, value))
+    emit('saved', await saveServer(props.original?.id ?? null, value, typedKey()))
+    form.key = ''
   } catch (error) {
     showError(error)
   } finally {
@@ -121,13 +163,41 @@ async function save() {
 <template>
   <form class="server-form" novalidate @submit.prevent="requestSave">
     <h3>{{ original ? `Edit ${original.id}` : 'Add an MCP server' }}</h3>
-    <p class="hint">Igor starts the server as a program on this computer and talks to it over standard input and output.</p>
+    <div class="segmented" role="radiogroup" aria-label="Kind of server">
+      <label :class="{ 'is-on': form.transport === 'stdio' }"><input v-model="form.transport" type="radio" name="transport" value="stdio" />Local program</label>
+      <label :class="{ 'is-on': form.transport === 'http' }"><input v-model="form.transport" type="radio" name="transport" value="http" />Remote server</label>
+    </div>
+    <p class="hint">{{ form.transport === 'http' ? 'Igor connects to the server over the internet (Streamable HTTP). Headers are sent only to this URL.' : 'Igor starts the server as a program on this computer and talks to it over standard input and output.' }}</p>
 
     <label>Name
       <input v-model="form.id" name="id" autocomplete="off" spellcheck="false" placeholder="pos" :aria-invalid="!!errors.id" />
       <small class="hint">Lowercase letters, digits, - or _. Tools appear to the model as name__tool.</small>
       <small v-if="errors.id" class="field-error" role="alert">{{ errors.id }}</small>
     </label>
+    <template v-if="form.transport === 'http'">
+      <label>URL
+        <input v-model="form.url" name="url" type="url" autocomplete="off" spellcheck="false" placeholder="https://mcp.example.com/mcp" :aria-invalid="!!errors.url" />
+        <small class="hint">https:// is required, except for this computer (localhost).</small>
+        <small v-if="errors.url" class="field-error" role="alert">{{ errors.url }}</small>
+      </label>
+      <label>Authentication
+        <select v-model="form.auth" name="auth">
+          <option value="none">None</option>
+          <option value="bearer">Bearer token</option>
+          <option value="header">API key header</option>
+        </select>
+      </label>
+      <label v-if="form.auth === 'header'">Header name
+        <input v-model="form.header" name="header" autocomplete="off" spellcheck="false" :aria-invalid="!!errors.header" />
+        <small v-if="errors.header" class="field-error" role="alert">{{ errors.header }}</small>
+      </label>
+      <label v-if="form.auth !== 'none'">{{ form.auth === 'bearer' ? 'Token' : 'Key' }}
+        <input v-model="form.key" name="key" type="password" autocomplete="off" spellcheck="false" :placeholder="keySaved ? 'Saved in Keychain — type to replace' : ''" :aria-invalid="!!errors.key" />
+        <small class="hint">Saved in your Keychain, never in the configuration file.</small>
+        <small v-if="errors.key" class="field-error" role="alert">{{ errors.key }}</small>
+      </label>
+    </template>
+    <template v-else>
     <label>Command
       <input v-model="form.command" name="command" autocomplete="off" spellcheck="false" placeholder="/usr/local/bin/pos-mcp" :aria-invalid="!!errors.command" />
       <small v-if="errors.command" class="field-error" role="alert">{{ errors.command }}</small>
@@ -136,9 +206,11 @@ async function save() {
       <textarea v-model="form.args" name="args" rows="2" spellcheck="false" :aria-invalid="!!errors.args"></textarea>
       <small v-if="errors.args" class="field-error" role="alert">{{ errors.args }}</small>
     </label>
+    </template>
 
     <details class="advanced">
       <summary>Advanced</summary>
+      <template v-if="form.transport === 'stdio'">
       <label>Working directory <span class="optional">optional</span>
         <input v-model="form.cwd" name="cwd" autocomplete="off" spellcheck="false" :aria-invalid="!!errors.cwd" />
         <small v-if="errors.cwd" class="field-error" role="alert">{{ errors.cwd }}</small>
@@ -153,6 +225,7 @@ async function save() {
         <small class="hint">Sets NAME in the server from Igor's environment variable IGOR_VARIABLE. Only the variable name is saved, never the value.</small>
         <small v-if="errors.env" class="field-error" role="alert">{{ errors.env }}</small>
       </label>
+      </template>
       <div class="field-row">
         <label>Startup timeout (ms)
           <input v-model="form.startupTimeout" name="startupTimeout" inputmode="numeric" placeholder="10000" :aria-invalid="!!errors.startupTimeout" />
@@ -174,11 +247,11 @@ async function save() {
     </div>
 
     <div v-if="confirming" class="confirm" role="alertdialog" aria-labelledby="confirm-title">
-      <p id="confirm-title"><strong>Run this program on your computer?</strong></p>
+      <p id="confirm-title"><strong>{{ form.transport === 'http' ? 'Connect to this server?' : 'Run this program on your computer?' }}</strong></p>
       <code class="command-line">{{ commandLine }}</code>
-      <p class="hint">Only add servers you trust. Igor starts this program now and whenever it opens.</p>
+      <p class="hint">Only add servers you trust. Igor {{ form.transport === 'http' ? 'connects' : 'starts this program' }} now and whenever it opens.</p>
       <div class="actions">
-        <button type="button" @click="save">Run and save</button>
+        <button type="button" @click="save">{{ form.transport === 'http' ? 'Connect and save' : 'Run and save' }}</button>
         <button type="button" class="secondary" @click="confirming = false">Back</button>
       </div>
     </div>

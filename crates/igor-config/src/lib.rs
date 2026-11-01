@@ -25,7 +25,7 @@ use std::time::Duration;
 use igor_core::policy::Classification;
 use igor_core::tools::{ServerId, ToolId};
 
-pub use edit::{ConfigDocument, PermissionClass, ProviderEntry, ServerEntry};
+pub use edit::{ConfigDocument, PermissionClass, ProviderEntry, SecretEntry, ServerEntry};
 pub use error::{ConfigError, Origin, Problem};
 pub use keychain::{KEYCHAIN_SERVICE, KeyStore, MemoryKeyStore, SystemKeychain};
 pub use secret::{REDACTED, Secret, SecretError, SecretRef};
