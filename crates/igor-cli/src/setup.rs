@@ -205,6 +205,7 @@ fn http_config(
     remote: &HttpServer,
 ) -> Result<HttpServerConfig, SecretError> {
     let mut http = HttpServerConfig::new(remote.url.as_str());
+    http.legacy_sse = remote.legacy_sse;
     http.startup_timeout = server.startup_timeout;
     http.call_timeout = server.call_timeout;
     for (name, secret) in &remote.headers {

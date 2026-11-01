@@ -45,7 +45,8 @@ pub struct ProviderEntry {
 pub struct ServerEntry {
     /// Host-assigned server id.
     pub id: String,
-    /// `stdio` for a local process or `http` for a remote server.
+    /// `stdio` for a local process, `http` for a remote server, or `sse` for a remote server on
+    /// the legacy HTTP+SSE transport.
     #[serde(default = "stdio_transport")]
     pub transport: String,
     /// Remote endpoint, for `http`.
@@ -592,7 +593,7 @@ fn write_server(table: &mut Table, entry: &ServerEntry) {
         "transport",
         Some(Value::from(entry.transport.as_str())),
     );
-    if entry.transport == "http" {
+    if entry.transport == "http" || entry.transport == "sse" {
         set(table, "url", entry.url.as_deref().map(Value::from));
         set(
             table,

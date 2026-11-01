@@ -115,7 +115,7 @@ pub enum Problem {
     #[error("server id {0:?} is declared more than once")]
     DuplicateServerId(ServerId),
     /// The server transport is not supported.
-    #[error("unsupported transport {0:?}: expected \"stdio\" or \"http\"")]
+    #[error("unsupported transport {0:?}: expected \"stdio\", \"http\" or \"sse\"")]
     UnsupportedTransport(String),
     /// A field that the server's transport does not use.
     #[error("not used with transport \"{0}\"")]

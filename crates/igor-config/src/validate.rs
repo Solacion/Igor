@@ -248,7 +248,10 @@ fn servers(
                 "stdio" => {
                     ServerTransport::Stdio(stdio_server(&mut raw, base_dir, provider_keys, &field)?)
                 }
-                "http" => ServerTransport::Http(http_server(&mut raw, provider_keys, &field)?),
+                "http" => {
+                    ServerTransport::Http(http_server(&mut raw, provider_keys, &field, false)?)
+                }
+                "sse" => ServerTransport::Http(http_server(&mut raw, provider_keys, &field, true)?),
                 _ => {
                     return Err((
                         field("transport"),
@@ -336,7 +339,9 @@ fn http_server(
     raw: &mut RawServer,
     provider_keys: &BTreeSet<&str>,
     field: &impl Fn(&str) -> String,
+    legacy_sse: bool,
 ) -> Result<HttpServer, Invalid> {
+    let transport = if legacy_sse { "sse" } else { "http" };
     for (name, set) in [
         ("command", raw.command.is_some()),
         ("args", !raw.args.is_empty()),
@@ -345,13 +350,13 @@ fn http_server(
         ("env_allowlist", !raw.env_allowlist.is_empty()),
     ] {
         if set {
-            return Err((field(name), Problem::NotForTransport("http")));
+            return Err((field(name), Problem::NotForTransport(transport)));
         }
     }
     let url = raw
         .url
         .take()
-        .ok_or_else(|| (field("url"), Problem::RequiredForTransport("http")))?;
+        .ok_or_else(|| (field("url"), Problem::RequiredForTransport(transport)))?;
     check_base_url(&url).map_err(|problem| (field("url"), problem))?;
     let bearer_token = raw
         .bearer_token
@@ -384,6 +389,9 @@ fn http_server(
             return Err((field("auth"), Problem::UnsupportedAuth(other.to_owned())));
         }
     };
+    if oauth && legacy_sse {
+        return Err((field("auth"), Problem::NotForTransport("sse")));
+    }
     if oauth
         && (bearer_token.is_some()
             || headers
@@ -396,6 +404,7 @@ fn http_server(
         url,
         headers,
         bearer_token,
+        legacy_sse,
         oauth,
     })
 }

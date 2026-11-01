@@ -65,7 +65,7 @@ Each `[[servers]]` entry is a local process (`transport = "stdio"`) or a remote 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `id` | (required) | A unique server id. Tools are identified by server id and tool name. |
-| `transport` | `stdio` | `stdio` or `http`. |
+| `transport` | `stdio` | `stdio`, `http` (Streamable HTTP) or `sse` (the legacy HTTP+SSE transport of MCP 2024-11-05). |
 | `command` | (required for `stdio`) | The program to run. A relative path with a directory part, such as `./bin/server`, resolves against the configuration directory. A bare name, such as `node`, is looked up on `PATH`. |
 | `args` | `[]` | Program arguments. |
 | `cwd` | configuration directory | The working directory. |
@@ -96,7 +96,7 @@ headers = { "X-Api-Key" = { env = "IGOR_CRM_KEY" } }
 
 Header and token values are read when the server connects. They never appear in the configuration file, logs, events or exported activity, and IGOR removes them from connection errors. IGOR does not follow redirects, so headers are only ever sent to the configured URL. To store a token in the Keychain, run `security add-generic-password -U -s com.solacion.igor -a crm-mcp -w` and type the token when asked.
 
-You can also add and edit remote servers in **Settings → MCP servers**: a key typed there is stored in the Keychain item `mcp-<id>` and referenced as `{ keychain = "mcp-<id>" }`. Legacy HTTP+SSE servers (#162) are planned.
+You can also add and edit remote servers in **Settings → MCP servers**: a key typed there is stored in the Keychain item `mcp-<id>` and referenced as `{ keychain = "mcp-<id>" }`. For a server that only speaks the older HTTP+SSE transport, use `transport = "sse"` and set `url` to its event stream, often ending in `/sse`. IGOR posts messages to the endpoint the server names, which must be on the same host. `headers` and `bearer_token` work as for `http`; `auth = "oauth"` does not.
 
 #### OAuth sign-in
 
