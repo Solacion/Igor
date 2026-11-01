@@ -144,6 +144,7 @@ it('persists only local voice preferences, accepts async voice lists and plays a
   engine.getVoices.mockReturnValueOnce([])
   let ipc = 0
   mockIPC(command => {
+    if (command === 'speech_languages') return [{ code: 'en', name: 'english' }, { code: 'de', name: 'german' }]
     if (command === 'speech_status') return notInstalled
     ipc++
     throw new Error('Voice settings must not use native configuration')
@@ -310,4 +311,25 @@ it('sends spoken: true only while voice output is on', async () => {
   await send(written)
   written.unmount()
   expect(requests.map(request => request.spoken)).toEqual([true, false])
+})
+
+it('defaults speech language to Automatic and persists a chosen code across settings mounts', async () => {
+  synthesis()
+  mockIPC(command => command === 'speech_languages'
+    ? [{ code: 'en', name: 'english' }, { code: 'de', name: 'german' }]
+    : notInstalled)
+  let wrapper = mount(VoiceSettings)
+  await flushPromises()
+  expect((wrapper.get('#speech-language').element as HTMLSelectElement).selectedOptions[0]?.text).toBe('Automatic')
+  expect(wrapper.get('#speech-language').text()).toContain('German')
+  await wrapper.get('#speech-language').setValue('de')
+  expect(JSON.parse(localStorage.getItem(voiceStorageKey)!).speechLanguage).toBe('de')
+  wrapper.unmount()
+  wrapper = mount(VoiceSettings)
+  await flushPromises()
+  expect((wrapper.get('#speech-language').element as HTMLSelectElement).value).toBe('de')
+  ;(wrapper.get('#speech-language').element as HTMLSelectElement).selectedIndex = 0
+  await wrapper.get('#speech-language').trigger('change')
+  expect(JSON.parse(localStorage.getItem(voiceStorageKey)!).speechLanguage).toBeNull()
+  wrapper.unmount()
 })

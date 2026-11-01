@@ -18,6 +18,8 @@ igor-config = { path = "../../../crates/igor-config" }
 igor-mcp = { path = "../../../crates/igor-mcp" }
 igor-provider-anthropic = { path = "../../../crates/igor-provider-anthropic" }
 igor-provider-openai = { path = "../../../crates/igor-provider-openai" }
+# Pin the multilingual API until the local core checkout includes PR #139.
+igor-voice = { git = "https://github.com/Solacion/Igor.git", rev = "27657779643a7ea52002d3e2ca52d28748e5c79e" }
 igor-tts = { path = "../../../crates/igor-tts" }
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
 sha2 = "0.11.1"

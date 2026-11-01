@@ -8,6 +8,7 @@ mod sessions;
 mod settings;
 mod shutdown;
 mod speech;
+mod transcription;
 use igor_core::events::{EventEnvelope, TurnOutcome};
 use igor_core::session::EventSink;
 
@@ -291,6 +292,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .manage(Arc::new(DesktopRuntime::default()))
         .manage(Arc::new(shutdown::ExitState::default()))
         .manage(Arc::new(speech::Speech::from_env()))
+        .manage(Arc::new(transcription::SpeechInput::default()))
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // Keep the main window/event loop alive while the exit callback reaps children.
@@ -324,6 +326,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings_remove_server,
             settings_reconnect_server,
             settings_set_permission,
+            transcription::speech_languages,
+            transcription::prepare_transcription,
+            transcription::transcribe,
             speech::speech_status,
             speech::speech_download,
             speech::speech_prepare,

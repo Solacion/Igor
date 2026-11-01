@@ -34,6 +34,7 @@ function backend(handlers: Record<string, (args: any) => unknown>): Calls {
   const calls: Calls = []
   mockIPC((command, args) => {
     calls.push({ command, args })
+    if (command === 'speech_languages') return []
     if (command === 'settings_providers') return { providers: [] }
     if (command === 'speech_status') return { installed: false, download_bytes: 0, default_voice: 'af_heart', voices: [] }
     const handler = handlers[command]
@@ -181,7 +182,7 @@ describe('settings', () => {
     await wrapper.get('textarea[name="env"]').setValue('just-a-value')
     await wrapper.get('form').trigger('submit')
     expect(wrapper.text()).toContain('Write one NAME=IGOR_VARIABLE per line.')
-    expect(calls.filter(call => call.command !== 'settings_providers' && call.command !== 'speech_status').map((call) => call.command)).toEqual(['settings_view'])
+    expect(calls.filter(call => call.command !== 'settings_providers' && call.command !== 'speech_status' && call.command !== 'speech_languages').map((call) => call.command)).toEqual(['settings_view'])
     wrapper.unmount()
   })
 

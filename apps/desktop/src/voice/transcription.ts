@@ -1,16 +1,35 @@
+import { invoke } from '@tauri-apps/api/core'
 /** Desktop capture contract, deliberately independent of AI/model providers. */
 export interface TranscriptionAudio {
   samples: Float32Array
   sampleRate: 16000
   channels: 1
+  language: string | null
+}
+export interface Transcript {
+  text: string
+  language: string | null
+}
+export interface SpeechLanguage {
+  code: string
+  name: string
+}
+export function readSpeechLanguages(): Promise<SpeechLanguage[]> {
+  return invoke<SpeechLanguage[]>('speech_languages')
+}
+export function capitaliseLanguage(name: string): string {
+  return name.charAt(0).toUpperCase() + name.slice(1)
 }
 export interface Transcriber {
   available: boolean
-  transcribe(audio: TranscriptionAudio): Promise<string>
+  prepare?: () => Promise<void>
+  transcribe(audio: TranscriptionAudio): Promise<Transcript>
 }
-/** Replace only this adapter after the native Whisper `transcribe` IPC contract lands.
-* Do not invent an IPC payload or expose an unrestricted native capability in the meantime. */
+/** Native Whisper adapter. Audio stays on this computer. */
 export const transcription: Transcriber = {
-  available: false,
-  async transcribe() { throw new Error('Voice input is not available in this build. You can still type.'); },
+  available: true,
+  prepare: () => invoke<void>('prepare_transcription'),
+  transcribe: audio => invoke<Transcript>('transcribe', {
+    request: { ...audio, samples: Array.from(audio.samples) },
+  }),
 }

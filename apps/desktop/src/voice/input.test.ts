@@ -8,7 +8,7 @@ import { transcription, type TranscriptionAudio } from './transcription'
 import { voiceStorageKey } from './output'
 import ConversationView from '../ConversationView.vue'
 
-vi.mock('./transcription', () => ({ transcription: { available: true, transcribe: vi.fn(async () => 'Voice message') } }))
+vi.mock('./transcription', async importOriginal => ({ ...await importOriginal<typeof import('./transcription')>(), transcription: { available: true, transcribe: vi.fn(async () => ({ text: 'Voice message', language: 'en' })) } }))
 const contexts: MockContext[] = []
 class MockContext {
   static resumeGate: Promise<void> | undefined
@@ -40,7 +40,7 @@ beforeEach(() => {
   getUserMedia = vi.fn(async () => ({ getTracks: () => [{ stop }] }))
   vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } })
   vi.stubGlobal('AudioContext', MockContext)
-  vi.mocked(transcription.transcribe).mockReset().mockResolvedValue('Voice message')
+  vi.mocked(transcription.transcribe).mockReset().mockResolvedValue({ text: 'Voice message', language: 'en' })
   localStorage.clear()
 })
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); clearMocks(); localStorage.clear() })
@@ -67,7 +67,7 @@ it('mixes stereo and resamples to bounded 16 kHz mono Float32 PCM', () => {
   expect(pcm[0]).toBeCloseTo(.3)
   expect(Array.from(resample16k(new Float32Array([NaN, Infinity, 2, -2]), 16000))).toEqual([0, 0, 1, -1])
 })
-it('captures only while held, meters volume, stops every track and passes PCM on release', async () => {
+it('captures until stopped, meters volume, stops every track and passes PCM when finished', async () => {
   const { state, wrapper, onText, onStart } = await host()
   await state.start()
   expect(state.state.value).toBe('Listening')
@@ -115,7 +115,7 @@ it('stops a late permission stream after release and cancels recording on unmoun
   expect(contexts.at(-1)?.close).toHaveBeenCalled()
   expect(state.state.value).toBe('Idle')
 })
-it('holds Space outside controls, ignores editable/interactive targets and cancels on blur', async () => {
+it('toggles Space outside controls, ignores editable/interactive targets and cancels on blur', async () => {
   const { state, wrapper } = await host()
   const input = document.createElement('textarea')
   document.body.append(input)
@@ -136,13 +136,13 @@ it('drops late transcription after navigation and bounds recordings to one minut
   const { state, active, wrapper, onText } = await host()
   await state.start()
   feed()
-  let resolve: (text: string) => void = () => {}
+  let resolve: (text: { text: string, language: string | null }) => void = () => {}
   vi.mocked(transcription.transcribe).mockImplementationOnce(() => new Promise(done => { resolve = done }))
   const release = state.release()
   expect(state.state.value).toBe('Transcribing')
   active.value = false
   await flushPromises()
-  resolve('Late words')
+  resolve({ text: 'Late words', language: 'en' })
   await release
   expect(onText).not.toHaveBeenCalled()
   active.value = true
@@ -159,6 +159,7 @@ it('drops late transcription after navigation and bounds recordings to one minut
 function backend() {
   const sends: string[] = []
   mockIPC((command, args: any) => {
+    if (command === 'speech_languages') return [{ code: 'de', name: 'german' }, { code: 'en', name: 'english' }]
     if (command === 'conversation_providers') return { providers: [{ id: 'any-provider', model: 'any-model', unavailable: null }] }
     if (command === 'settings_view') return { servers: [] }
     if (command === 'start_session') return { session_id: 'one', provider_id: 'any-provider', model: 'any-model', servers: [] }
@@ -166,20 +167,21 @@ function backend() {
   })
   return sends
 }
-it.each([false, true])('fills and automatically sends transcripts unless review=%s', async review => {
+it.each([false, true])('automatically sends a finished recording even with legacy review=%s', async review => {
   localStorage.setItem(voiceStorageKey, JSON.stringify({ reviewBeforeSending: review }))
   const sends = backend()
   const wrapper = mount(ConversationView)
   await flushPromises()
-  await wrapper.get('.mic-button').trigger('pointerdown', { pointerId: 1 })
+  await wrapper.get('.mic-button').trigger('click')
   await flushPromises()
   expect(wrapper.get('.voice-input [role=status]').text()).toBe('Listening')
   expect(wrapper.find('meter').exists()).toBe(true)
   feed()
-  await wrapper.get('.mic-button').trigger('pointerup')
+  await wrapper.get('.mic-button').trigger('click')
   await flushPromises()
-  expect(sends).toEqual(review ? [] : ['Voice message'])
-  expect((wrapper.get('#message').element as HTMLTextAreaElement).value).toBe(review ? 'Voice message' : '')
+  expect(sends).toEqual(['Voice message'])
+  expect(wrapper.text()).not.toContain('Heard in')
+  expect((wrapper.get('#message').element as HTMLTextAreaElement).value).toBe('')
   wrapper.unmount()
 })
 it('speaks an inline permission error when output is enabled and stops speech when talking starts', async () => {
@@ -191,7 +193,7 @@ it('speaks an inline permission error when output is enabled and stops speech wh
   const wrapper = mount(ConversationView)
   await flushPromises()
   getUserMedia.mockRejectedValueOnce(new DOMException('private', 'NotAllowedError'))
-  await wrapper.get('.mic-button').trigger('pointerdown', { pointerId: 1 })
+  await wrapper.get('.mic-button').trigger('click')
   await flushPromises()
   expect(engine.cancel).toHaveBeenCalled()
   expect(wrapper.get('.voice-input [role=alert]').text()).toContain('permission was denied')
@@ -217,11 +219,116 @@ it('stops the granted microphone immediately if released while AudioContext is r
 })
 it('reports an empty recognized transcript instead of sending an empty message', async () => {
   const { state, wrapper, onText } = await host()
-  vi.mocked(transcription.transcribe).mockResolvedValueOnce('  ')
+  vi.mocked(transcription.transcribe).mockResolvedValueOnce({ text: '  ', language: null })
   await state.start()
   feed()
   await state.release()
   expect(state.error.value).toContain('No speech heard')
   expect(onText).not.toHaveBeenCalled()
+  wrapper.unmount()
+})
+
+it('enables talking after native recognition preparation', async () => {
+  let resolve!: () => void
+  let input!: ReturnType<typeof useVoiceInput>
+  const prepare = vi.fn(() => new Promise<void>(done => { resolve = done }))
+  const wrapper = mount(defineComponent({ setup() {
+    input = useVoiceInput({ active: () => true, busy: () => false, onStart: vi.fn(), onText: vi.fn(), onError: vi.fn() }, { available: true, prepare, transcribe: vi.fn() })
+    return () => h('div')
+  } }))
+  expect(input.preparing.value).toBe(true)
+  expect(input.available).toBe(false)
+  resolve()
+  await flushPromises()
+  expect(input.preparing.value).toBe(false)
+  expect(input.available).toBe(true)
+  await input.start()
+  expect(getUserMedia).toHaveBeenCalled()
+  wrapper.unmount()
+})
+
+it('ends a stuck preparation and allows retry', async () => {
+  vi.useFakeTimers()
+  let input!: ReturnType<typeof useVoiceInput>
+  const prepare = vi.fn<() => Promise<void>>().mockImplementationOnce(() => new Promise(() => {})).mockResolvedValue(undefined)
+  const wrapper = mount(defineComponent({ setup() {
+    input = useVoiceInput({ active: () => true, busy: () => false, onStart: vi.fn(), onText: vi.fn(), onError: vi.fn() }, { available: true, prepare, transcribe: vi.fn() })
+    return () => h('div')
+  } }))
+  await vi.advanceTimersByTimeAsync(60000)
+  expect(input.preparing.value).toBe(false)
+  expect(input.available).toBe(false)
+  expect(input.error.value).toContain('too long')
+  await input.prepare()
+  expect(input.available).toBe(true)
+  expect(input.error.value).toBe('')
+  wrapper.unmount()
+})
+
+it('sends once after speech followed by a pause, while tolerating short pauses', async () => {
+  const sends = backend()
+  const wrapper = mount(ConversationView)
+  await flushPromises()
+  await wrapper.get('.mic-button').trigger('click')
+  await flushPromises()
+  expect(wrapper.get('.mic-button').attributes('aria-pressed')).toBe('true')
+  feed()
+  feed(0)
+  await flushPromises()
+  expect(sends).toEqual([])
+  expect(wrapper.get('.mic-button').text()).toBe('Stop listening')
+  feed()
+  for (let i = 0; i < 5; i++) feed(0)
+  await flushPromises()
+  expect(sends).toEqual(['Voice message'])
+  expect(wrapper.text()).not.toContain('Heard in')
+  expect(stop).toHaveBeenCalledOnce()
+  expect(wrapper.get('.mic-button').attributes('aria-pressed')).toBe('false')
+  expect(wrapper.get('.mic-button').text()).toBe('Talk')
+  wrapper.unmount()
+})
+
+it('stops listening without sending when no speech is detected', async () => {
+  const { state, wrapper, onText } = await host()
+  await state.toggle()
+  for (let i = 0; i < 40; i++) feed(0)
+  await flushPromises()
+  expect(state.state.value).toBe('Idle')
+  expect(state.error.value).toContain('No speech heard')
+  expect(stop).toHaveBeenCalledOnce()
+  expect(transcription.transcribe).not.toHaveBeenCalled()
+  expect(onText).not.toHaveBeenCalled()
+  wrapper.unmount()
+})
+
+it('Space toggles listening without stopping on key release or repeated keydown', async () => {
+  const { state, wrapper, onText } = await host()
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space' }))
+  await flushPromises()
+  feed()
+  window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Space' }))
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', repeat: true }))
+  expect(state.state.value).toBe('Listening')
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space' }))
+  await flushPromises()
+  expect(onText).toHaveBeenCalledOnce()
+  expect(state.state.value).toBe('Idle')
+  wrapper.unmount()
+})
+
+it.each(['de', null])('passes speech language %s from preferences to recognition and shows detected German', async language => {
+  localStorage.setItem(voiceStorageKey, JSON.stringify({ speechLanguage: language }))
+  const sends = backend()
+  vi.mocked(transcription.transcribe).mockResolvedValueOnce({ text: 'Guten Tag', language: 'de' })
+  const wrapper = mount(ConversationView)
+  await flushPromises()
+  await wrapper.get('.mic-button').trigger('click')
+  await flushPromises()
+  feed()
+  await wrapper.get('.mic-button').trigger('click')
+  await flushPromises()
+  expect(vi.mocked(transcription.transcribe).mock.calls[0]?.[0].language).toBe(language)
+  expect(sends).toEqual(['Guten Tag'])
+  expect(wrapper.text()).toContain('Heard in German')
   wrapper.unmount()
 })

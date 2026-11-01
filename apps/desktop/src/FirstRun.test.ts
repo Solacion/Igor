@@ -11,6 +11,7 @@ it.each([
   { providers: [{ id: 'local', model: 'model', unavailable: null }], servers: [], link: 'Open Settings', target: 'mcp-servers' },
 ])('explains missing setup and focuses the matching section: $target', async ({ providers, servers, link, target }) => {
   mockIPC(command => {
+    if (command === 'prepare_transcription') return
     if (command === 'desktop_status') return { app_version: 'test', core_event_schema: 1 }
     if (command === 'conversation_providers') return { providers }
     if (command === 'settings_view') return { config_path: '/temporary/config.toml', servers }

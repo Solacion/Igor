@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Igor listens only while you hold the talk button.</string>
+  <string>Igor uses the microphone after you click Talk and stops listening when you finish speaking or click Stop listening.</string>
 </dict>
 </plist>

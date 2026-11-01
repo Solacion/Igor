@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { capitaliseLanguage } from './voice/transcription'
 import { computed } from 'vue'
 import { igorVoicePrefix, useVoiceOutput } from './voice/output'
 const voice = useVoiceOutput()
@@ -10,9 +11,14 @@ const percent = computed(() => download.value?.total ? Math.floor(download.value
   <section id="voice" aria-labelledby="voice-title">
     <h2 id="voice-title">Voice</h2>
     <p class="hint">Voice is independent of your AI provider. These preferences stay on this device and are never saved in igor.toml.</p>
+    <label for="speech-language">Speech language</label>
+    <select id="speech-language" v-model="preferences.speechLanguage">
+      <option :value="null">Automatic</option>
+      <option v-for="language in voice.speechLanguages.value" :key="language.code" :value="language.code">{{ capitaliseLanguage(language.name) }}</option>
+    </select>
+    <p v-if="voice.languageError.value" role="status">{{ voice.languageError.value }} <button type="button" @click="voice.refreshLanguages">Try again</button></p>
     <label><input v-model="preferences.enabled" type="checkbox" :disabled="!voice.supported.value" /> Speak Igor's replies</label>
-    <label><input v-model="preferences.reviewBeforeSending" type="checkbox" /> Review before sending</label>
-    <p class="hint">Leave recorded text in the composer for review instead of sending it automatically.</p>
+    <p class="hint">Click Talk to speak. Your message sends automatically when you finish speaking.</p>
     <div v-if="igor && !igor.installed" class="igor-voice-download">
       <p class="hint">Igor has its own natural voice. It runs on this Mac with no extra service, after a one-time download of {{ megabytes(igor.download_bytes) }} MB. Until then, Igor uses the basic macOS voices.</p>
       <template v-if="download">
