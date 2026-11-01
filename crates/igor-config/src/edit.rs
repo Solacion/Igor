@@ -48,10 +48,15 @@ pub struct ServerEntry {
     /// `stdio` for a local process or `http` for a remote server.
     #[serde(default = "stdio_transport")]
     pub transport: String,
-    /// Remote endpoint, for `http`. Headers and tokens are kept in the file as written and are
-    /// not part of the entry.
+    /// Remote endpoint, for `http`.
     #[serde(default)]
     pub url: Option<String>,
+    /// Sent as `Authorization: Bearer <token>`, for `http`.
+    #[serde(default)]
+    pub bearer_token: Option<SecretEntry>,
+    /// Headers sent with every request, for `http`.
+    #[serde(default)]
+    pub headers: BTreeMap<String, SecretEntry>,
     /// Program to run, as written: relative paths resolve against the configuration directory.
     /// Empty for a remote server.
     #[serde(default)]
@@ -77,6 +82,37 @@ pub struct ServerEntry {
     pub call_timeout_ms: Option<u64>,
 }
 
+/// Where a server secret is read from, as written: `{ env = "NAME" }` or `{ keychain = "item" }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum SecretEntry {
+    /// An environment variable of IGOR's process.
+    Env(String),
+    /// An item in the login Keychain under [`crate::KEYCHAIN_SERVICE`].
+    Keychain(String),
+}
+
+impl SecretEntry {
+    /// The entry for a reference written in the file, or `None` for a literal or malformed one.
+    fn from_value(value: &toml::Value) -> Option<Self> {
+        let table = value.as_table()?;
+        match (table.get("env"), table.get("keychain")) {
+            (Some(name), None) => Some(Self::Env(name.as_str()?.to_owned())),
+            (None, Some(name)) => Some(Self::Keychain(name.as_str()?.to_owned())),
+            _ => None,
+        }
+    }
+
+    fn value(&self) -> Value {
+        let mut reference = InlineTable::new();
+        match self {
+            Self::Env(name) => reference.insert("env", Value::from(name.as_str())),
+            Self::Keychain(name) => reference.insert("keychain", Value::from(name.as_str())),
+        };
+        Value::InlineTable(reference)
+    }
+}
+
 fn stdio_transport() -> String {
     "stdio".to_owned()
 }
@@ -87,6 +123,8 @@ impl Default for ServerEntry {
             id: String::new(),
             transport: stdio_transport(),
             url: None,
+            bearer_token: None,
+            headers: BTreeMap::new(),
             command: String::new(),
             args: Vec::new(),
             cwd: None,
@@ -151,6 +189,9 @@ struct ListedServer {
     #[serde(default = "stdio_transport")]
     transport: String,
     url: Option<String>,
+    bearer_token: Option<toml::Value>,
+    #[serde(default)]
+    headers: BTreeMap<String, toml::Value>,
     #[serde(default)]
     command: String,
     #[serde(default)]
@@ -218,6 +259,17 @@ impl ConfigDocument {
                 id: server.id,
                 transport: server.transport,
                 url: server.url,
+                bearer_token: server
+                    .bearer_token
+                    .as_ref()
+                    .and_then(SecretEntry::from_value),
+                headers: server
+                    .headers
+                    .iter()
+                    .filter_map(|(name, value)| {
+                        Some((name.clone(), SecretEntry::from_value(value)?))
+                    })
+                    .collect(),
                 command: server.command,
                 args: server.args,
                 cwd: server.cwd,
@@ -531,8 +583,20 @@ fn write_server(table: &mut Table, entry: &ServerEntry) {
         Some(Value::from(entry.transport.as_str())),
     );
     if entry.transport == "http" {
-        // Headers and the bearer token are not part of the entry and stay as written.
         set(table, "url", entry.url.as_deref().map(Value::from));
+        set(
+            table,
+            "bearer_token",
+            entry.bearer_token.as_ref().map(SecretEntry::value),
+        );
+        let headers = (!entry.headers.is_empty()).then(|| {
+            let mut headers = InlineTable::new();
+            for (name, secret) in &entry.headers {
+                headers.insert(name, secret.value());
+            }
+            Value::InlineTable(headers)
+        });
+        set(table, "headers", headers);
         for key in ["command", "args", "cwd", "env_allowlist", "env"] {
             set(table, key, None);
         }
@@ -988,6 +1052,37 @@ command = "./sales-server"
         let err = doc.validate().err().ok_or("accepted a bad Keychain name")?;
         assert_eq!(err.field(), Some("providers[1].api_key"));
         assert!(!err.to_string().contains("sk-ant"));
+        Ok(())
+    }
+
+    #[test]
+    fn writes_a_remote_server_with_its_secret_references() -> TestResult {
+        let mut doc = document("remote-write", "")?;
+        let entry = ServerEntry {
+            id: "crm".to_owned(),
+            transport: "http".to_owned(),
+            url: Some("https://mcp.example.com/mcp".to_owned()),
+            bearer_token: Some(SecretEntry::Keychain("mcp-crm".to_owned())),
+            headers: BTreeMap::from([(
+                "X-Tenant".to_owned(),
+                SecretEntry::Env("IGOR_CRM_TENANT".to_owned()),
+            )]),
+            ..ServerEntry::default()
+        };
+        doc.put_server(None, &entry)?;
+        let config = doc.save()?;
+        let text = std::fs::read_to_string(doc.path())?;
+        assert!(
+            text.contains(r#"bearer_token = { keychain = "mcp-crm" }"#),
+            "{text}"
+        );
+        assert!(!text.contains("command"), "{text}");
+        let remote = config.servers()[0].http().ok_or("not http")?;
+        assert_eq!(
+            remote.headers["X-Tenant"].env_var(),
+            Some("IGOR_CRM_TENANT")
+        );
+        assert_eq!(ConfigDocument::open(doc.path())?.servers()?, [entry]);
         Ok(())
     }
 

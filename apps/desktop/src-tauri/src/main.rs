@@ -235,7 +235,7 @@ async fn settings_save_server(
     request: SaveServerRequest,
 ) -> Result<SettingsView, CommandError> {
     let result = settings
-        .save_server(request.replacing.as_deref(), request.entry)
+        .save_server(request.replacing.as_deref(), request.entry, request.secret)
         .await?;
     let _ = app.emit_to("main", "settings-changed", ());
     Ok(result)
@@ -247,7 +247,7 @@ async fn settings_test_server(
     request: SaveServerRequest,
 ) -> Result<Vec<ToolView>, CommandError> {
     settings
-        .test_server(request.replacing.as_deref(), request.entry)
+        .test_server(request.replacing.as_deref(), request.entry, request.secret)
         .await
 }
 

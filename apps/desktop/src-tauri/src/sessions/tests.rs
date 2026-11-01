@@ -542,6 +542,7 @@ async fn real_fixture_approve_once_deny_never_and_settings_snapshot_is_leased() 
                     ],
                     ..ServerEntry::default()
                 },
+                None,
             )
             .await?;
         settings
@@ -750,6 +751,7 @@ async fn list_changed_refreshes_real_fixture_before_next_turn_and_keeps_new_tool
                 ],
                 ..ServerEntry::default()
             },
+            None,
         )
         .await?;
     settings
