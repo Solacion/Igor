@@ -9,6 +9,7 @@ use thiserror::Error;
 pub const USAGE: &str =
     "usage: igor-cli [--config <path>] --provider <scripted|ID> [--script <path>] [--export <path>]
                 [--spoken] [REQUEST...]
+       igor-cli [--config <path>] --sign-in <SERVER>
 
   --config <path>    configuration file (default: $IGOR_CONFIG, then ~/Library/Application Support/igor/config.toml)
   --provider <name>  `scripted` for an offline scripted model (needs --script), or a provider id
@@ -16,6 +17,8 @@ pub const USAGE: &str =
   --script <path>    JSON script of model turns for the scripted provider
   --export <path>    write the session's events to this file as redacted JSON Lines
   --spoken           ask for short replies suited to being read aloud
+  --sign-in <server> sign in to a remote server configured with auth = \"oauth\" in the browser,
+                     keep its tokens in the Keychain, and exit
   REQUEST            the first message; read as one line from stdin when omitted
 
 After each turn, igor-cli reads a follow-up message from stdin. An empty line or end of input
@@ -48,19 +51,34 @@ pub struct Args {
     pub request: Option<String>,
 }
 
+/// What to do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Command {
+    /// Hold a conversation.
+    Chat(Args),
+    /// Sign in to an OAuth-protected server and exit.
+    SignIn {
+        /// Explicit configuration path.
+        config: Option<PathBuf>,
+        /// The server's id.
+        server: String,
+    },
+}
+
 /// The arguments could not be parsed.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("{0}")]
 pub struct ArgsError(pub String);
 
 /// Parses arguments, excluding the program name.
-pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Args, ArgsError> {
+pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, ArgsError> {
     let mut args = args.into_iter();
     let mut config = None;
     let mut provider = None;
     let mut script = None;
     let mut export = None;
     let mut spoken = false;
+    let mut sign_in = None;
     let mut words = Vec::new();
     while let Some(arg) = args.next() {
         let text = arg
@@ -76,6 +94,12 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Args, ArgsError
             "--script" => script = Some(PathBuf::from(value("--script")?)),
             "--export" => export = Some(PathBuf::from(value("--export")?)),
             "--spoken" => spoken = true,
+            "--sign-in" => {
+                let server = value("--sign-in")?
+                    .into_string()
+                    .map_err(|_| ArgsError("--sign-in must be valid UTF-8".to_owned()))?;
+                sign_in = Some(server);
+            }
             "--provider" => {
                 let name = value("--provider")?;
                 let name = name
@@ -94,6 +118,15 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Args, ArgsError
             _ => words.push(text),
         }
     }
+    if let Some(server) = sign_in {
+        if provider.is_some() || script.is_some() || export.is_some() || spoken || !words.is_empty()
+        {
+            return Err(ArgsError(
+                "--sign-in takes only --config and the server id".to_owned(),
+            ));
+        }
+        return Ok(Command::SignIn { config, server });
+    }
     let provider = match (provider.as_deref(), script) {
         (Some("scripted"), Some(script)) => ProviderChoice::Scripted { script },
         (Some("scripted"), None) => {
@@ -108,13 +141,13 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Args, ArgsError
         (None, _) => return Err(ArgsError("--provider is required".to_owned())),
     };
     let request = (!words.is_empty()).then(|| words.join(" "));
-    Ok(Args {
+    Ok(Command::Chat(Args {
         config,
         provider,
         export,
         spoken,
         request,
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -122,7 +155,30 @@ mod tests {
     use super::*;
 
     fn parse_strs(args: &[&str]) -> Result<Args, ArgsError> {
-        parse(args.iter().map(OsString::from))
+        match parse(args.iter().map(OsString::from))? {
+            Command::Chat(args) => Ok(args),
+            other => Err(ArgsError(format!("not a chat: {other:?}"))),
+        }
+    }
+
+    #[test]
+    fn sign_in_takes_a_server_and_nothing_else() -> Result<(), ArgsError> {
+        let parsed = parse(["--config", "igor.toml", "--sign-in", "crm"].map(OsString::from))?;
+        assert_eq!(
+            parsed,
+            Command::SignIn {
+                config: Some(PathBuf::from("igor.toml")),
+                server: "crm".to_owned()
+            }
+        );
+        for bad in [
+            &["--sign-in"][..],
+            &["--sign-in", "crm", "--provider", "lm"],
+            &["--sign-in", "crm", "hello"],
+        ] {
+            assert!(parse(bad.iter().map(OsString::from)).is_err(), "{bad:?}");
+        }
+        Ok(())
     }
 
     #[test]

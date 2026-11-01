@@ -57,6 +57,9 @@ pub struct ServerEntry {
     /// Headers sent with every request, for `http`.
     #[serde(default)]
     pub headers: BTreeMap<String, SecretEntry>,
+    /// `oauth` when the remote server needs sign-in.
+    #[serde(default)]
+    pub auth: Option<String>,
     /// Program to run, as written: relative paths resolve against the configuration directory.
     /// Empty for a remote server.
     #[serde(default)]
@@ -125,6 +128,7 @@ impl Default for ServerEntry {
             url: None,
             bearer_token: None,
             headers: BTreeMap::new(),
+            auth: None,
             command: String::new(),
             args: Vec::new(),
             cwd: None,
@@ -196,6 +200,7 @@ struct ListedServer {
     bearer_token: Option<toml::Value>,
     #[serde(default)]
     headers: BTreeMap<String, toml::Value>,
+    auth: Option<String>,
     #[serde(default)]
     command: String,
     #[serde(default)]
@@ -274,6 +279,7 @@ impl ConfigDocument {
                         Some((name.clone(), SecretEntry::from_value(value)?))
                     })
                     .collect(),
+                auth: server.auth,
                 command: server.command,
                 args: server.args,
                 cwd: server.cwd,
@@ -601,11 +607,12 @@ fn write_server(table: &mut Table, entry: &ServerEntry) {
             Value::InlineTable(headers)
         });
         set(table, "headers", headers);
+        set(table, "auth", entry.auth.as_deref().map(Value::from));
         for key in ["command", "args", "cwd", "env_allowlist", "env"] {
             set(table, key, None);
         }
     } else {
-        for key in ["url", "headers", "bearer_token"] {
+        for key in ["url", "headers", "bearer_token", "auth"] {
             set(table, key, None);
         }
         write_stdio(table, entry);

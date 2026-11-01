@@ -19,7 +19,7 @@ use std::io::Write;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
-use igor_config::{Config, ConfigError, ProviderConfig, ProviderKind, SecretError};
+use igor_config::{Config, ConfigError, HttpServer, ProviderConfig, ProviderKind, SecretError};
 use igor_core::CancellationToken;
 use igor_core::events::TurnOutcome;
 use igor_core::ids::SequentialIds;
@@ -33,7 +33,7 @@ use thiserror::Error;
 use tokio::io::BufReader;
 use tokio::sync::mpsc;
 
-use crate::args::{Args, ProviderChoice, USAGE};
+use crate::args::{Args, Command, ProviderChoice, USAGE};
 
 const EXIT_STARTUP: u8 = 1;
 const EXIT_FAILED: u8 = 2;
@@ -45,6 +45,9 @@ const EXIT_GAPS: u8 = 5;
 enum CliError {
     #[error("{0}\n{USAGE}")]
     Usage(#[from] args::ArgsError),
+    /// Signing in to a server failed.
+    #[error("{0}")]
+    SignIn(String),
     #[error("no configuration file: pass --config or set IGOR_CONFIG")]
     NoConfig,
     #[error(transparent)]
@@ -84,7 +87,10 @@ async fn main() -> ExitCode {
 }
 
 async fn run() -> Result<ExitCode, CliError> {
-    let args = args::parse(std::env::args_os().skip(1))?;
+    let args = match args::parse(std::env::args_os().skip(1))? {
+        Command::Chat(args) => args,
+        Command::SignIn { config, server } => return sign_in(config.as_deref(), &server).await,
+    };
     let config_path = igor_config::config_path(args.config.as_deref()).ok_or(CliError::NoConfig)?;
     let config = Config::load(&config_path)?;
     let (provider, scripted) = build_provider(&args, &config)?;
@@ -205,6 +211,41 @@ type Providers = (Arc<dyn Provider>, Option<Arc<ScriptedProvider>>);
 
 /// The scripted provider, or a configured Anthropic or OpenAI-compatible (such as LM Studio)
 /// provider.
+/// Signs in to `server` in the browser and keeps its tokens in the Keychain.
+async fn sign_in(config: Option<&std::path::Path>, server: &str) -> Result<ExitCode, CliError> {
+    let config_path = igor_config::config_path(config).ok_or(CliError::NoConfig)?;
+    let config = Config::load(&config_path)?;
+    let found = config
+        .servers()
+        .iter()
+        .find(|configured| configured.id.as_str() == server)
+        .ok_or_else(|| CliError::SignIn(format!("no server {server:?} is configured")))?;
+    let remote = found.http().filter(|remote| remote.oauth).ok_or_else(|| {
+        CliError::SignIn(format!("server {server} does not use auth = \"oauth\""))
+    })?;
+    let store = Arc::new(setup::KeychainTokens(HttpServer::oauth_item(&found.id)));
+    igor_mcp::sign_in(
+        &remote.url,
+        store,
+        |page| {
+            println!(
+                "Opening your browser to sign in to {server}. If it does not open, visit:\n{page}"
+            );
+            // The page was checked to be https (or this machine) before it reaches here.
+            std::process::Command::new("open")
+                .arg(page)
+                .status()
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        },
+        igor_mcp::DEFAULT_SIGN_IN_TIMEOUT,
+    )
+    .await
+    .map_err(|error| CliError::SignIn(error.to_string()))?;
+    println!("Signed in to {server}.");
+    Ok(ExitCode::SUCCESS)
+}
+
 fn build_provider(args: &Args, config: &Config) -> Result<Providers, CliError> {
     match &args.provider {
         ProviderChoice::Scripted { script } => {

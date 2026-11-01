@@ -289,6 +289,7 @@ fn stdio_server(
         ("url", raw.url.is_some()),
         ("headers", !raw.headers.is_empty()),
         ("bearer_token", raw.bearer_token.is_some()),
+        ("auth", raw.auth.is_some()),
     ] {
         if set {
             return Err((field(name), Problem::NotForTransport("stdio")));
@@ -376,10 +377,26 @@ fn http_server(
         let reference = server_secret(secret, provider_keys, path)?;
         headers.insert(name, reference);
     }
+    let oauth = match raw.auth.take().as_deref() {
+        None => false,
+        Some("oauth") => true,
+        Some(other) => {
+            return Err((field("auth"), Problem::UnsupportedAuth(other.to_owned())));
+        }
+    };
+    if oauth
+        && (bearer_token.is_some()
+            || headers
+                .keys()
+                .any(|name: &String| name.eq_ignore_ascii_case("authorization")))
+    {
+        return Err((field("auth"), Problem::OAuthWithAuthorization));
+    }
     Ok(HttpServer {
         url,
         headers,
         bearer_token,
+        oauth,
     })
 }
 

@@ -215,6 +215,16 @@ pub struct HttpServer {
     pub headers: BTreeMap<String, SecretRef>,
     /// Sent as `Authorization: Bearer <token>`, read at connect time.
     pub bearer_token: Option<SecretRef>,
+    /// The server needs OAuth sign-in (`auth = "oauth"`). Hosts keep its tokens in the Keychain
+    /// item [`HttpServer::oauth_item`].
+    pub oauth: bool,
+}
+
+impl HttpServer {
+    /// The Keychain item that holds the OAuth tokens of server `id`.
+    pub fn oauth_item(id: &ServerId) -> String {
+        format!("mcp-{id}-oauth")
+    }
 }
 
 /// Host tool classifications, keyed by server and exact tool name.

@@ -20,11 +20,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use igor_config::{
-    ConfigDocument, ConfigError, HttpServer, PermissionClass, Secret, SecretEntry, SecretError,
-    ServerConfig, ServerEntry, ServerTransport,
+    ConfigDocument, ConfigError, HttpServer, KeyStore, PermissionClass, Secret, SecretEntry,
+    SecretError, ServerConfig, ServerEntry, ServerTransport,
 };
 use igor_core::tools::{ServerId, ToolBackend, ToolDescriptor};
-use igor_mcp::{HttpServerConfig, McpBackend, StdioServerConfig};
+use igor_mcp::{ConnectError, HttpServerConfig, McpBackend, StdioServerConfig, TokenStore};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{Mutex, RwLock};
@@ -39,6 +39,8 @@ pub enum Status {
     Starting,
     /// Connected; tools listed.
     Connected,
+    /// The server needs OAuth sign-in: none was done, or it expired.
+    SignInNeeded,
     /// The last attempt failed.
     Failed {
         /// Why. Diagnostic text without secret values.
@@ -301,7 +303,7 @@ impl Settings {
         if self.closing.load(Ordering::Acquire) {
             return Err("Desktop is closing".into());
         }
-        start(server, &self.owned, pasted).await
+        start(server, &self.owned, pasted, &self.key_store).await
     }
 
     fn document(&self) -> Result<ConfigDocument, CommandError> {
@@ -387,9 +389,14 @@ impl Settings {
         let mut servers = Vec::new();
         let mut unavailable_servers = Vec::new();
         for server in config.servers() {
-            if let Some(connection) = connections.get(server.id.as_str())
-                && let Status::Failed { detail } = connection.current_status()
-            {
+            let unavailable = connections.get(server.id.as_str()).and_then(|connection| {
+                match connection.current_status() {
+                    Status::Failed { detail } => Some(detail),
+                    Status::SignInNeeded => Some("needs the operator to sign in".to_owned()),
+                    _ => None,
+                }
+            });
+            if let Some(detail) = unavailable {
                 server.id.hash(&mut hash);
                 detail.hash(&mut hash);
                 unavailable_servers.push(igor_core::session::UnavailableServer {
@@ -539,9 +546,12 @@ impl Settings {
             }
             doc.save()
                 .map_err(|error| CommandError::config(&error, None))?;
-            // The key typed for this server in Settings goes with it.
+            // The key typed for this server in Settings, and its sign-in, go with it.
             if stored_key {
                 let _ = self.key_store.delete(&item);
+            }
+            if let Ok(server) = ServerId::new(id) {
+                let _ = self.key_store.delete(&HttpServer::oauth_item(&server));
             }
         }
         self.connections.lock().await.remove(id);
@@ -615,6 +625,54 @@ impl Settings {
         self.view().await
     }
 
+    /// Signs in to the OAuth server `id` in the browser, then reconnects it. `open` shows the
+    /// authorization page.
+    pub async fn sign_in(
+        &self,
+        id: &str,
+        open: impl FnOnce(&str) -> Result<(), String>,
+    ) -> Result<SettingsView, CommandError> {
+        let server = self.oauth_server(id)?;
+        let remote = server
+            .http()
+            .ok_or_else(|| CommandError::message("This server does not use sign-in."))?;
+        igor_mcp::sign_in(
+            &remote.url,
+            oauth_tokens(&server, &self.key_store),
+            open,
+            igor_mcp::DEFAULT_SIGN_IN_TIMEOUT,
+        )
+        .await
+        .map_err(|error| CommandError::message(error.to_string()))?;
+        self.connect(&server).await;
+        self.view().await
+    }
+
+    /// Forgets the OAuth tokens of server `id` and disconnects it.
+    pub async fn sign_out(&self, id: &str) -> Result<SettingsView, CommandError> {
+        let server = self.oauth_server(id)?;
+        self.key_store
+            .delete(&HttpServer::oauth_item(&server.id))
+            .map_err(|_| CommandError::message("Could not remove the sign-in from Keychain."))?;
+        self.connections.lock().await.remove(id);
+        self.connect(&server).await;
+        self.view().await
+    }
+
+    /// The configured server `id`, which must use OAuth.
+    fn oauth_server(&self, id: &str) -> Result<ServerConfig, CommandError> {
+        let config = self
+            .document()?
+            .validate()
+            .map_err(|error| CommandError::config(&error, None))?;
+        config
+            .servers()
+            .iter()
+            .find(|s| s.id.as_str() == id && s.http().is_some_and(|remote| remote.oauth))
+            .cloned()
+            .ok_or_else(|| CommandError::message("This server does not use sign-in."))
+    }
+
     /// Connects every configured server. Problems are recorded as statuses.
     pub async fn connect_all(&self) {
         let Ok(doc) = self.document() else {
@@ -643,6 +701,7 @@ impl Settings {
                 descriptors: tools,
                 startup_stderr: Vec::new(),
             },
+            Err(error) if error.sign_in => Connection::new(Status::SignInNeeded),
             Err(error) => {
                 let mut connection = Connection::new(Status::Failed {
                     detail: error.detail,
@@ -676,6 +735,8 @@ fn position(doc: &ConfigDocument, replacing: Option<&str>) -> Result<usize, Comm
 struct StartError {
     detail: String,
     stderr: Vec<String>,
+    /// The server needs OAuth sign-in.
+    sign_in: bool,
 }
 
 impl From<String> for StartError {
@@ -683,6 +744,7 @@ impl From<String> for StartError {
         Self {
             detail,
             stderr: Vec::new(),
+            sign_in: false,
         }
     }
 }
@@ -698,6 +760,7 @@ async fn start(
     server: &ServerConfig,
     owned: &Mutex<Vec<Arc<McpBackend>>>,
     pasted: Option<&PastedKey<'_>>,
+    key_store: &Arc<dyn KeyStore>,
 ) -> Result<(Arc<McpBackend>, Vec<ToolDescriptor>), StartError> {
     let id: ServerId = server.id.clone();
     let connected = match &server.transport {
@@ -717,13 +780,17 @@ async fn start(
             McpBackend::connect(id, &stdio).await
         }
         ServerTransport::Http(remote) => {
-            let http = http_config(server, remote, pasted).map_err(|e| e.to_string())?;
+            let mut http = http_config(server, remote, pasted).map_err(|e| e.to_string())?;
+            if remote.oauth {
+                http.oauth = Some(oauth_tokens(server, key_store));
+            }
             McpBackend::connect_http(id, &http).await
         }
     };
     let backend = connected.map_err(|error| StartError {
         detail: error.to_string(),
         stderr: error.stderr().to_vec(),
+        sign_in: matches!(error, ConnectError::SignInNeeded { .. }),
     })?;
     let backend = Arc::new(backend);
     owned.lock().await.push(backend.clone());
@@ -734,6 +801,7 @@ async fn start(
             return Err(StartError {
                 detail: error.to_string(),
                 stderr: backend.recent_stderr(),
+                sign_in: false,
             });
         }
     };
@@ -772,6 +840,42 @@ pub struct PermissionRequest {
     pub tool: String,
     /// New class; `None` leaves the tool unclassified.
     pub class: Option<PermissionClass>,
+}
+
+/// Where server `server`'s OAuth tokens are kept: its Keychain item, read through `key_store`.
+fn oauth_tokens(server: &ServerConfig, key_store: &Arc<dyn KeyStore>) -> Arc<dyn TokenStore> {
+    Arc::new(KeychainTokens {
+        store: Arc::clone(key_store),
+        item: HttpServer::oauth_item(&server.id),
+    })
+}
+
+/// A server's OAuth tokens in one Keychain item.
+struct KeychainTokens {
+    store: Arc<dyn KeyStore>,
+    item: String,
+}
+
+impl TokenStore for KeychainTokens {
+    fn load(&self) -> Result<Option<String>, String> {
+        self.store
+            .get(&self.item)
+            .map(|found| found.map(|secret| secret.expose().to_owned()))
+            .map_err(|error| error.to_string())
+    }
+
+    fn save(&self, value: &str) -> Result<(), String> {
+        self.store
+            .set(&self.item, &Secret::new(value.to_owned()))
+            .map_err(|error| error.to_string())
+    }
+
+    fn clear(&self) -> Result<(), String> {
+        self.store
+            .delete(&self.item)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
 }
 
 /// A typed key, or `None` when none was typed. A blank key is an error.
@@ -1175,6 +1279,42 @@ mod tests {
 
         settings.remove_server("crm").await?;
         assert!(igor_config::KeyStore::get(store.as_ref(), "mcp-crm")?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_oauth_server_without_tokens_needs_sign_in_and_takes_them_when_removed() -> TestResult
+    {
+        let store = Arc::new(igor_config::MemoryKeyStore::default());
+        let settings = Settings::with_key_store(Some(temp_config("oauth")?), store.clone());
+        let entry = ServerEntry {
+            id: "crm".into(),
+            transport: "http".into(),
+            url: Some("http://127.0.0.1:9/mcp".into()),
+            auth: Some("oauth".into()),
+            ..ServerEntry::default()
+        };
+        let view = settings.save_server(None, entry, None).await?;
+        assert_eq!(view.servers[0].status, Status::SignInNeeded);
+        let snapshot = settings.snapshot().await?;
+        assert_eq!(
+            snapshot.unavailable_servers[0].reason,
+            "needs the operator to sign in"
+        );
+
+        igor_config::KeyStore::set(
+            store.as_ref(),
+            "mcp-crm-oauth",
+            &Secret::new("{}".to_owned()),
+        )?;
+        settings.remove_server("crm").await?;
+        assert!(igor_config::KeyStore::get(store.as_ref(), "mcp-crm-oauth")?.is_none());
+        let error = settings
+            .sign_out("crm")
+            .await
+            .err()
+            .ok_or("signed out of a removed server")?;
+        assert_eq!(error.message, "This server does not use sign-in.");
         Ok(())
     }
 }
