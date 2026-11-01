@@ -9,14 +9,19 @@ export const retryPhrases = ['Hmm, that didn\'t work. Let me try something else.
 const failedStates = new Set(['Failed', 'Server reported an error'])
 export function useConversationSpeech(conversation: ReturnType<typeof useConversation>, voice: VoiceOutput) {
   let firstMessage = 0
-  let completed = false
+  /** True once Igor has said something of its own this turn, such as "Let me check the weather". */
+  let saidSomething = false
+  /** Speaks Igor's new messages as they arrive, so a sentence before a tool call is heard while
+   * the tool runs rather than after the turn. */
   function flushReplies() {
-    if (!completed || suppressed)
+    if (suppressed)
       return
     const messages = conversation.messages.value
     for (const message of messages.slice(firstMessage)) {
-      if (message.role === 'Igor')
+      if (message.role === 'Igor' && message.text.trim()) {
         voice.speak(message.text)
+        saidSomething = true
+      }
     }
     firstMessage = messages.length
   }
@@ -42,8 +47,8 @@ export function useConversationSpeech(conversation: ReturnType<typeof useConvers
       if (retried === 1)
         voice.speak(pick(retryPhrases))
     }
-    // After an on-screen approval the operator knows what is happening; stay quiet.
-    else if (!looked && now.started > baseline.started && conversation.approvals.value.length === approvalsAtStart) {
+    // Stay quiet after an on-screen approval, or when Igor already said what it is doing.
+    else if (!looked && !saidSomething && now.started > baseline.started && conversation.approvals.value.length === approvalsAtStart) {
       looked = true
       voice.speak(pick(lookingPhrases))
     }
@@ -51,7 +56,7 @@ export function useConversationSpeech(conversation: ReturnType<typeof useConvers
   watch(conversation.busy, (busy, previous) => {
     if (busy) {
       voice.stop()
-      completed = false
+      saidSomething = false
       firstMessage = conversation.messages.value.length
       suppressed = false
       baseline = progress.value
@@ -60,7 +65,6 @@ export function useConversationSpeech(conversation: ReturnType<typeof useConvers
       retried = 0
     }
     else if (previous) {
-      completed = true
       flushReplies()
     }
   }, { flush: 'sync' })
