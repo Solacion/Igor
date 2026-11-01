@@ -33,7 +33,7 @@ shasum -a 256 "$DIR"/model.onnx "$DIR"/voices.bin "$DIR"/tokens.txt
 # 6ebb6bb288f20f3ae8d004d3c2ca27697da27c037d75e81a60e2a6a663f95425  tokens.txt
 ```
 
-Measured on an Apple M4 Max: loading takes about 0.3 seconds; the first sentence of a reply is ready in about 0.2 seconds, and a reply is produced about seven times faster than it is spoken. IGOR speaks a reply sentence by sentence, so playback starts almost at once. Text is turned into phonemes with espeak-ng, so names and numbers are spoken rather than skipped, though an unusual name may be pronounced the English way.
+Measured on an Apple M4 Max: loading takes about 0.3 seconds; the first sentence of a reply is ready in about 0.2 seconds, and a reply is produced about seven times faster than it is spoken. IGOR speaks a reply sentence by sentence, so playback starts almost at once. Text is turned into phonemes with espeak-ng, so names and numbers are spoken rather than skipped, though an unusual name may be pronounced the English way. Units written after a number are spoken as words: `km/h` as "kilometres per hour", `°C` as "degrees", `%` as "percent", and likewise for `mph`, `m/s`, `mm`, `cm`, `km`, `kg`, `hPa`, `kW`, `kWh` and `ms`.
 
 To hear a voice:
 

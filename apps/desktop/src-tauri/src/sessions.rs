@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use igor_core::CancellationToken;
 use igor_core::approval::{ActionHash, Decision};
 use igor_core::events::{EventEnvelope, TurnOutcome};
-use igor_core::session::{EventSink, Session, SessionHandle};
+use igor_core::session::{EventSink, ReplyStyle, Session, SessionHandle};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -66,6 +66,9 @@ pub struct SessionRequest {
 pub struct MessageRequest {
     pub session_id: String,
     pub text: String,
+    /// Replies will be read aloud: the model answers in short, plain spoken sentences.
+    #[serde(default)]
+    pub spoken: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -294,6 +297,11 @@ impl DesktopRuntime {
         };
         // This async lock serializes only the core conversation, not approvals or cancellation.
         let mut session = session.lock().await;
+        session.set_reply_style(if request.spoken {
+            ReplyStyle::Spoken
+        } else {
+            ReplyStyle::Written
+        });
         if let Some(settings) = settings {
             let stale = session.stale_servers();
             let snapshot = tokio::select! {

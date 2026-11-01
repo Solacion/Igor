@@ -9,7 +9,12 @@
 //! Synthesis is blocking CPU work. On Apple silicon the first sentence takes about 0.2 seconds
 //! and a reply is produced about seven times faster than it is spoken. Hosts run it off their
 //! async runtime, for example with `spawn_blocking`, and speak a reply sentence by sentence
-//! ([`sentences`]) so playback starts quickly.
+//! ([`sentences`]) so playback starts quickly. Units written after numbers, such as `km/h` and
+//! `°C`, are spoken as words ([`speakable`]).
+
+mod speakable;
+
+pub use speakable::speakable;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
@@ -274,7 +279,7 @@ impl Synthesizer {
     pub fn synthesize(&self, text: &str, voice: &str, speed: f32) -> Result<Speech, SpeechError> {
         let voice = find_voice(voice).ok_or_else(|| SpeechError::UnknownVoice(voice.to_owned()))?;
         let text = validate(text, speed)?;
-        let phonemes = phonemize(text, voice.accent)?;
+        let phonemes = phonemize(&speakable(text), voice.accent)?;
         let config = GenerationConfig {
             sid: voice.speaker,
             speed,

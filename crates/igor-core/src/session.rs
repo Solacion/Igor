@@ -60,11 +60,15 @@ When igor_ask_operator is available, ask with it and continue once you have the 
 end your reply with a question.";
 
 /// Added to the system prompt when replies are spoken: see [`ReplyStyle::Spoken`].
-pub const SPOKEN_REPLY_PROMPT: &str = "- Your replies are read aloud by a speech synthesiser. Answer \
-in one to three short sentences of plain spoken English. Do not use Markdown, lists, tables, code, \
-emoji or symbols. Write amounts so they read naturally, such as \"2,268 rand\" or \"12 cases\". \
-Mention identifiers such as SKUs only when the operator needs them. When you propose an action \
-that needs approval, say in one sentence what it will do; the operator approves on screen.";
+pub const SPOKEN_REPLY_PROMPT: &str = "- Your replies are read aloud by a speech synthesiser, so \
+talk the way a helpful person would on the phone. Answer in one to three short, friendly sentences \
+of plain spoken English, giving the main point first. Do not use Markdown, headings, lists, tables, \
+code, emoji or symbols. Turn tool results into natural speech instead of reading them out: pick \
+what the operator asked about and leave out the rest. Round numbers the way people say them, and \
+write units as words, such as \"about 27 degrees\", \"wind of 9 kilometres per hour\", \"2,268 \
+rand\" or \"12 cases\". Mention identifiers such as SKUs only when the operator needs them. When \
+you propose an action that needs approval, say in one sentence what it will do; the operator \
+approves on screen.";
 
 /// How the operator receives replies.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
