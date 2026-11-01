@@ -19,6 +19,7 @@ igor-provider-openai = { path = "../igor-provider-openai" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+jiff = "0.2.38"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-std", "io-util", "signal", "sync"] }
 
 [lints]

@@ -12,7 +12,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -121,6 +121,10 @@ pub struct SessionConfig {
     pub unavailable_servers: Vec<UnavailableServer>,
     /// How replies reach the operator. Change between turns with [`Session::set_reply_style`].
     pub reply_style: ReplyStyle,
+    /// The operator's local offset from UTC, in seconds east. When set, the system prompt states
+    /// today's local date and weekday, read from the system clock for each model request, so the
+    /// model does not guess dates. `None` leaves the date out.
+    pub utc_offset_seconds: Option<i32>,
 }
 
 /// A configured server that is not available.
@@ -148,6 +152,7 @@ impl Default for SessionConfig {
             ask_operator: true,
             unavailable_servers: Vec::new(),
             reply_style: ReplyStyle::Written,
+            utc_offset_seconds: None,
         }
     }
 }
@@ -957,6 +962,13 @@ is called again"
     /// The host system prompt, plus a note on unavailable servers when there are any.
     fn system_prompt(&self) -> String {
         let mut prompt = self.config.system_prompt.clone();
+        if let Some(offset) = self.config.utc_offset_seconds {
+            prompt.push_str(&format!(
+                "\n- Today is {} in the operator's local time. Work out relative dates, such as \
+today, yesterday or last week, from this date.",
+                local_day(SystemTime::now(), offset)
+            ));
+        }
         if self.config.reply_style == ReplyStyle::Spoken {
             prompt.push('\n');
             prompt.push_str(SPOKEN_REPLY_PROMPT);
@@ -1051,6 +1063,56 @@ fn render_output(output: ToolOutput) -> String {
         parts.push(structured.to_string());
     }
     parts.join("\n")
+}
+
+/// The local calendar day at `now`, `offset` seconds east of UTC, as "Sunday 1 November 2026".
+pub(crate) fn local_day(now: SystemTime, offset: i32) -> String {
+    const WEEKDAYS: [&str; 7] = [
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+    ];
+    const MONTHS: [&str; 12] = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+    let seconds = match now.duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(since) => i64::try_from(since.as_secs()).unwrap_or(i64::MAX),
+        Err(before) => -i64::try_from(before.duration().as_secs()).unwrap_or(i64::MAX),
+    };
+    let days = (seconds.saturating_add(i64::from(offset))).div_euclid(86_400);
+    // Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
+    let shifted = days + 719_468;
+    let era = shifted.div_euclid(146_097);
+    let day_of_era = shifted.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    let weekday = WEEKDAYS[usize::try_from(days.rem_euclid(7)).unwrap_or(0)];
+    let month_name = MONTHS[usize::try_from(month - 1).unwrap_or(0)];
+    format!("{weekday} {day} {month_name} {year}")
 }
 
 #[cfg(test)]

@@ -250,6 +250,7 @@ fn session_config(config: &Config) -> Result<SessionConfig, LimitTooSmall> {
         max_model_requests: limits.max_iterations,
         tool_timeout: limits.tool_call_timeout,
         result_limit: ResultSizeLimit::new(limits.max_result_bytes)?,
+        utc_offset_seconds: Some(jiff::Zoned::now().offset().seconds()),
         ..SessionConfig::default()
     })
 }
