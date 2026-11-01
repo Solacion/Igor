@@ -9,8 +9,8 @@
 //! Synthesis is blocking CPU work. On Apple silicon the first sentence takes about 0.2 seconds
 //! and a reply is produced about seven times faster than it is spoken. Hosts run it off their
 //! async runtime, for example with `spawn_blocking`, and speak a reply sentence by sentence
-//! ([`sentences`]) so playback starts quickly. Units written after numbers, such as `km/h` and
-//! `°C`, are spoken as words ([`speakable`]).
+//! ([`sentences`]) so playback starts quickly. Units, amounts, `#` and dates next to numbers, such
+//! as `km/h`, `°C`, `R125`, `#2241` and `Oct 26`, are spoken as words ([`speakable`]).
 
 mod speakable;
 

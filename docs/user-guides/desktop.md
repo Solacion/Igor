@@ -248,7 +248,7 @@ With voice enabled, Igor talks like a person rather than reading a report:
 
 - Each message asks the model for spoken replies: one to three short, friendly sentences with the main point first, rounded numbers and units as words, and no Markdown, lists or tables. With voice off, replies are written for the screen as before. The style follows the setting from one message to the next in the same conversation.
 - When Igor starts using tools it says so, such as “Let me have a look for you.”, so you are not left in silence. If a tool fails it says “Hmm, that didn't work. Let me try something else.” once per turn. It stays quiet about tools you have just approved on screen.
-- Igor's voice says units written after numbers as words, so `9.1 km/h` is “9.1 kilometres per hour” and `26.6°C` is “26.6 degrees”, whatever the model writes.
+- Igor's voice says units, amounts, numbers and dates as words, so `9.1 km/h` is “9.1 kilometres per hour”, `26.6°C` is “26.6 degrees”, `R125` is “125 rand”, `Order #2241` is “Order number 2241” and `Oct 26` is “October 26”, whatever the model writes.
 
 Igor speaks assistant text after the turn finishes and reads approval requests as a short summary ending “Approve on screen?”. Markdown formatting is removed before speaking. Approval still requires the on-screen button and exact action hash; speech never grants approval. **Stop speaking**, **Stop turn** and **New conversation** cancel speech. Voice works independently of the selected AI provider; LM Studio with local Whisper is the intended voice test setup. Available system voices and native playback still need a manual check on the demo Mac.
 
