@@ -1914,10 +1914,12 @@ name = "igor-mcp"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures-util",
  "igor-core",
  "reqwest",
  "rmcp",
  "serde_json",
+ "sse-stream",
  "thiserror 2.0.21",
  "tokio",
  "url",

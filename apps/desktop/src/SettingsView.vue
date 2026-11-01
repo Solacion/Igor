@@ -120,7 +120,7 @@ function statusText(server: ServerView): string {
   }
 }
 function commandLine(entry: ServerEntry): string {
-  if (entry.transport === 'http')
+  if (entry.transport === 'http' || entry.transport === 'sse')
     return entry.url ?? ''
   return [entry.command, ...entry.args].join(' ')
 }

@@ -17,8 +17,9 @@ export type SecretEntry = { env: string } | { keychain: string }
 
 export interface ServerEntry {
   id: string
-  /** `stdio` for a local process, `http` for a remote server. Absent means `stdio`. */
-  transport?: 'stdio' | 'http'
+  /** `stdio` for a local process, `http` for a remote server, `sse` for a remote server on the
+   * legacy HTTP+SSE transport. Absent means `stdio`. */
+  transport?: 'stdio' | 'http' | 'sse'
   /** Remote endpoint, for `http`. */
   url?: string | null
   /** Sent as `Authorization: Bearer <token>`, for `http`. */

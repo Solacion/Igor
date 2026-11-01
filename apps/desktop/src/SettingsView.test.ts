@@ -363,3 +363,22 @@ it('signs in to an OAuth server from its card and offers sign-out once connected
   wrapper.unmount()
 })
 
+it('adds a legacy SSE server with the protocol choice', async () => {
+  const calls = backend({ settings_view: () => view([]), settings_save_server: () => view([]) })
+  const wrapper = mount(SettingsView)
+  await flushPromises()
+  await wrapper.get('#mcp-servers .section-head button').trigger('click')
+  await wrapper.get('input[value="http"]').setValue(true)
+  await wrapper.get('input[name="id"]').setValue('old')
+  await wrapper.get('input[name="url"]').setValue('https://mcp.example.com/sse')
+  await wrapper.get('select[name="protocol"]').setValue('sse')
+  expect(wrapper.find('option[value="oauth"]').exists()).toBe(false)
+  await wrapper.get('form').trigger('submit')
+  await wrapper.get('[role="alertdialog"] button').trigger('click')
+  await flushPromises()
+  const save = calls.find(call => call.command === 'settings_save_server')?.args as { request: { entry: ServerEntry } }
+  expect(save.request.entry.transport).toBe('sse')
+  expect(save.request.entry.url).toBe('https://mcp.example.com/sse')
+  wrapper.unmount()
+})
+

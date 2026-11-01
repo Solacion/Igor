@@ -184,7 +184,8 @@ impl ServerConfig {
 pub enum ServerTransport {
     /// A local child process speaking MCP over stdin and stdout (`transport = "stdio"`).
     Stdio(StdioServer),
-    /// A remote server over Streamable HTTP (`transport = "http"`).
+    /// A remote server over Streamable HTTP (`transport = "http"`), or the legacy HTTP+SSE
+    /// transport (`transport = "sse"`, see [`HttpServer::legacy_sse`]).
     Http(HttpServer),
 }
 
@@ -215,6 +216,8 @@ pub struct HttpServer {
     pub headers: BTreeMap<String, SecretRef>,
     /// Sent as `Authorization: Bearer <token>`, read at connect time.
     pub bearer_token: Option<SecretRef>,
+    /// The server speaks the legacy HTTP+SSE transport of MCP 2024-11-05 (`transport = "sse"`).
+    pub legacy_sse: bool,
     /// The server needs OAuth sign-in (`auth = "oauth"`). Hosts keep its tokens in the Keychain
     /// item [`HttpServer::oauth_item`].
     pub oauth: bool,
