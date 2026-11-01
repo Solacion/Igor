@@ -62,7 +62,7 @@ end your reply with a question.";
 /// Added to the system prompt when replies are spoken: see [`ReplyStyle::Spoken`].
 pub const SPOKEN_REPLY_PROMPT: &str = "- Your replies are read aloud by a speech synthesiser, so \
 talk the way a helpful person would on the phone. Answer in one to three short, friendly sentences \
-of plain spoken English, giving the main point first. Do not use Markdown, headings, lists, tables, \
+of plain spoken language, in the language the operator used, giving the main point first. Do not use Markdown, headings, lists, tables, \
 code, emoji or symbols. Turn tool results into natural speech instead of reading them out: pick \
 what the operator asked about and leave out the rest. Round numbers the way people say them, and \
 write units as words, such as \"about 27 degrees\", \"wind of 9 kilometres per hour\", \"2,268 \

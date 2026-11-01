@@ -14,10 +14,19 @@ use igor_voice::{SAMPLE_RATE, Transcriber};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-/// Synthesises `text` with macOS `say` as 16 kHz mono 32-bit float samples.
-fn speak(text: &str, dir: &Path) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+/// Synthesises `text` with macOS `say`, in the system voice or `voice`, as 16 kHz mono 32-bit
+/// float samples.
+fn speak(
+    text: &str,
+    voice: Option<&str>,
+    dir: &Path,
+) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
     let wav = dir.join("speech.wav");
-    let status = Command::new("say")
+    let mut say = Command::new("say");
+    if let Some(voice) = voice {
+        say.args(["-v", voice]);
+    }
+    let status = say
         .args([
             "--file-format=WAVE",
             &format!("--data-format=LEF32@{SAMPLE_RATE}"),
@@ -67,7 +76,7 @@ fn transcribes_synthesised_requests() -> TestResult {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("igor-voice-live");
     std::fs::create_dir_all(&dir)?;
     let started = Instant::now();
-    let transcriber = Transcriber::load(&model)?;
+    let mut transcriber = Transcriber::load(&model)?;
     println!("model loaded in {:?}", started.elapsed());
 
     let cases = [
@@ -81,7 +90,7 @@ fn transcribes_synthesised_requests() -> TestResult {
         ),
     ];
     for (spoken, expected) in cases {
-        let audio = speak(spoken, &dir)?;
+        let audio = speak(spoken, None, &dir)?;
         let started = Instant::now();
         let transcript = transcriber.transcribe(&audio)?;
         let seconds = audio.len() as f64 / SAMPLE_RATE as f64;
@@ -94,7 +103,23 @@ fn transcribes_synthesised_requests() -> TestResult {
         for word in expected {
             assert!(heard.contains(word), "missing {word:?} in {heard:?}");
         }
+        assert_eq!(transcript.language.as_deref(), Some("en"));
     }
+
+    // German, detected, then with the language fixed. Anna is a standard macOS voice.
+    let audio = speak(
+        "Wie viele Kisten Cola hat der Lieferant auf Lager?",
+        Some("Anna"),
+        &dir,
+    )?;
+    let detected = transcriber.transcribe(&audio)?;
+    println!("German, detected: {detected:?}");
+    assert_eq!(detected.language.as_deref(), Some("de"));
+    assert!(detected.text.to_lowercase().contains("lager"));
+    transcriber.set_language(Some("de"))?;
+    let fixed = transcriber.transcribe(&audio)?;
+    assert_eq!(fixed.language.as_deref(), Some("de"));
+    assert!(fixed.text.to_lowercase().contains("lieferant"));
 
     let silence = vec![0.0; SAMPLE_RATE * 2];
     assert!(transcriber.transcribe(&silence)?.is_empty());
