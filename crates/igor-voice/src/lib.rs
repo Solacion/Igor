@@ -5,6 +5,10 @@
 //! runs: the host loads a Whisper model file once and passes recorded speech as 16 kHz mono
 //! samples. See [`DEFAULT_MODEL_FILE`] for the recommended model.
 //!
+//! Whisper is multilingual. By default it detects the language of each recording; a host can fix
+//! one with [`Transcriber::set_language`], which avoids misdetection on short clips. Each
+//! [`Transcript`] says which language was used, and [`languages`] lists them for a picker.
+//!
 //! Transcription is blocking, GPU-bound work that takes from a fraction of a second to a few
 //! seconds: hosts run it off their async runtime, for example with `spawn_blocking`.
 //!
@@ -54,6 +58,9 @@ pub enum VoiceError {
     /// The recording is longer than [`MAX_AUDIO_SECONDS`].
     #[error("the recording is longer than {MAX_AUDIO_SECONDS} seconds")]
     TooLong,
+    /// The language is not one Whisper knows.
+    #[error("Whisper does not support the language {0:?}")]
+    UnsupportedLanguage(String),
     /// A sample is not a finite number.
     #[error("the recording contains invalid samples")]
     InvalidSamples,
@@ -67,6 +74,30 @@ pub enum VoiceError {
 pub struct Transcript {
     /// The recognised text, trimmed. Empty when no speech was heard.
     pub text: String,
+    /// Code of the language Whisper transcribed, such as `en` or `af`: the fixed language, or
+    /// the detected one. `None` when no speech was heard.
+    pub language: Option<String>,
+}
+
+/// A language Whisper can transcribe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Language {
+    /// Code, such as `en`, as passed to [`Transcriber::set_language`].
+    pub code: &'static str,
+    /// English name in lower case, as Whisper gives it, such as `english`.
+    pub name: &'static str,
+}
+
+/// Every language Whisper can transcribe, in Whisper's order (English first).
+pub fn languages() -> Vec<Language> {
+    (0..=whisper_rs::get_lang_max_id())
+        .filter_map(|id| {
+            Some(Language {
+                code: whisper_rs::get_lang_str(id)?,
+                name: whisper_rs::get_lang_str_full(id)?,
+            })
+        })
+        .collect()
 }
 
 impl Transcript {
@@ -79,7 +110,8 @@ impl Transcript {
 /// A loaded Whisper model. Load once and reuse: loading takes about a second.
 pub struct Transcriber {
     context: WhisperContext,
-    language: String,
+    /// Fixed language code; `None` detects the language of each recording.
+    language: Option<String>,
 }
 
 impl std::fmt::Debug for Transcriber {
@@ -91,7 +123,8 @@ impl std::fmt::Debug for Transcriber {
 }
 
 impl Transcriber {
-    /// Loads the model at `model` for English speech. whisper.cpp's own logging is silenced.
+    /// Loads the model at `model`, detecting the language of each recording. whisper.cpp's own
+    /// logging is silenced.
     pub fn load(model: &Path) -> Result<Self, VoiceError> {
         if !model.is_file() {
             return Err(VoiceError::ModelMissing(model.to_path_buf()));
@@ -108,8 +141,20 @@ impl Transcriber {
             .map_err(|err| load_error(err.to_string()))?;
         Ok(Self {
             context,
-            language: "en".to_owned(),
+            language: None,
         })
+    }
+
+    /// Fixes the language of later recordings to `code`, such as `en` (or its English name,
+    /// such as `English`), or detects it for each recording with `None`.
+    pub fn set_language(&mut self, code: Option<&str>) -> Result<(), VoiceError> {
+        self.language = code.map(language_code).transpose()?;
+        Ok(())
+    }
+
+    /// The fixed language code, or `None` when the language is detected.
+    pub fn language(&self) -> Option<&str> {
+        self.language.as_deref()
     }
 
     /// Transcribes `audio`: mono samples at [`SAMPLE_RATE`], in the range -1.0 to 1.0.
@@ -117,12 +162,13 @@ impl Transcriber {
         if is_silent(validate(audio)?) {
             return Ok(Transcript {
                 text: String::new(),
+                language: None,
             });
         }
         let failed = |err: whisper_rs::WhisperError| VoiceError::Transcribe(err.to_string());
         let mut state = self.context.create_state().map_err(failed)?;
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_language(Some(&self.language));
+        params.set_language(Some(self.language.as_deref().unwrap_or("auto")));
         params.set_n_threads(threads());
         params.set_no_context(true);
         params.set_no_timestamps(true);
@@ -147,8 +193,27 @@ impl Transcriber {
                 text.push_str(part);
             }
         }
-        Ok(Transcript { text })
+        let language = if text.is_empty() {
+            None
+        } else {
+            whisper_rs::get_lang_str(state.full_lang_id_from_state()).map(str::to_owned)
+        };
+        Ok(Transcript { text, language })
     }
+}
+
+/// The code of a language Whisper knows, given its code or English name, such as `de` or
+/// `German`. whisper.cpp treats `auto` as detection; callers ask for detection with `None`.
+fn language_code(language: &str) -> Result<String, VoiceError> {
+    let language = language.trim().to_ascii_lowercase();
+    let unsupported = || VoiceError::UnsupportedLanguage(language.clone());
+    if language == "auto" {
+        return Err(unsupported());
+    }
+    let id = whisper_rs::get_lang_id(&language).ok_or_else(unsupported)?;
+    whisper_rs::get_lang_str(id)
+        .map(str::to_owned)
+        .ok_or_else(unsupported)
 }
 
 /// Checks `audio` is usable: not empty, not too long, finite samples.
@@ -191,6 +256,27 @@ mod tests {
             Err(VoiceError::InvalidSamples)
         ));
         assert!(validate(&[0.0, 0.5, -0.5]).is_ok());
+    }
+
+    #[test]
+    fn languages_include_english_and_afrikaans() {
+        let all = languages();
+        assert_eq!(all.first().map(|l| l.code), Some("en"));
+        assert!(all.iter().any(|l| l.code == "af" && l.name == "afrikaans"));
+        assert!(all.len() >= 99);
+    }
+
+    #[test]
+    fn language_codes_are_checked() {
+        assert_eq!(language_code(" EN ").ok().as_deref(), Some("en"));
+        assert_eq!(language_code("af").ok().as_deref(), Some("af"));
+        assert_eq!(language_code("German").ok().as_deref(), Some("de"));
+        for bad in ["auto", "", "xx", "klingon"] {
+            assert!(matches!(
+                language_code(bad),
+                Err(VoiceError::UnsupportedLanguage(_))
+            ));
+        }
     }
 
     #[test]
