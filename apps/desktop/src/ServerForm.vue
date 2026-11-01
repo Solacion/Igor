@@ -19,9 +19,10 @@ const keySaved = inKeychain(props.original?.bearer_token, originalItem) || !!ori
 
 const form = reactive({
   id: props.original?.id ?? '',
-  transport: (props.original?.transport ?? 'stdio') as 'stdio' | 'http',
+  transport: ((props.original?.transport ?? 'stdio') === 'stdio' ? 'stdio' : 'http') as 'stdio' | 'http',
+  protocol: (props.original?.transport === 'sse' ? 'sse' : 'http') as 'http' | 'sse',
   url: props.original?.url ?? '',
-  auth: (inKeychain(props.original?.bearer_token, originalItem) ? 'bearer' : originalHeader ? 'header' : 'none') as 'none' | 'bearer' | 'header',
+  auth: (props.original?.auth === 'oauth' ? 'oauth' : inKeychain(props.original?.bearer_token, originalItem) ? 'bearer' : originalHeader ? 'header' : 'none') as 'none' | 'bearer' | 'header' | 'oauth',
   header: originalHeader ?? 'X-API-Key',
   key: '',
   command: props.original?.command ?? '',
@@ -86,10 +87,10 @@ function entry(): ServerEntry | null {
       if (!form.header.trim()) errors.value.header = 'Enter the header name, such as X-API-Key.'
       headers[form.header.trim()] = { keychain: item }
     }
-    if (form.auth !== 'none' && !form.key && !(keySaved && common.id === props.original?.id))
+    if ((form.auth === 'bearer' || form.auth === 'header') && !form.key && !(keySaved && common.id === props.original?.id))
       errors.value.key = 'Enter the key. It is saved in Keychain, never in the configuration file.'
     result = {
-      ...common, transport: 'http', url: form.url.trim(), headers,
+      ...common, transport: form.protocol, url: form.url.trim(), headers, auth: form.auth === 'oauth' && form.protocol === 'http' ? 'oauth' : null,
       bearer_token: form.auth === 'bearer' ? { keychain: item } : props.original?.bearer_token && !inKeychain(props.original.bearer_token, originalItem) ? props.original.bearer_token : null,
       command: '', args: [], cwd: null, env_allowlist: [], env: {},
     }
@@ -115,14 +116,14 @@ function showError(error: unknown) {
 const commandLine = computed(() => form.transport === 'http' ? form.url.trim() : [form.command.trim(), ...lines(form.args)].join(' '))
 const runsSomethingNew = computed(() =>
   !props.original ||
-  (props.original.transport ?? 'stdio') !== form.transport ||
+  (props.original.transport ?? 'stdio') !== (form.transport === 'http' ? form.protocol : 'stdio') ||
   (form.transport === 'http'
     ? (props.original.url ?? '') !== form.url.trim()
     : props.original.command !== form.command.trim() ||
       props.original.args.join('\n') !== lines(form.args).join('\n') ||
       (props.original.cwd ?? '') !== form.cwd.trim()))
 /** The typed key, sent only for a remote server that uses one. */
-const typedKey = () => form.transport === 'http' && form.auth !== 'none' && form.key ? form.key : null
+const typedKey = () => form.transport === 'http' && (form.auth === 'bearer' || form.auth === 'header') && form.key ? form.key : null
 
 async function test() {
   const value = entry()
@@ -180,18 +181,27 @@ async function save() {
         <small class="hint">https:// is required, except for this computer (localhost).</small>
         <small v-if="errors.url" class="field-error" role="alert">{{ errors.url }}</small>
       </label>
+      <label>Protocol
+        <select v-model="form.protocol" name="protocol">
+          <option value="http">Streamable HTTP</option>
+          <option value="sse">HTTP+SSE (older servers)</option>
+        </select>
+        <small v-if="form.protocol === 'sse'" class="hint">For servers built for the 2024-11-05 version of MCP. The URL is the server's event stream, often ending in /sse.</small>
+      </label>
       <label>Authentication
         <select v-model="form.auth" name="auth">
           <option value="none">None</option>
           <option value="bearer">Bearer token</option>
           <option value="header">API key header</option>
+          <option v-if="form.protocol === 'http'" value="oauth">Sign in (OAuth)</option>
         </select>
+        <small v-if="form.auth === 'oauth'" class="hint">After saving, choose Sign in on the server. Igor opens the sign-in page in your browser and keeps the tokens in Keychain.</small>
       </label>
       <label v-if="form.auth === 'header'">Header name
         <input v-model="form.header" name="header" autocomplete="off" spellcheck="false" :aria-invalid="!!errors.header" />
         <small v-if="errors.header" class="field-error" role="alert">{{ errors.header }}</small>
       </label>
-      <label v-if="form.auth !== 'none'">{{ form.auth === 'bearer' ? 'Token' : 'Key' }}
+      <label v-if="form.auth === 'bearer' || form.auth === 'header'">{{ form.auth === 'bearer' ? 'Token' : 'Key' }}
         <input v-model="form.key" name="key" type="password" autocomplete="off" spellcheck="false" :placeholder="keySaved ? 'Saved in Keychain — type to replace' : ''" :aria-invalid="!!errors.key" />
         <small class="hint">Saved in your Keychain, never in the configuration file.</small>
         <small v-if="errors.key" class="field-error" role="alert">{{ errors.key }}</small>

@@ -309,11 +309,11 @@ fn invalid_values_name_field_and_problem() -> TestResult {
             "unsupported transport",
             (
                 "transport = \"stdio\"\ncommand = \"./server\"\n\n[[servers]]\nid = \"inventory\"",
-                "transport = \"sse\"\ncommand = \"./server\"\n\n[[servers]]\nid = \"inventory\"",
+                "transport = \"websocket\"\ncommand = \"./server\"\n\n[[servers]]\nid = \"inventory\"",
             ),
             "",
             "servers[0].transport",
-            Problem::UnsupportedTransport("sse".into()),
+            Problem::UnsupportedTransport("websocket".into()),
         ),
         (
             "stdio server without a command",

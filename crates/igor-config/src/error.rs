@@ -115,7 +115,7 @@ pub enum Problem {
     #[error("server id {0:?} is declared more than once")]
     DuplicateServerId(ServerId),
     /// The server transport is not supported.
-    #[error("unsupported transport {0:?}: expected \"stdio\" or \"http\"")]
+    #[error("unsupported transport {0:?}: expected \"stdio\", \"http\" or \"sse\"")]
     UnsupportedTransport(String),
     /// A field that the server's transport does not use.
     #[error("not used with transport \"{0}\"")]
@@ -126,6 +126,12 @@ pub enum Problem {
     /// A header name is not a valid HTTP token.
     #[error("invalid header name {0:?}: use letters, digits and !#$%&'*+-.^_`|~")]
     InvalidHeaderName(String),
+    /// The `auth` value is not supported.
+    #[error("unsupported auth {0:?}: expected \"oauth\"")]
+    UnsupportedAuth(String),
+    /// OAuth is combined with a bearer token or `Authorization` header.
+    #[error("OAuth sends its own Authorization header; remove bearer_token and Authorization")]
+    OAuthWithAuthorization,
     /// A header name appears twice, ignoring case.
     #[error("header {0:?} is listed more than once")]
     DuplicateHeaderName(String),

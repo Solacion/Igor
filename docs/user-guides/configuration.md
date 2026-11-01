@@ -65,7 +65,7 @@ Each `[[servers]]` entry is a local process (`transport = "stdio"`) or a remote 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `id` | (required) | A unique server id. Tools are identified by server id and tool name. |
-| `transport` | `stdio` | `stdio` or `http`. |
+| `transport` | `stdio` | `stdio`, `http` (Streamable HTTP) or `sse` (the legacy HTTP+SSE transport of MCP 2024-11-05). |
 | `command` | (required for `stdio`) | The program to run. A relative path with a directory part, such as `./bin/server`, resolves against the configuration directory. A bare name, such as `node`, is looked up on `PATH`. |
 | `args` | `[]` | Program arguments. |
 | `cwd` | configuration directory | The working directory. |
@@ -91,11 +91,18 @@ headers = { "X-Api-Key" = { env = "IGOR_CRM_KEY" } }
 | --- | --- | --- |
 | `url` | (required for `http`) | The server's MCP endpoint. It must use `https://`; plain `http://` is allowed only for `localhost`, `127.0.0.1` and `[::1]`. It must not contain a user name or password. |
 | `bearer_token` | none | A secret reference, sent as `Authorization: Bearer <token>`. |
+| `auth` | none | `"oauth"` for a server that needs you to sign in with OAuth 2.1. Not allowed together with `bearer_token` or an `Authorization` header. |
 | `headers` | `{}` | Headers sent with every request, each value a secret reference. Names are HTTP tokens and are case-insensitive. `Host`, `Content-Type`, `Content-Length`, `Accept`, `Mcp-Session-Id`, `Mcp-Protocol-Version` and `Last-Event-Id` are set by IGOR. `Authorization` is not allowed together with `bearer_token`. |
 
 Header and token values are read when the server connects. They never appear in the configuration file, logs, events or exported activity, and IGOR removes them from connection errors. IGOR does not follow redirects, so headers are only ever sent to the configured URL. To store a token in the Keychain, run `security add-generic-password -U -s com.solacion.igor -a crm-mcp -w` and type the token when asked.
 
-You can also add and edit remote servers in **Settings → MCP servers**: a key typed there is stored in the Keychain item `mcp-<id>` and referenced as `{ keychain = "mcp-<id>" }`. OAuth sign-in (#161) and legacy HTTP+SSE servers (#162) are planned.
+You can also add and edit remote servers in **Settings → MCP servers**: a key typed there is stored in the Keychain item `mcp-<id>` and referenced as `{ keychain = "mcp-<id>" }`. For a server that only speaks the older HTTP+SSE transport, use `transport = "sse"` and set `url` to its event stream, often ending in `/sse`. IGOR posts messages to the endpoint the server names, which must be on the same host. `headers` and `bearer_token` work as for `http`; `auth = "oauth"` does not.
+
+#### OAuth sign-in
+
+With `auth = "oauth"`, IGOR finds the server's authorization server, registers itself as a client when the server allows it, and opens the sign-in page in your browser with PKCE. The browser comes back to a one-off address on this computer (`http://127.0.0.1:<port>/callback`). IGOR keeps the tokens in the Keychain item `mcp-<id>-oauth` and refreshes them when they expire. Until you sign in, the server shows as needing sign-in and its tools are not offered.
+
+Sign in from **Settings → MCP servers → Sign in**, or from a terminal with `igor-cli --sign-in <id>`. **Sign out**, or removing the server, deletes the tokens. Only an `https` sign-in page (or one on this computer) is opened.
 
 A server can never receive a provider API key. IGOR rejects an allowlist entry or an `env` reference that names a variable used by a provider's `api_key`.
 

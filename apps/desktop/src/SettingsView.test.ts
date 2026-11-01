@@ -303,7 +303,7 @@ it('adds a remote server with its key in the Keychain and edits it without retyp
     request: {
       replacing: null,
       entry: {
-        id: 'crm', transport: 'http', url: 'https://mcp.example.com/mcp', headers: {}, bearer_token: { keychain: 'mcp-crm' },
+        id: 'crm', transport: 'http', url: 'https://mcp.example.com/mcp', headers: {}, auth: null, bearer_token: { keychain: 'mcp-crm' },
         command: '', args: [], cwd: null, env_allowlist: [], env: {}, startup_timeout_ms: null, call_timeout_ms: null,
       },
       secret: 'tok-ui-sentinel',
@@ -340,6 +340,45 @@ it('writes allow only for tools the server says change data, and shows read on s
     { request: { server: 'pos', tool: 'create_order', class: 'allow' } },
     { request: { server: 'pos', tool: 'get_sales', class: 'read' } },
   ])
+  wrapper.unmount()
+})
+
+it('signs in to an OAuth server from its card and offers sign-out once connected', async () => {
+  const oauth: ServerView = { ...pos, status: { state: 'sign_in_needed' }, tools: [], permissions: {}, entry: { ...pos.entry, id: 'crm', transport: 'http', url: 'https://mcp.example.com/mcp', command: '', args: [], auth: 'oauth' } }
+  const calls = backend({
+    settings_view: () => view([oauth]),
+    settings_sign_in_server: () => view([{ ...oauth, status: { state: 'connected' } }]),
+  })
+  const wrapper = mount(SettingsView)
+  await flushPromises()
+  const card = wrapper.get('.server-card')
+  expect(card.get('.status').text()).toBe('Sign-in needed')
+  expect(card.findAll('button').map(b => b.text())).not.toContain('Sign out')
+  await card.findAll('button').find(b => b.text() === 'Sign in')!.trigger('click')
+  await flushPromises()
+  expect(calls.find(call => call.command === 'settings_sign_in_server')?.args).toEqual({ request: { id: 'crm' } })
+  const buttons = wrapper.get('.server-card').findAll('button').map(b => b.text())
+  expect(buttons).toContain('Sign out')
+  expect(buttons).not.toContain('Sign in')
+  wrapper.unmount()
+})
+
+it('adds a legacy SSE server with the protocol choice', async () => {
+  const calls = backend({ settings_view: () => view([]), settings_save_server: () => view([]) })
+  const wrapper = mount(SettingsView)
+  await flushPromises()
+  await wrapper.get('#mcp-servers .section-head button').trigger('click')
+  await wrapper.get('input[value="http"]').setValue(true)
+  await wrapper.get('input[name="id"]').setValue('old')
+  await wrapper.get('input[name="url"]').setValue('https://mcp.example.com/sse')
+  await wrapper.get('select[name="protocol"]').setValue('sse')
+  expect(wrapper.find('option[value="oauth"]').exists()).toBe(false)
+  await wrapper.get('form').trigger('submit')
+  await wrapper.get('[role="alertdialog"] button').trigger('click')
+  await flushPromises()
+  const save = calls.find(call => call.command === 'settings_save_server')?.args as { request: { entry: ServerEntry } }
+  expect(save.request.entry.transport).toBe('sse')
+  expect(save.request.entry.url).toBe('https://mcp.example.com/sse')
   wrapper.unmount()
 })
 

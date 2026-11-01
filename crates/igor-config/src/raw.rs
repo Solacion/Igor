@@ -45,6 +45,7 @@ pub(crate) struct RawServer {
     #[serde(default)]
     pub headers: BTreeMap<String, RawSecret>,
     pub bearer_token: Option<RawSecret>,
+    pub auth: Option<String>,
     #[serde(default)]
     pub args: Vec<String>,
     pub cwd: Option<PathBuf>,

@@ -263,6 +263,42 @@ async fn settings_remove_server(
 }
 
 #[tauri::command]
+async fn settings_sign_in_server(
+    app: tauri::AppHandle,
+    settings: State<'_, Arc<Settings>>,
+    request: ServerRequest,
+) -> Result<SettingsView, CommandError> {
+    let result = settings
+        .sign_in(&request.id, |page| {
+            // igor_mcp checked that the page is https (or this machine) before it reaches here.
+            std::process::Command::new("open")
+                .arg(page)
+                .status()
+                .map_err(|error| error.to_string())
+                .and_then(|status| {
+                    status
+                        .success()
+                        .then_some(())
+                        .ok_or_else(|| "could not open the browser".to_owned())
+                })
+        })
+        .await?;
+    let _ = app.emit_to("main", "settings-changed", ());
+    Ok(result)
+}
+
+#[tauri::command]
+async fn settings_sign_out_server(
+    app: tauri::AppHandle,
+    settings: State<'_, Arc<Settings>>,
+    request: ServerRequest,
+) -> Result<SettingsView, CommandError> {
+    let result = settings.sign_out(&request.id).await?;
+    let _ = app.emit_to("main", "settings-changed", ());
+    Ok(result)
+}
+
+#[tauri::command]
 async fn settings_reconnect_server(
     app: tauri::AppHandle,
     settings: State<'_, Arc<Settings>>,
@@ -334,6 +370,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings_test_server,
             settings_remove_server,
             settings_reconnect_server,
+            settings_sign_in_server,
+            settings_sign_out_server,
             settings_set_permission,
             speech::speech_status,
             speech::speech_sentences,
