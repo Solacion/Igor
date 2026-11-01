@@ -19,9 +19,12 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use igor_config::{ConfigDocument, ConfigError, PermissionClass, ServerConfig, ServerEntry};
+use igor_config::{
+    ConfigDocument, ConfigError, HttpServer, PermissionClass, SecretError, ServerConfig,
+    ServerEntry, ServerTransport,
+};
 use igor_core::tools::{ServerId, ToolBackend, ToolDescriptor};
-use igor_mcp::{McpBackend, StdioServerConfig};
+use igor_mcp::{HttpServerConfig, McpBackend, StdioServerConfig};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{Mutex, RwLock};
@@ -631,25 +634,32 @@ async fn start(
     server: &ServerConfig,
     owned: &Mutex<Vec<Arc<McpBackend>>>,
 ) -> Result<(Arc<McpBackend>, Vec<ToolDescriptor>), StartError> {
-    let mut stdio = StdioServerConfig::new(&server.command);
-    stdio.args = server.args.iter().map(OsString::from).collect();
-    stdio.cwd = Some(server.cwd.clone());
-    stdio.env_allowlist = server.env_allowlist.clone();
-    stdio.startup_timeout = server.startup_timeout;
-    stdio.call_timeout = server.call_timeout;
-    for (name, secret) in &server.env {
-        let value = secret.resolve().map_err(|e| e.to_string())?;
-        stdio
-            .env
-            .push((name.clone(), OsString::from(value.expose())));
-    }
     let id: ServerId = server.id.clone();
-    let backend = McpBackend::connect(id, &stdio)
-        .await
-        .map_err(|error| StartError {
-            detail: error.to_string(),
-            stderr: error.stderr().to_vec(),
-        })?;
+    let connected = match &server.transport {
+        ServerTransport::Stdio(local) => {
+            let mut stdio = StdioServerConfig::new(&local.command);
+            stdio.args = local.args.iter().map(OsString::from).collect();
+            stdio.cwd = Some(local.cwd.clone());
+            stdio.env_allowlist = local.env_allowlist.clone();
+            stdio.startup_timeout = server.startup_timeout;
+            stdio.call_timeout = server.call_timeout;
+            for (name, secret) in &local.env {
+                let value = secret.resolve().map_err(|e| e.to_string())?;
+                stdio
+                    .env
+                    .push((name.clone(), OsString::from(value.expose())));
+            }
+            McpBackend::connect(id, &stdio).await
+        }
+        ServerTransport::Http(remote) => {
+            let http = http_config(server, remote).map_err(|e| e.to_string())?;
+            McpBackend::connect_http(id, &http).await
+        }
+    };
+    let backend = connected.map_err(|error| StartError {
+        detail: error.to_string(),
+        stderr: error.stderr().to_vec(),
+    })?;
     let backend = Arc::new(backend);
     owned.lock().await.push(backend.clone());
     let tools = match backend.list_tools().await {
@@ -693,6 +703,24 @@ pub struct PermissionRequest {
     pub tool: String,
     /// New class; `None` leaves the tool unclassified.
     pub class: Option<PermissionClass>,
+}
+
+/// The connection settings for a remote server, with its header secrets read now.
+fn http_config(
+    server: &ServerConfig,
+    remote: &HttpServer,
+) -> Result<HttpServerConfig, SecretError> {
+    let mut http = HttpServerConfig::new(remote.url.as_str());
+    http.startup_timeout = server.startup_timeout;
+    http.call_timeout = server.call_timeout;
+    for (name, secret) in &remote.headers {
+        http.headers
+            .push((name.clone(), secret.resolve()?.expose().to_owned()));
+    }
+    if let Some(token) = &remote.bearer_token {
+        http.bearer_token = Some(token.resolve()?.expose().to_owned());
+    }
+    Ok(http)
 }
 
 #[cfg(test)]

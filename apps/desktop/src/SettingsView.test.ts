@@ -278,3 +278,14 @@ it('filters a long tool list by name or description', async () => {
   expect(wrapper.text()).toContain('No tools match.')
   wrapper.unmount()
 })
+
+it('shows a remote server by its URL and does not offer the local server form for it', async () => {
+  backend({ settings_view: () => view([{ ...pos, entry: { ...pos.entry, transport: 'http', url: 'https://mcp.example.com/mcp', command: '', args: [] } }]) })
+  const wrapper = mount(SettingsView)
+  await flushPromises()
+  const card = wrapper.get('.server-card')
+  expect(card.get('.command-line').text()).toBe('https://mcp.example.com/mcp')
+  expect(card.findAll('button').map(b => b.text())).not.toContain('Edit')
+  expect(card.findAll('button').map(b => b.text())).toContain('Reconnect')
+  wrapper.unmount()
+})

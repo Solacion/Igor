@@ -115,8 +115,23 @@ pub enum Problem {
     #[error("server id {0:?} is declared more than once")]
     DuplicateServerId(ServerId),
     /// The server transport is not supported.
-    #[error("unsupported transport {0:?}: only \"stdio\" is supported")]
+    #[error("unsupported transport {0:?}: expected \"stdio\" or \"http\"")]
     UnsupportedTransport(String),
+    /// A field that the server's transport does not use.
+    #[error("not used with transport \"{0}\"")]
+    NotForTransport(&'static str),
+    /// A field the server's transport needs is missing.
+    #[error("required for transport \"{0}\"")]
+    RequiredForTransport(&'static str),
+    /// A header name is not a valid HTTP token.
+    #[error("invalid header name {0:?}: use letters, digits and !#$%&'*+-.^_`|~")]
+    InvalidHeaderName(String),
+    /// A header name appears twice, ignoring case.
+    #[error("header {0:?} is listed more than once")]
+    DuplicateHeaderName(String),
+    /// A header IGOR sets itself, or `Authorization` together with `bearer_token`.
+    #[error("header {0:?} is set by IGOR and cannot be configured")]
+    ReservedHeader(String),
     /// A secret field holds a literal value instead of a reference. The value is not shown.
     #[error(
         "literal secret values are not allowed (value not shown); use {{ env = \"VARIABLE_NAME\" }}"
@@ -132,9 +147,6 @@ pub enum Problem {
         "Keychain reference must be 1 to 64 letters, digits, '.', '_' or '-' (value not shown)"
     )]
     InvalidKeychainReference,
-    /// A Keychain reference is used where only environment variables are supported.
-    #[error("Keychain references are supported only for provider API keys")]
-    KeychainNotAllowed,
     /// A provider entry names both an environment variable and a Keychain item for its key.
     #[error("give the API key either as an environment variable or as a Keychain item, not both")]
     TwoKeySources,

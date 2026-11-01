@@ -5,11 +5,11 @@ use std::ffi::OsString;
 use std::io::{self, Write};
 use std::sync::Arc;
 
-use igor_config::{Config, ServerConfig};
+use igor_config::{Config, HttpServer, SecretError, ServerConfig, ServerTransport};
 use igor_core::registry::ToolRegistry;
 use igor_core::session::UnavailableServer;
 use igor_core::tools::{ServerId, ToolBackend, ToolDescriptor};
-use igor_mcp::{McpBackend, StdioServerConfig};
+use igor_mcp::{HttpServerConfig, McpBackend, StdioServerConfig};
 
 use crate::render::sanitize;
 
@@ -159,24 +159,31 @@ impl From<String> for Failed {
 async fn connect_one(
     server: &ServerConfig,
 ) -> Result<(Arc<dyn ToolBackend>, Vec<ToolDescriptor>), Failed> {
-    let mut stdio = StdioServerConfig::new(&server.command);
-    stdio.args = server.args.iter().map(OsString::from).collect();
-    stdio.cwd = Some(server.cwd.clone());
-    stdio.env_allowlist = server.env_allowlist.clone();
-    stdio.startup_timeout = server.startup_timeout;
-    stdio.call_timeout = server.call_timeout;
-    for (name, secret) in &server.env {
-        let value = secret.resolve().map_err(|e| Failed::from(e.to_string()))?;
-        stdio
-            .env
-            .push((name.clone(), OsString::from(value.expose())));
+    let backend = match &server.transport {
+        ServerTransport::Stdio(local) => {
+            let mut stdio = StdioServerConfig::new(&local.command);
+            stdio.args = local.args.iter().map(OsString::from).collect();
+            stdio.cwd = Some(local.cwd.clone());
+            stdio.env_allowlist = local.env_allowlist.clone();
+            stdio.startup_timeout = server.startup_timeout;
+            stdio.call_timeout = server.call_timeout;
+            for (name, secret) in &local.env {
+                let value = secret.resolve().map_err(|e| Failed::from(e.to_string()))?;
+                stdio
+                    .env
+                    .push((name.clone(), OsString::from(value.expose())));
+            }
+            McpBackend::connect(server.id.clone(), &stdio).await
+        }
+        ServerTransport::Http(remote) => {
+            let http = http_config(server, remote).map_err(|e| Failed::from(e.to_string()))?;
+            McpBackend::connect_http(server.id.clone(), &http).await
+        }
     }
-    let backend = McpBackend::connect(server.id.clone(), &stdio)
-        .await
-        .map_err(|e| Failed {
-            message: e.to_string(),
-            stderr: e.stderr().to_vec(),
-        })?;
+    .map_err(|e| Failed {
+        message: e.to_string(),
+        stderr: e.stderr().to_vec(),
+    })?;
     let tools = match backend.list_tools().await {
         Ok(tools) => tools,
         Err(e) => {
@@ -187,4 +194,22 @@ async fn connect_one(
         }
     };
     Ok((Arc::new(backend), tools))
+}
+
+/// The connection settings for a remote server, with its header secrets read now.
+fn http_config(
+    server: &ServerConfig,
+    remote: &HttpServer,
+) -> Result<HttpServerConfig, SecretError> {
+    let mut http = HttpServerConfig::new(remote.url.as_str());
+    http.startup_timeout = server.startup_timeout;
+    http.call_timeout = server.call_timeout;
+    for (name, secret) in &remote.headers {
+        http.headers
+            .push((name.clone(), secret.resolve()?.expose().to_owned()));
+    }
+    if let Some(token) = &remote.bearer_token {
+        http.bearer_token = Some(token.resolve()?.expose().to_owned());
+    }
+    Ok(http)
 }

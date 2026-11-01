@@ -52,8 +52,17 @@ fn sample_config_loads_and_needs_no_credentials() -> TestResult {
     let ids: Vec<&str> = config.servers().iter().map(|s| s.id.as_str()).collect();
     assert_eq!(ids, ["sales", "supplier"]);
     for server in config.servers() {
-        assert!(server.command.ends_with("target/debug/igor-fixture-server"));
-        assert!(server.env.is_empty(), "fixture servers need no secrets");
+        assert!(
+            server
+                .stdio()
+                .ok_or("not stdio")?
+                .command
+                .ends_with("target/debug/igor-fixture-server")
+        );
+        assert!(
+            server.stdio().ok_or("not stdio")?.env.is_empty(),
+            "fixture servers need no secrets"
+        );
     }
     let permissions = config.permissions();
     assert_eq!(
@@ -81,15 +90,26 @@ fn relative_config_paths_resolve_to_absolute_server_paths() -> TestResult {
     // Tests run in the crate directory, so this path is relative to it.
     let config = Config::load(Path::new("../../examples/igor.toml"))?;
     for server in config.servers() {
-        assert!(server.cwd.is_absolute(), "{}", server.cwd.display());
-        assert!(server.command.is_absolute(), "{}", server.command.display());
-        assert!(server.cwd.ends_with("examples"));
+        assert!(
+            server.stdio().ok_or("not stdio")?.cwd.is_absolute(),
+            "{}",
+            server.stdio().ok_or("not stdio")?.cwd.display()
+        );
+        assert!(
+            server.stdio().ok_or("not stdio")?.command.is_absolute(),
+            "{}",
+            server.stdio().ok_or("not stdio")?.command.display()
+        );
+        assert!(server.stdio().ok_or("not stdio")?.cwd.ends_with("examples"));
     }
     let inline = Config::from_toml_str(BASE, Path::new(""))?;
     let sales = inline
         .server(&ServerId::new("sales")?)
         .ok_or("sales missing")?;
-    assert_eq!(sales.cwd, std::env::current_dir()?);
+    assert_eq!(
+        sales.stdio().ok_or("not stdio")?.cwd,
+        std::env::current_dir()?
+    );
     Ok(())
 }
 
@@ -113,8 +133,11 @@ fn defaults_apply_when_omitted() -> TestResult {
         .ok_or("sales missing")?;
     assert_eq!(sales.call_timeout, Limits::DEFAULT_TOOL_CALL_TIMEOUT);
     assert_eq!(sales.startup_timeout, igor_config::DEFAULT_STARTUP_TIMEOUT);
-    assert_eq!(sales.cwd, PathBuf::from("/cfg"));
-    assert_eq!(sales.command, PathBuf::from("/cfg/./server"));
+    assert_eq!(sales.stdio().ok_or("not stdio")?.cwd, PathBuf::from("/cfg"));
+    assert_eq!(
+        sales.stdio().ok_or("not stdio")?.command,
+        PathBuf::from("/cfg/./server")
+    );
     let claude = config.provider("claude").ok_or("claude missing")?;
     assert_eq!(claude.base_url, "https://api.anthropic.com");
     assert_eq!(
@@ -144,10 +167,18 @@ fn explicit_values_override_defaults() -> TestResult {
         .ok_or("sales missing")?;
     assert_eq!(sales.call_timeout, Duration::from_millis(900));
     assert_eq!(sales.startup_timeout, Duration::from_millis(200));
-    assert_eq!(sales.cwd, PathBuf::from("/cfg/run"));
-    assert_eq!(sales.env_allowlist, ["PATH"]);
     assert_eq!(
-        sales.env.get("SALES_TOKEN").and_then(|r| r.env_var()),
+        sales.stdio().ok_or("not stdio")?.cwd,
+        PathBuf::from("/cfg/run")
+    );
+    assert_eq!(sales.stdio().ok_or("not stdio")?.env_allowlist, ["PATH"]);
+    assert_eq!(
+        sales
+            .stdio()
+            .ok_or("not stdio")?
+            .env
+            .get("SALES_TOKEN")
+            .and_then(|r| r.env_var()),
         Some("IGOR_SALES_TOKEN")
     );
     let inventory = config
@@ -255,7 +286,7 @@ fn invalid_values_name_field_and_problem() -> TestResult {
             ),
             "",
             "providers[0].base_url",
-            Problem::InvalidUrl("must not embed credentials; use api_key with an env reference"),
+            Problem::InvalidUrl("must not embed credentials; use a secret reference"),
         ),
         (
             "plain http to a remote host",
@@ -278,11 +309,38 @@ fn invalid_values_name_field_and_problem() -> TestResult {
             "unsupported transport",
             (
                 "transport = \"stdio\"\ncommand = \"./server\"\n\n[[servers]]\nid = \"inventory\"",
-                "transport = \"http\"\ncommand = \"./server\"\n\n[[servers]]\nid = \"inventory\"",
+                "transport = \"sse\"\ncommand = \"./server\"\n\n[[servers]]\nid = \"inventory\"",
             ),
             "",
             "servers[0].transport",
-            Problem::UnsupportedTransport("http".into()),
+            Problem::UnsupportedTransport("sse".into()),
+        ),
+        (
+            "stdio server without a command",
+            ("command = \"./server\"\n", "\n"),
+            "",
+            "servers[0].command",
+            Problem::RequiredForTransport("stdio"),
+        ),
+        (
+            "url on a stdio server",
+            (
+                "command = \"./server\"\n",
+                "command = \"./server\"\nurl = \"https://mcp.example.com\"\n",
+            ),
+            "",
+            "servers[0].url",
+            Problem::NotForTransport("stdio"),
+        ),
+        (
+            "command on an http server",
+            (
+                "transport = \"stdio\"\n",
+                "transport = \"http\"\nurl = \"https://mcp.example.com/mcp\"\n",
+            ),
+            "",
+            "servers[0].command",
+            Problem::NotForTransport("http"),
         ),
         (
             "empty command",
@@ -437,8 +495,8 @@ fn schema_violations_report_location() -> TestResult {
     let cases = [
         (
             "missing field",
-            BASE.replacen("command = \"./server\"\n", "", 1),
-            "missing field `command`",
+            BASE.replacen("id = \"sales\"\n", "", 1),
+            "missing field `id`",
         ),
         (
             "unknown key",
@@ -536,6 +594,123 @@ fn sentinel_secret_never_leaks() -> TestResult {
         serde_json::to_string(&secret)?,
     ] {
         assert!(!output.contains(SENTINEL), "leaked: {output}");
+    }
+    Ok(())
+}
+
+/// A remote server: URL, header secrets and a bearer token, all as references.
+#[test]
+fn http_servers_take_a_url_and_secret_headers() -> TestResult {
+    let config = parse(
+        r#"
+[[servers]]
+id = "crm"
+transport = "http"
+url = "https://mcp.example.com/mcp"
+bearer_token = { keychain = "crm-mcp" }
+headers = { "X-Api-Key" = { env = "IGOR_CRM_KEY" } }
+call_timeout_ms = 2000
+
+[[servers]]
+id = "local"
+transport = "http"
+url = "http://127.0.0.1:8080/mcp"
+"#,
+    )?;
+    let crm = config.servers()[0].http().ok_or("not http")?;
+    assert_eq!(crm.url, "https://mcp.example.com/mcp");
+    assert_eq!(
+        crm.bearer_token.as_ref().and_then(|t| t.keychain_name()),
+        Some("crm-mcp")
+    );
+    assert_eq!(crm.headers["X-Api-Key"].env_var(), Some("IGOR_CRM_KEY"));
+    assert_eq!(
+        config.servers()[0].call_timeout,
+        Duration::from_millis(2000)
+    );
+    assert!(config.servers()[0].stdio().is_none());
+    assert!(
+        config.servers()[1]
+            .http()
+            .ok_or("not http")?
+            .headers
+            .is_empty()
+    );
+    Ok(())
+}
+
+#[test]
+fn http_server_settings_are_checked() -> TestResult {
+    let server = |extra: &str| {
+        format!(
+            "[[servers]]\nid = \"crm\"\ntransport = \"http\"\nurl = \"https://mcp.example.com/mcp\"\n{extra}\n"
+        )
+    };
+    let cases = [
+        (
+            "missing url",
+            "[[servers]]\nid = \"crm\"\ntransport = \"http\"\n".to_owned(),
+            "servers[0].url",
+            Problem::RequiredForTransport("http"),
+        ),
+        (
+            "plain http to another host",
+            server("").replace("https://mcp.example.com", "http://mcp.example.com"),
+            "servers[0].url",
+            Problem::InvalidUrl("plain http:// is only allowed for localhost; use https://"),
+        ),
+        (
+            "credentials in url",
+            server("").replace("https://", "https://user:pw@"),
+            "servers[0].url",
+            Problem::InvalidUrl("must not embed credentials; use a secret reference"),
+        ),
+        (
+            "literal header value",
+            server("headers = { \"X-Api-Key\" = \"sk-literal\" }"),
+            "servers[0].headers.X-Api-Key",
+            Problem::LiteralSecret,
+        ),
+        (
+            "invalid header name",
+            server("headers = { \"X Key\" = { env = \"K\" } }"),
+            "servers[0].headers.X Key",
+            Problem::InvalidHeaderName("X Key".into()),
+        ),
+        (
+            "reserved header",
+            server("headers = { \"Mcp-Session-Id\" = { env = \"K\" } }"),
+            "servers[0].headers.Mcp-Session-Id",
+            Problem::ReservedHeader("Mcp-Session-Id".into()),
+        ),
+        (
+            "authorization and bearer token",
+            server("bearer_token = { env = \"T\" }\nheaders = { Authorization = { env = \"K\" } }"),
+            "servers[0].headers.Authorization",
+            Problem::ReservedHeader("Authorization".into()),
+        ),
+        (
+            "duplicate header",
+            server("headers = { \"x-key\" = { env = \"K\" }, \"X-Key\" = { env = \"L\" } }"),
+            "servers[0].headers.x-key",
+            Problem::DuplicateHeaderName("x-key".into()),
+        ),
+        (
+            "env on an http server",
+            server("env = { K = { env = \"K\" } }"),
+            "servers[0].env",
+            Problem::NotForTransport("http"),
+        ),
+    ];
+    for (name, source, field, problem) in cases {
+        match parse(&source) {
+            Err(err) => {
+                assert_eq!(err.field(), Some(field), "{name}: {err}");
+                assert_eq!(err.problem(), Some(&problem), "{name}: {err}");
+                assert!(!err.to_string().contains("sk-literal"), "{name}: {err}");
+            }
+            Ok(_) => return Err(format!("{name}: expected an error").into()),
+        }
     }
     Ok(())
 }

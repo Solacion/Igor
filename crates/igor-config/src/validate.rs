@@ -12,8 +12,8 @@ use crate::keychain::is_keychain_name;
 use crate::raw::{RawConfig, RawLimits, RawProvider, RawSecret, RawServer};
 use crate::secret::{SecretRef, is_env_name};
 use crate::{
-    Config, ConfigError, DEFAULT_STARTUP_TIMEOUT, Limits, Origin, Problem, ProviderConfig,
-    ProviderKind, ServerConfig, ToolPermissions,
+    Config, ConfigError, DEFAULT_STARTUP_TIMEOUT, HttpServer, Limits, Origin, Problem,
+    ProviderConfig, ProviderKind, ServerConfig, ServerTransport, StdioServer, ToolPermissions,
 };
 
 const ANTHROPIC_DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
@@ -195,7 +195,7 @@ fn check_base_url(url: &str) -> Result<(), Problem> {
     }
     if authority.contains('@') {
         return Err(Problem::InvalidUrl(
-            "must not embed credentials; use api_key with an env reference",
+            "must not embed credentials; use a secret reference",
         ));
     }
     // Plain HTTP would send API keys unencrypted, so allow it only for this machine.
@@ -237,25 +237,25 @@ fn servers(
     let mut seen = BTreeSet::new();
     raw.into_iter()
         .enumerate()
-        .map(|(index, raw)| {
+        .map(|(index, mut raw)| {
             let field = |name: &str| format!("servers[{index}].{name}");
-            let id = ServerId::new(raw.id).map_err(|err| (field("id"), err.into()))?;
+            let id = ServerId::new(std::mem::take(&mut raw.id))
+                .map_err(|err| (field("id"), err.into()))?;
             if !seen.insert(id.clone()) {
                 return Err((field("id"), Problem::DuplicateServerId(id)));
             }
-            if raw.transport != "stdio" {
-                return Err((
-                    field("transport"),
-                    Problem::UnsupportedTransport(raw.transport),
-                ));
-            }
-            if raw.command.trim().is_empty() {
-                return Err((field("command"), Problem::Empty));
-            }
-            let env = server_env(raw.env, provider_keys, |name| field(&format!("env.{name}")))?;
-            check_allowlist(&raw.env_allowlist, &env, provider_keys, |i| {
-                field(&format!("env_allowlist[{i}]"))
-            })?;
+            let transport = match raw.transport.as_str() {
+                "stdio" => {
+                    ServerTransport::Stdio(stdio_server(&mut raw, base_dir, provider_keys, &field)?)
+                }
+                "http" => ServerTransport::Http(http_server(&mut raw, provider_keys, &field)?),
+                _ => {
+                    return Err((
+                        field("transport"),
+                        Problem::UnsupportedTransport(raw.transport),
+                    ));
+                }
+            };
             let startup_timeout = match raw.startup_timeout_ms {
                 Some(ms) => Duration::from_millis(in_range(ms, &STARTUP_TIMEOUT_MS, || {
                     field("startup_timeout_ms")
@@ -270,18 +270,141 @@ fn servers(
             };
             Ok(ServerConfig {
                 id,
-                command: resolve_command(&raw.command, base_dir),
-                args: raw.args,
-                cwd: raw
-                    .cwd
-                    .map_or_else(|| base_dir.to_path_buf(), |cwd| base_dir.join(cwd)),
-                env_allowlist: raw.env_allowlist,
-                env,
+                transport,
                 startup_timeout,
                 call_timeout,
             })
         })
         .collect()
+}
+
+/// The stdio fields of `raw`, after checking no HTTP field is set.
+fn stdio_server(
+    raw: &mut RawServer,
+    base_dir: &Path,
+    provider_keys: &BTreeSet<&str>,
+    field: &impl Fn(&str) -> String,
+) -> Result<StdioServer, Invalid> {
+    for (name, set) in [
+        ("url", raw.url.is_some()),
+        ("headers", !raw.headers.is_empty()),
+        ("bearer_token", raw.bearer_token.is_some()),
+    ] {
+        if set {
+            return Err((field(name), Problem::NotForTransport("stdio")));
+        }
+    }
+    let command = raw
+        .command
+        .take()
+        .ok_or_else(|| (field("command"), Problem::RequiredForTransport("stdio")))?;
+    if command.trim().is_empty() {
+        return Err((field("command"), Problem::Empty));
+    }
+    let env = server_env(std::mem::take(&mut raw.env), provider_keys, |name| {
+        field(&format!("env.{name}"))
+    })?;
+    check_allowlist(&raw.env_allowlist, &env, provider_keys, |i| {
+        field(&format!("env_allowlist[{i}]"))
+    })?;
+    Ok(StdioServer {
+        command: resolve_command(&command, base_dir),
+        args: std::mem::take(&mut raw.args),
+        cwd: raw
+            .cwd
+            .take()
+            .map_or_else(|| base_dir.to_path_buf(), |cwd| base_dir.join(cwd)),
+        env_allowlist: std::mem::take(&mut raw.env_allowlist),
+        env,
+    })
+}
+
+/// Headers IGOR or the HTTP client sets for every MCP request.
+const RESERVED_HEADERS: [&str; 7] = [
+    "host",
+    "content-length",
+    "content-type",
+    "accept",
+    "mcp-session-id",
+    "mcp-protocol-version",
+    "last-event-id",
+];
+
+/// The HTTP fields of `raw`, after checking no stdio field is set.
+fn http_server(
+    raw: &mut RawServer,
+    provider_keys: &BTreeSet<&str>,
+    field: &impl Fn(&str) -> String,
+) -> Result<HttpServer, Invalid> {
+    for (name, set) in [
+        ("command", raw.command.is_some()),
+        ("args", !raw.args.is_empty()),
+        ("cwd", raw.cwd.is_some()),
+        ("env", !raw.env.is_empty()),
+        ("env_allowlist", !raw.env_allowlist.is_empty()),
+    ] {
+        if set {
+            return Err((field(name), Problem::NotForTransport("http")));
+        }
+    }
+    let url = raw
+        .url
+        .take()
+        .ok_or_else(|| (field("url"), Problem::RequiredForTransport("http")))?;
+    check_base_url(&url).map_err(|problem| (field("url"), problem))?;
+    let bearer_token = raw
+        .bearer_token
+        .take()
+        .map(|secret| server_secret(secret, provider_keys, || field("bearer_token")))
+        .transpose()?;
+    let mut seen = BTreeSet::new();
+    let mut headers = BTreeMap::new();
+    for (name, secret) in std::mem::take(&mut raw.headers) {
+        let path = || field(&format!("headers.{name}"));
+        if !is_header_name(&name) {
+            return Err((path(), Problem::InvalidHeaderName(name)));
+        }
+        let lower = name.to_ascii_lowercase();
+        if RESERVED_HEADERS.contains(&lower.as_str())
+            || (lower == "authorization" && bearer_token.is_some())
+        {
+            return Err((path(), Problem::ReservedHeader(name)));
+        }
+        if !seen.insert(lower) {
+            return Err((path(), Problem::DuplicateHeaderName(name)));
+        }
+        let reference = server_secret(secret, provider_keys, path)?;
+        headers.insert(name, reference);
+    }
+    Ok(HttpServer {
+        url,
+        headers,
+        bearer_token,
+    })
+}
+
+/// An HTTP token (RFC 9110, section 5.6.2), as header names must be.
+fn is_header_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+}
+
+/// A secret reference given to a server, which must not be a provider's API key.
+fn server_secret(
+    secret: RawSecret,
+    provider_keys: &BTreeSet<&str>,
+    field: impl Fn() -> String,
+) -> Result<SecretRef, Invalid> {
+    let reference = secret_ref(secret, &field)?;
+    if let Some(var) = reference.env_var()
+        && provider_keys.contains(var)
+    {
+        return Err((field(), Problem::ExposesProviderKey(var.to_owned())));
+    }
+    Ok(reference)
 }
 
 fn server_env(
@@ -294,15 +417,7 @@ fn server_env(
             if !is_env_name(&name) {
                 return Err((field(&name), Problem::InvalidEnvName(name)));
             }
-            if matches!(secret, RawSecret::Keychain(_)) {
-                return Err((field(&name), Problem::KeychainNotAllowed));
-            }
-            let reference = secret_ref(secret, || field(&name))?;
-            if let Some(var) = reference.env_var()
-                && provider_keys.contains(var)
-            {
-                return Err((field(&name), Problem::ExposesProviderKey(var.to_owned())));
-            }
+            let reference = server_secret(secret, provider_keys, || field(&name))?;
             Ok((name, reference))
         })
         .collect()

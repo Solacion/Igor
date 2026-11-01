@@ -45,7 +45,7 @@ pub async fn prepare(
     let mut secrets = Vec::new();
     let provider = provider(configured, &mut secrets, settings)?;
     for server in config.servers() {
-        for reference in server.env.values() {
+        for reference in server.secrets() {
             // Missing server credentials are a connection failure, not a reason to lose
             // the conversation. Only resolved values can appear in output.
             if let Ok(secret) = reference.resolve() {

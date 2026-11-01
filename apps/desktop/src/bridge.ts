@@ -14,6 +14,10 @@ export async function readDesktopStatus(): Promise<DesktopStatus> {
  * server receives to the name of the environment variable holding its value, never a value. */
 export interface ServerEntry {
   id: string
+  /** `stdio` for a local process, `http` for a remote server. Absent means `stdio`. */
+  transport?: 'stdio' | 'http'
+  /** Remote endpoint, for `http`. Its headers and tokens stay in the configuration file. */
+  url?: string | null
   command: string
   args: string[]
   cwd: string | null

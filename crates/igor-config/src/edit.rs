@@ -40,12 +40,21 @@ pub struct ProviderEntry {
 }
 
 /// An MCP server entry as written in the configuration file.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerEntry {
     /// Host-assigned server id.
     pub id: String,
+    /// `stdio` for a local process or `http` for a remote server.
+    #[serde(default = "stdio_transport")]
+    pub transport: String,
+    /// Remote endpoint, for `http`. Headers and tokens are kept in the file as written and are
+    /// not part of the entry.
+    #[serde(default)]
+    pub url: Option<String>,
     /// Program to run, as written: relative paths resolve against the configuration directory.
+    /// Empty for a remote server.
+    #[serde(default)]
     pub command: String,
     /// Program arguments.
     #[serde(default)]
@@ -66,6 +75,27 @@ pub struct ServerEntry {
     /// Bound on each tool call, in milliseconds. `None` means the configured default.
     #[serde(default)]
     pub call_timeout_ms: Option<u64>,
+}
+
+fn stdio_transport() -> String {
+    "stdio".to_owned()
+}
+
+impl Default for ServerEntry {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            transport: stdio_transport(),
+            url: None,
+            command: String::new(),
+            args: Vec::new(),
+            cwd: None,
+            env_allowlist: Vec::new(),
+            env: BTreeMap::new(),
+            startup_timeout_ms: None,
+            call_timeout_ms: None,
+        }
+    }
 }
 
 /// A tool permission class as written in the configuration file.
@@ -118,6 +148,9 @@ struct ListedProvider {
 struct ListedServer {
     #[serde(default)]
     id: String,
+    #[serde(default = "stdio_transport")]
+    transport: String,
+    url: Option<String>,
     #[serde(default)]
     command: String,
     #[serde(default)]
@@ -183,6 +216,8 @@ impl ConfigDocument {
             .into_iter()
             .map(|server| ServerEntry {
                 id: server.id,
+                transport: server.transport,
+                url: server.url,
                 command: server.command,
                 args: server.args,
                 cwd: server.cwd,
@@ -490,25 +525,23 @@ fn write_provider(table: &mut Table, entry: &ProviderEntry) {
 /// unchanged keys survive.
 fn write_server(table: &mut Table, entry: &ServerEntry) {
     set(table, "id", Some(Value::from(entry.id.as_str())));
-    set(table, "transport", Some(Value::from("stdio")));
-    set(table, "command", Some(Value::from(entry.command.as_str())));
-    set(table, "args", non_empty(&entry.args).map(string_array));
-    set(table, "cwd", entry.cwd.as_deref().map(Value::from));
     set(
         table,
-        "env_allowlist",
-        non_empty(&entry.env_allowlist).map(string_array),
+        "transport",
+        Some(Value::from(entry.transport.as_str())),
     );
-    let env = (!entry.env.is_empty()).then(|| {
-        let mut env = InlineTable::new();
-        for (name, var) in &entry.env {
-            let mut reference = InlineTable::new();
-            reference.insert("env", Value::from(var.as_str()));
-            env.insert(name, Value::InlineTable(reference));
+    if entry.transport == "http" {
+        // Headers and the bearer token are not part of the entry and stay as written.
+        set(table, "url", entry.url.as_deref().map(Value::from));
+        for key in ["command", "args", "cwd", "env_allowlist", "env"] {
+            set(table, key, None);
         }
-        Value::InlineTable(env)
-    });
-    set(table, "env", env);
+    } else {
+        for key in ["url", "headers", "bearer_token"] {
+            set(table, key, None);
+        }
+        write_stdio(table, entry);
+    }
     set(
         table,
         "startup_timeout_ms",
@@ -518,6 +551,39 @@ fn write_server(table: &mut Table, entry: &ServerEntry) {
         table,
         "call_timeout_ms",
         entry.call_timeout_ms.map(ms_value),
+    );
+}
+
+fn write_stdio(table: &mut Table, entry: &ServerEntry) {
+    set(table, "command", Some(Value::from(entry.command.as_str())));
+    set(table, "args", non_empty(&entry.args).map(string_array));
+    set(table, "cwd", entry.cwd.as_deref().map(Value::from));
+    set(
+        table,
+        "env_allowlist",
+        non_empty(&entry.env_allowlist).map(string_array),
+    );
+    let mut env = InlineTable::new();
+    // Keychain references are not part of the entry; keep those written for other names.
+    if let Some(old) = table.get("env").and_then(Item::as_inline_table) {
+        for (name, value) in old {
+            let keychain = value
+                .as_inline_table()
+                .is_some_and(|reference| reference.contains_key("keychain"));
+            if keychain && !entry.env.contains_key(name) {
+                env.insert(name, value.clone());
+            }
+        }
+    }
+    for (name, var) in &entry.env {
+        let mut reference = InlineTable::new();
+        reference.insert("env", Value::from(var.as_str()));
+        env.insert(name, Value::InlineTable(reference));
+    }
+    set(
+        table,
+        "env",
+        (!env.is_empty()).then_some(Value::InlineTable(env)),
     );
 }
 
@@ -675,6 +741,7 @@ get_stock_levels = "read" # safe
             env: BTreeMap::from([("POS_TOKEN".to_owned(), "IGOR_POS_TOKEN".to_owned())]),
             startup_timeout_ms: Some(5_000),
             call_timeout_ms: Some(20_000),
+            ..ServerEntry::default()
         };
         doc.put_server(None, &full)?;
         let config = doc.save()?;
@@ -686,7 +753,10 @@ get_stock_levels = "read" # safe
         assert_eq!(ConfigDocument::open(doc.path())?.servers()?, [full]);
         let server = &config.servers()[0];
         assert_eq!(server.startup_timeout, Duration::from_millis(5_000));
-        assert_eq!(server.env["POS_TOKEN"].env_var(), Some("IGOR_POS_TOKEN"));
+        assert_eq!(
+            server.stdio().ok_or("not stdio")?.env["POS_TOKEN"].env_var(),
+            Some("IGOR_POS_TOKEN")
+        );
         Ok(())
     }
 
@@ -922,7 +992,49 @@ command = "./sales-server"
     }
 
     #[test]
-    fn server_secrets_cannot_use_the_keychain() -> TestResult {
+    fn http_servers_keep_headers_and_keychain_env_survives_edits() -> TestResult {
+        let mut doc = document(
+            "remote",
+            r#"[[servers]]
+id = "crm"
+transport = "http"
+url = "https://mcp.example.com/mcp"
+headers = { "X-Api-Key" = { keychain = "crm-key" } }
+
+[[servers]]
+id = "pos"
+transport = "stdio"
+command = "./pos"
+env = { TOKEN = { keychain = "pos" }, USER = { env = "IGOR_POS_USER" } }
+"#,
+        )?;
+        let entries = doc.servers()?;
+        assert_eq!(entries[0].transport, "http");
+        assert_eq!(
+            entries[0].url.as_deref(),
+            Some("https://mcp.example.com/mcp")
+        );
+        assert!(entries[0].command.is_empty());
+        // Edit both: the URL changes, the header stays; the env reference changes, the
+        // Keychain one stays.
+        let mut crm = entries[0].clone();
+        crm.url = Some("https://mcp2.example.com/mcp".to_owned());
+        doc.put_server(Some("crm"), &crm)?;
+        let mut pos = entries[1].clone();
+        pos.env = BTreeMap::from([("USER".to_owned(), "IGOR_OTHER_USER".to_owned())]);
+        doc.put_server(Some("pos"), &pos)?;
+        let config = doc.save()?;
+        let crm = config.servers()[0].http().ok_or("not http")?;
+        assert_eq!(crm.url, "https://mcp2.example.com/mcp");
+        assert_eq!(crm.headers["X-Api-Key"].keychain_name(), Some("crm-key"));
+        let env = &config.servers()[1].stdio().ok_or("not stdio")?.env;
+        assert_eq!(env["TOKEN"].keychain_name(), Some("pos"));
+        assert_eq!(env["USER"].env_var(), Some("IGOR_OTHER_USER"));
+        Ok(())
+    }
+
+    #[test]
+    fn server_secrets_can_use_the_keychain() -> TestResult {
         let doc = document(
             "server-keychain",
             r#"[[servers]]
@@ -932,12 +1044,9 @@ command = "./pos"
 env = { TOKEN = { keychain = "pos" } }
 "#,
         )?;
-        let err = doc
-            .validate()
-            .err()
-            .ok_or("accepted a Keychain server secret")?;
-        assert_eq!(err.field(), Some("servers[0].env.TOKEN"));
-        assert!(matches!(err.problem(), Some(Problem::KeychainNotAllowed)));
+        let config = doc.validate()?;
+        let env = &config.servers()[0].stdio().ok_or("not stdio")?.env;
+        assert_eq!(env["TOKEN"].keychain_name(), Some("pos"));
         Ok(())
     }
 }
