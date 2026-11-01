@@ -1,4 +1,4 @@
-import { onMounted, onScopeDispose, ref, watch } from 'vue'
+import { computed, onMounted, onScopeDispose, ref, watch } from 'vue'
 import { monoFrame, resample16k } from '../voice/audio'
 import { transcription, type Transcriber } from '../voice/transcription'
 interface Capture {
@@ -25,6 +25,7 @@ export function useVoiceInput(options: {
   const preparing = ref(false)
   const ready = ref(transcriber.available && !transcriber.prepare)
   const heardLanguage = ref<string | null>(null)
+  const isAvailable = () => transcriber.refresh ? transcriber.available : ready.value
   const level = ref(0)
   const error = ref('')
   let pressed = false
@@ -69,7 +70,7 @@ export function useVoiceInput(options: {
     state.value = 'Idle'
   }
   async function start() {
-    if (pressed || state.value !== 'Idle' || options.busy() || !options.active() || !ready.value)
+    if (pressed || state.value !== 'Idle' || options.busy() || !options.active() || !isAvailable())
       return
     pressed = true
     const token = ++generation
@@ -212,7 +213,7 @@ export function useVoiceInput(options: {
     return target instanceof Element && !!target.closest('input, textarea, select, button, a, summary, [contenteditable="true"], [role="button"]')
   }
   function keydown(event: KeyboardEvent) {
-    if (event.code !== 'Space' || interactive(event.target) || !options.active() || options.busy() || !ready.value)
+    if (event.code !== 'Space' || interactive(event.target) || !options.active() || options.busy() || !isAvailable())
       return
     event.preventDefault()
     if (event.repeat)
@@ -251,6 +252,7 @@ export function useVoiceInput(options: {
   }
   onMounted(() => {
     void prepare()
+    void transcriber.refresh?.()
     window.addEventListener('keydown', keydown)
     window.addEventListener('blur', cancel)
   })
@@ -263,5 +265,5 @@ export function useVoiceInput(options: {
     window.removeEventListener('blur', cancel)
     cancel()
   })
-  return { state, heardLanguage, level, error, get available() { return ready.value }, preparing, prepare, toggle, start, release, cancel }
+  return { state, heardLanguage, level, error, get available() { return isAvailable() }, preparing: computed(() => preparing.value || transcriber.preparing === true), prepare: () => transcriber.refresh ? transcriber.refresh() : prepare(), toggle, start, release, cancel }
 }

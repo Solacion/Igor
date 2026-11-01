@@ -18,6 +18,8 @@ shasum -a 256 "$HOME/Library/Application Support/igor/models/ggml-large-v3-turbo
 
 Measured on an Apple M4 Max: loading the model takes about 6 seconds the first time; transcribing a 3 to 4 second request takes 0.3 to 0.6 seconds. Silence gives no text rather than an invented phrase.
 
+Whisper understands about 99 languages, including Afrikaans, German, French and Spanish. By default it detects the language of each recording. On very short clips it can guess wrong, for example reading accented English as another language; fixing the language avoids that. When replies are spoken, IGOR asks the model to answer in the language you used. Igor's own voice speaks English only for now.
+
 ## Text-to-speech model
 
 IGOR speaks with Kokoro-82M v1.0 (Apache-2.0), run by sherpa-onnx. It has 28 English voices, American and British, such as `af_heart` (the default), `bf_emma` and `bm_george`. The model is three files, about 354 MB. Until the desktop downloads them on first use, fetch them once:

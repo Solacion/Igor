@@ -27,12 +27,15 @@
     "allow-export-activity",
     "allow-conversation-providers",
     "allow-speech-languages",
-    "allow-prepare-transcription",
-    "allow-transcribe",
     "allow-speech-status",
+    "allow-speech-sentences",
     "allow-speech-download",
     "allow-speech-prepare",
     "allow-speak",
+    "allow-transcription-status",
+    "allow-transcription-download",
+    "allow-transcription-prepare",
+    "allow-transcribe",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

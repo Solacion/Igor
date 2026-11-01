@@ -93,7 +93,7 @@ async function stopTurn() {
       <meter v-if="voiceInput.state.value === 'Listening'" :value="voiceInput.level.value" min="0" max="1" aria-label="Microphone level" />
       <button type="button" class="secondary mic-button" :disabled="!voiceInput.available || busy || !loaded || !selected || !!selected.unavailable || confirmingReset || voiceInput.state.value === 'Transcribing'" :aria-pressed="voiceInput.state.value === 'Listening'" @click="voiceInput.toggle">{{ voiceInput.state.value === 'Listening' ? 'Stop listening' : 'Talk' }}</button>
       <p v-if="voiceInput.preparing.value" role="status">Preparing speech recognition…</p>
-      <p v-else-if="!voiceInput.available" class="hint">Speech recognition is unavailable. <button type="button" class="secondary" @click="voiceInput.prepare">Try again</button></p>
+      <p v-else-if="!voiceInput.available" class="hint">Download speech input in Settings → Voice, or retry preparation. <button type="button" class="secondary" @click="voiceInput.prepare">Try again</button></p>
       <p v-else class="hint">Click Talk or press Space outside text fields to start. Your message sends automatically after a pause. Click again to finish sooner.</p>
       <small v-if="heardLanguage" class="hint">Heard in {{ heardLanguage }}</small>
       <p v-if="voiceInput.error.value" role="alert">{{ voiceInput.error.value }}</p>

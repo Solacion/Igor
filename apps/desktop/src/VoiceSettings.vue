@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { capitaliseLanguage } from './voice/transcription'
-import { computed } from 'vue'
+import { inputStatus, inputPreparing, inputProgress, inputError, refreshInput, downloadInput, capitaliseLanguage } from './voice/transcription'
+import { computed, onMounted } from 'vue'
 import { igorVoicePrefix, useVoiceOutput } from './voice/output'
+onMounted(refreshInput)
 const voice = useVoiceOutput()
 const { preferences, voices, igor, download, error } = voice
 const megabytes = (bytes: number) => Math.round(bytes / 1_000_000)
@@ -19,6 +20,16 @@ const percent = computed(() => download.value?.total ? Math.floor(download.value
     <p v-if="voice.languageError.value" role="status">{{ voice.languageError.value }} <button type="button" @click="voice.refreshLanguages">Try again</button></p>
     <label><input v-model="preferences.enabled" type="checkbox" :disabled="!voice.supported.value" /> Speak Igor's replies</label>
     <p class="hint">Click Talk to speak. Your message sends automatically when you finish speaking.</p>
+    <h3>Speech input</h3>
+    <p class="hint">Whisper transcribes on this Mac. Audio stays on your device. Download its 574 MB model once to enable voice input.</p>
+    <template v-if="inputProgress">
+      <label for="input-download-progress">Downloading speech input: {{ Math.floor(inputProgress.received / inputProgress.total * 100) }}%</label>
+      <progress id="input-download-progress" :value="inputProgress.received" :max="inputProgress.total" />
+    </template>
+    <button v-else-if="!inputStatus?.installed" type="button" @click="downloadInput">Download speech input (574 MB)</button>
+    <p v-if="inputPreparing" role="status">Preparing speech…</p>
+    <p v-else-if="inputStatus?.installed && !inputError" role="status">Speech input is ready.</p>
+    <p v-if="inputError" role="alert">{{ inputError }} <button type="button" @click="refreshInput">Retry preparing speech</button></p>
     <div v-if="igor && !igor.installed" class="igor-voice-download">
       <p class="hint">Igor has its own natural voice. It runs on this Mac with no extra service, after a one-time download of {{ megabytes(igor.download_bytes) }} MB. Until then, Igor uses the basic macOS voices.</p>
       <template v-if="download">

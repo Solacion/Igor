@@ -1966,7 +1966,6 @@ dependencies = [
 [[package]]
 name = "igor-voice"
 version = "0.1.0"
-source = "git+https://github.com/Solacion/Igor.git?rev=27657779643a7ea52002d3e2ca52d28748e5c79e#27657779643a7ea52002d3e2ca52d28748e5c79e"
 dependencies = [
  "thiserror 2.0.21",
  "whisper-rs",

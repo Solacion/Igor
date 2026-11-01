@@ -4,6 +4,7 @@ use tauri::Emitter;
 
 mod activity_export;
 mod composition;
+mod model_download;
 mod sessions;
 mod settings;
 mod shutdown;
@@ -292,7 +293,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .manage(Arc::new(DesktopRuntime::default()))
         .manage(Arc::new(shutdown::ExitState::default()))
         .manage(Arc::new(speech::Speech::from_env()))
-        .manage(Arc::new(transcription::SpeechInput::default()))
+        .manage(Arc::new(transcription::VoiceInput::from_env()))
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // Keep the main window/event loop alive while the exit callback reaps children.
@@ -326,13 +327,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings_remove_server,
             settings_reconnect_server,
             settings_set_permission,
-            transcription::speech_languages,
-            transcription::prepare_transcription,
-            transcription::transcribe,
             speech::speech_status,
+            speech::speech_sentences,
             speech::speech_download,
             speech::speech_prepare,
             speech::speak,
+            transcription::speech_languages,
+            transcription::transcription_status,
+            transcription::transcription_download,
+            transcription::transcription_prepare,
+            transcription::transcribe,
         ])
         .build(tauri::generate_context!())?
         .run(|app, event| {

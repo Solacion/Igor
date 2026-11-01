@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { mockIPC, clearMocks } from '@tauri-apps/api/mocks'
 import type { Channel } from '@tauri-apps/api/core'
-import { bestVoice, createVoiceOutput, speechSentences, stripMarkdown, voiceStorageKey } from './output'
+import { bestVoice, createVoiceOutput, stripMarkdown, voiceStorageKey } from './output'
 import VoiceSettings from '../VoiceSettings.vue'
 import ConversationView from '../ConversationView.vue'
 import type { CoreEvent } from '../session'
@@ -62,6 +62,7 @@ function igorBackend(status = installed) {
     calls.push(command)
     if (command === 'speech_status') return status
     if (command === 'speech_prepare') return null
+    if (command === 'speech_sentences') return args.text.split(/(?<=[.!?;])\s+/)
     if (command === 'speak') { spoken.push(args.request); return new ArrayBuffer(8) }
     if (command === 'speech_download') {
       args.progress.onmessage({ received: 177_000_000, total: 354_000_000 })
@@ -71,10 +72,6 @@ function igorBackend(status = installed) {
   })
   return { spoken, calls }
 }
-it('splits speech into sentences like igor_tts::sentences', () => {
-  expect(speechSentences('Hi Pieter. Is it 3.5 degrees? Yes!\nDone')).toEqual(['Hi Pieter.', 'Is it 3.5 degrees?', 'Yes!', 'Done'])
-  expect(speechSentences('word '.repeat(100)).every(part => part.length <= 300)).toBe(true)
-})
 it('lists Igor\'s voices first and the basic system voices last, after a separator', async () => {
   synthesis()
   igorBackend()
@@ -146,6 +143,7 @@ it('persists only local voice preferences, accepts async voice lists and plays a
   mockIPC(command => {
     if (command === 'speech_languages') return [{ code: 'en', name: 'english' }, { code: 'de', name: 'german' }]
     if (command === 'speech_status') return notInstalled
+    if (command === 'transcription_status') return { installed: false, download_bytes: 574041195 }
     ipc++
     throw new Error('Voice settings must not use native configuration')
   })
@@ -311,6 +309,41 @@ it('sends spoken: true only while voice output is on', async () => {
   await send(written)
   written.unmount()
   expect(requests.map(request => request.spoken)).toEqual([true, false])
+})
+
+it('preserves reply order across asynchronous sentence requests and drops a late split after stop', async () => {
+  synthesis()
+  const played = audioPlayer()
+  const spoken: string[] = []
+  let split: ((sentences: string[]) => void) | undefined
+  mockIPC((command, args: any) => {
+    if (command === 'speech_status') return installed
+    if (command === 'speech_prepare') return null
+    if (command === 'speech_sentences') return new Promise(resolve => { split = resolve })
+    if (command === 'speak') { spoken.push(args.request.text); return new ArrayBuffer(8) }
+  })
+  const voice = createVoiceOutput()
+  voice.connect()
+  voice.preferences.value.enabled = true
+  await flushPromises()
+  voice.speak('First; second.')
+  voice.speak('Third.')
+  await flushPromises()
+  split?.(['First;', 'second.'])
+  await flushPromises()
+  expect(spoken).toEqual(['First;', 'second.'])
+  split?.(['Third.'])
+  await flushPromises()
+  played[0]!.onended?.()
+  await flushPromises()
+  expect(spoken).toEqual(['First;', 'second.', 'Third.'])
+  voice.speak('Cancelled.')
+  await flushPromises()
+  voice.stop()
+  split?.(['Cancelled.'])
+  await flushPromises()
+  expect(spoken).not.toContain('Cancelled.')
+  voice.dispose()
 })
 
 it('defaults speech language to Automatic and persists a chosen code across settings mounts', async () => {

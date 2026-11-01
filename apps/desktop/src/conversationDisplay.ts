@@ -33,9 +33,14 @@ export function approvalSummary(request: ApprovalPreview): string {
   }
   return `Allow ${request.tool.server} to run ${request.tool.name}?`
 }
-export function toolSummary(call: Activity): string {
+/** A short, human label for a tool call, such as "Checked stock". */
+export function toolLabel(call: Activity): string {
   const labels: Record<string, string> = { get_stock_levels: 'Checked stock', get_sales_history: 'Checked sales', get_catalogue: 'Checked catalogue', list_notes: 'Read notes', create_draft_order: 'Draft order' }
   const label = labels[call.tool] ?? call.tool.replaceAll('_', ' ')
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
+export function toolSummary(call: Activity): string {
+  const label = toolLabel(call)
   const indicator = call.state === 'Completed' ? '✓' : ['Failed', 'Refused', 'Server reported an error'].includes(call.state) ? '!' : '…'
   return `${label} · ${call.server} ${indicator}`
 }

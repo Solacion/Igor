@@ -254,11 +254,13 @@ Igor speaks assistant text after the turn finishes and reads approval requests a
 
 ### Voice input
 
+In **Settings → Voice**, choose **Download speech input (574 MB)** to consent to downloading Whisper. The model is saved to `~/Library/Application Support/igor/models/ggml-large-v3-turbo-q5_0.bin`. Input and output share a downloader that checks size and SHA-256 before renaming a `.part` file; failed checks remove the partial file. Audio stays on this Mac. The model loads once in the background with **Preparing speech…** shown while it loads; the microphone becomes available when ready. You can keep typing while the model downloads or prepares.
+
 Click **Talk** once and speak. After 1.2 seconds of silence, Igor transcribes and sends your message automatically. Click **Stop listening** to finish sooner; Space outside text fields and controls also toggles listening. Listening shows a microphone level meter. Window blur or leaving the conversation cancels capture, and recordings are limited to one minute. Starting to talk stops speech output. Microphone and transcription errors appear inline; write approvals still require an on-screen decision.
 
 In **Settings → Voice → Speech language**, choose **Automatic** (the default) to detect the language of each recording, or choose a fixed language such as **German**. The list comes from the embedded Whisper recognizer. A fixed language can improve recognition of short clips or accented speech. The language code is saved locally with your other voice preferences, never in `igor.toml`. Changes apply to the next transcription without reloading the model. Choose **Automatic** again to clear the fixed language.
 
-For a non-English transcript, a small hint such as **Heard in German** shows the language the recognizer returned. English and recordings with no recognized speech show no language hint. Audio stays on this computer and is not stored with preferences. The desktop pins its speech recognizer to the merged core PR #139 commit, so older local core checkouts still support the language picker. Cargo fetches this pinned dependency on the first build.
+For a non-English transcript, a small hint such as **Heard in German** shows the language the recognizer returned. English and recordings with no recognized speech show no language hint. Audio stays on this computer and is not stored with preferences. The desktop uses the multilingual speech API provided by core PR #139.
 
 ### Allow a tool for this conversation
 

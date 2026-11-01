@@ -332,3 +332,23 @@ it.each(['de', null])('passes speech language %s from preferences to recognition
   expect(wrapper.text()).toContain('Heard in German')
   wrapper.unmount()
 })
+
+it('enables the toggle when the native download and preparation finish after mounting', async () => {
+  const ready = ref(false)
+  let input!: ReturnType<typeof useVoiceInput>
+  const wrapper = mount(defineComponent({ setup() {
+    input = useVoiceInput({ active: () => true, busy: () => false, onStart: vi.fn(), onText: vi.fn(), onError: vi.fn() }, {
+      get available() { return ready.value },
+      refresh: vi.fn(async () => {}),
+      transcribe: vi.fn(),
+    })
+    return () => h('div')
+  } }))
+  await input.toggle()
+  expect(getUserMedia).not.toHaveBeenCalled()
+  ready.value = true
+  await input.toggle()
+  expect(input.state.value).toBe('Listening')
+  expect(getUserMedia).toHaveBeenCalledOnce()
+  wrapper.unmount()
+})

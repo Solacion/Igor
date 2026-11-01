@@ -9,32 +9,15 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use igor_tts::{Accent, MODEL_DIR, MODEL_FILES, ModelFile, Synthesizer};
+use crate::model_download::{
+    self, DownloadProgress, ModelFile, SpeechCommandError, fetch, has_size,
+};
+use igor_tts::{Accent, MODEL_DIR, MODEL_FILES, Synthesizer};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tauri::ipc::{Channel, Response};
-use tokio::io::AsyncWriteExt;
 
 /// Model directory relative to `HOME`, next to the default configuration file.
 const MODELS_PATH: &str = "Library/Application Support/igor/models";
-
-/// Bound on reading one chunk of a model download; the whole download is not bounded.
-const CHUNK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-
-/// A failed speech command, with a message for the operator.
-#[derive(Debug, Serialize, thiserror::Error)]
-#[error("{message}")]
-pub struct SpeechCommandError {
-    message: String,
-}
-
-impl SpeechCommandError {
-    fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
-}
 
 impl From<igor_tts::SpeechError> for SpeechCommandError {
     fn from(err: igor_tts::SpeechError) -> Self {
@@ -57,12 +40,6 @@ pub struct SpeechStatus {
     download_bytes: u64,
     default_voice: &'static str,
     voices: Vec<VoiceView>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct DownloadProgress {
-    received: u64,
-    total: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -184,21 +161,28 @@ impl Speech {
         tokio::fs::create_dir_all(&dir)
             .await
             .map_err(|err| SpeechCommandError::new(format!("cannot create {dir:?}: {err}")))?;
-        let client = reqwest::Client::builder()
-            .read_timeout(CHUNK_TIMEOUT)
-            .build()
-            .map_err(|err| SpeechCommandError::new(format!("cannot start the download: {err}")))?;
+        let client = model_download::client()?;
         let total = MODEL_FILES.iter().map(|file| file.size).sum();
         let mut done = 0;
         for file in &MODEL_FILES {
             let target = dir.join(file.name);
             if !has_size(&target, file.size) {
-                fetch(&client, file, &target, |received| {
-                    progress(DownloadProgress {
-                        received: done + received,
-                        total,
-                    });
-                })
+                fetch(
+                    &client,
+                    &ModelFile {
+                        name: file.name,
+                        url: file.url,
+                        size: file.size,
+                        sha256: file.sha256,
+                    },
+                    &target,
+                    |received| {
+                        progress(DownloadProgress {
+                            received: done + received,
+                            total,
+                        });
+                    },
+                )
                 .await?;
             }
             done += file.size;
@@ -218,72 +202,12 @@ fn installed(dir: &Path) -> bool {
         .all(|file| has_size(&dir.join(file.name), file.size))
 }
 
-fn has_size(path: &Path, size: u64) -> bool {
-    std::fs::metadata(path).is_ok_and(|meta| meta.is_file() && meta.len() == size)
-}
-
-/// Downloads `file` to `target` through `<target>.part`, renaming only after the size and
-/// SHA-256 match. A failed download leaves no `.part` file behind.
-async fn fetch(
-    client: &reqwest::Client,
-    file: &ModelFile,
-    target: &Path,
-    progress: impl Fn(u64),
-) -> Result<(), SpeechCommandError> {
-    let part = target.with_file_name(format!("{}.part", file.name));
-    let result = fetch_part(client, file, &part, progress).await;
-    match result {
-        Ok(()) => tokio::fs::rename(&part, target)
-            .await
-            .map_err(|err| SpeechCommandError::new(format!("cannot save {}: {err}", file.name))),
-        Err(err) => {
-            let _ = tokio::fs::remove_file(&part).await;
-            Err(err)
-        }
-    }
-}
-
-async fn fetch_part(
-    client: &reqwest::Client,
-    file: &ModelFile,
-    part: &Path,
-    progress: impl Fn(u64),
-) -> Result<(), SpeechCommandError> {
-    let failed = |err: &dyn std::fmt::Display| {
-        SpeechCommandError::new(format!("downloading {} failed: {err}", file.name))
-    };
-    let mut response = client
-        .get(file.url)
-        .send()
-        .await
-        .and_then(reqwest::Response::error_for_status)
-        .map_err(|err| failed(&err))?;
-    let mut out = tokio::fs::File::create(part)
-        .await
-        .map_err(|err| failed(&err))?;
-    let mut hasher = Sha256::new();
-    let mut received = 0u64;
-    while let Some(chunk) = response.chunk().await.map_err(|err| failed(&err))? {
-        received += chunk.len() as u64;
-        if received > file.size {
-            return Err(failed(&"the file is larger than expected"));
-        }
-        hasher.update(&chunk);
-        out.write_all(&chunk).await.map_err(|err| failed(&err))?;
-        progress(received);
-    }
-    out.flush().await.map_err(|err| failed(&err))?;
-    if received != file.size {
-        return Err(failed(&"the file is incomplete"));
-    }
-    if hex(&hasher.finalize()) != file.sha256 {
-        return Err(failed(&"the file does not match its checksum"));
-    }
-    Ok(())
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+#[tauri::command]
+pub fn speech_sentences(text: String) -> Vec<String> {
+    igor_tts::sentences(&text)
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
 }
 
 #[tauri::command]
@@ -329,6 +253,19 @@ pub async fn speak(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sentence_command_uses_core_boundaries_and_byte_limits() {
+        assert_eq!(
+            speech_sentences("At 1.5 km/h; fine.\nNext!".into()),
+            ["At 1.5 km/h;", "fine.", "Next!"]
+        );
+        assert!(
+            speech_sentences("é".repeat(400))
+                .iter()
+                .all(|part| part.len() <= 300)
+        );
+    }
 
     fn request(voice: &str) -> SpeakRequest {
         SpeakRequest {
@@ -379,6 +316,6 @@ mod tests {
 
     #[test]
     fn hex_is_lowercase_and_padded() {
-        assert_eq!(hex(&[0x0a, 0xff]), "0aff");
+        assert_eq!(model_download::hex(&[0x0a, 0xff]), "0aff");
     }
 }

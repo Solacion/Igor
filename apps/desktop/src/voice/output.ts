@@ -22,11 +22,6 @@ export interface SpeechStatus {
   default_voice: string
   voices: IgorVoice[]
 }
-/** Mirrors `igor_tts::sentences`: one synthesis request per sentence, at most 300 characters. */
-export function speechSentences(text: string): string[] {
-  const sentences = text.split(/(?<=[.!?])\s+|\n+/).map(part => part.trim()).filter(Boolean)
-  return sentences.flatMap(sentence => sentence.match(/.{1,300}(?:\s|$)|\S{1,300}/g)?.map(part => part.trim()).filter(Boolean) ?? [])
-}
 export function stripMarkdown(text: string): string {
   return text.replace(/```[^\n]*\n([\s\S]*?)```/g, '$1')
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
@@ -90,6 +85,7 @@ export function createVoiceOutput(synthesis = globalThis.speechSynthesis) {
   let audio: HTMLAudioElement | undefined
   let endAudio: (() => void) | undefined
   let prepared = false
+  let sentenceRequests = Promise.resolve()
   async function refreshIgor() {
     try {
       igor.value = await invoke<SpeechStatus>('speech_status')
@@ -140,6 +136,7 @@ export function createVoiceOutput(synthesis = globalThis.speechSynthesis) {
   }
   function stop() {
     generation++
+    sentenceRequests = Promise.resolve()
     queue.length = 0
     current = undefined
     igorRunning = false
@@ -257,9 +254,20 @@ export function createVoiceOutput(synthesis = globalThis.speechSynthesis) {
       if (options.interrupt)
         stop()
       error.value = ''
-      queue.push(...speechSentences(text))
-      if (!igorRunning)
-        void runIgor(voice)
+      const token = generation
+      sentenceRequests = sentenceRequests.then(async () => {
+        if (generation !== token)
+          return
+        const sentences = await invoke<string[]>('speech_sentences', { text })
+        if (generation !== token)
+          return
+        queue.push(...sentences)
+        if (!igorRunning && queue.length)
+          void runIgor(voice)
+      }).catch(() => {
+        if (generation === token)
+          error.value = "Igor's voice could not prepare this reply."
+      })
       return
     }
     if (!systemSupported) {

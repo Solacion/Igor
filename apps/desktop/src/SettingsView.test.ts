@@ -182,7 +182,7 @@ describe('settings', () => {
     await wrapper.get('textarea[name="env"]').setValue('just-a-value')
     await wrapper.get('form').trigger('submit')
     expect(wrapper.text()).toContain('Write one NAME=IGOR_VARIABLE per line.')
-    expect(calls.filter(call => call.command !== 'settings_providers' && call.command !== 'speech_status' && call.command !== 'speech_languages').map((call) => call.command)).toEqual(['settings_view'])
+    expect(calls.filter(call => call.command !== 'settings_providers' && call.command !== 'speech_status' && call.command !== 'speech_languages' && call.command !== 'transcription_status').map((call) => call.command)).toEqual(['settings_view'])
     wrapper.unmount()
   })
 

@@ -22,12 +22,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "settings_reconnect_server",
             "settings_set_permission",
             "speech_languages",
-            "prepare_transcription",
-            "transcribe",
             "speech_status",
+            "speech_sentences",
             "speech_download",
             "speech_prepare",
             "speak",
+            "transcription_status",
+            "transcription_download",
+            "transcription_prepare",
+            "transcribe",
         ]),
     ))?;
     Ok(())
