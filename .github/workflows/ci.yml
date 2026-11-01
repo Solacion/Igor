@@ -31,13 +31,14 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Re-run native library downloads after a partial cache restore
-        # sherpa-onnx-sys and piper-phonemize-sys download prebuilt libraries into target/. A cache
-        # restored from another lockfile can hold their build output without the libraries, and
-        # linking then fails. Removing that output makes cargo run their build scripts again,
-        # which download anything missing.
+        # sherpa-onnx-sys and piper-phonemize-sys download prebuilt libraries into
+        # target/<name>-prebuilt. A cache restored from another lockfile can hold their build output
+        # and an incomplete download folder, and linking then fails. Removing both makes cargo run
+        # their build scripts again, which download the libraries afresh.
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          rm -rf target/debug/build/sherpa-onnx-sys-* target/debug/.fingerprint/sherpa-onnx-sys-* \
+          rm -rf target/sherpa-onnx-prebuilt target/piper-phonemize-prebuilt \
+            target/debug/build/sherpa-onnx-sys-* target/debug/.fingerprint/sherpa-onnx-sys-* \
             target/debug/build/piper-phonemize-sys-* target/debug/.fingerprint/piper-phonemize-sys-*
 
       - name: Check formatting
