@@ -28,17 +28,22 @@ jobs:
 
       - name: Cache build
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          # piper-phonemize-sys downloads its native library here, outside what the cache keeps.
-          cache-directories: target/piper-phonemize-prebuilt
 
-      - name: Re-download native libraries missing from the cache
-        # A cache restored without the download would skip piper-phonemize-sys's build script and
-        # fail to link. Removing its cached output makes cargo run the script again.
+      - name: Fetch piper's prebuilt library
+        # piper-phonemize-sys otherwise downloads this into target/, and a partly matching build
+        # cache could restore its build output without the library, which then fails to link.
+        # The crate reads PIPER_PHONEMIZE_LIB_DIR instead when it is set.
+        env:
+          ARCHIVE: piper-phonemize-v1.5.9-macos-arm64-static-lib.tar.bz2
+          SHA256: 4ed1ca09d558b2af416dd56b305f60f5bc4d7fd643607acb54c3cf40e1b7bcda
         run: |
-          if [ ! -d target/piper-phonemize-prebuilt ]; then
-            rm -rf target/debug/build/piper-phonemize-sys-* target/debug/.fingerprint/piper-phonemize-sys-*
-          fi
+          dir="$RUNNER_TEMP/piper-phonemize"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$ARCHIVE" \
+            "https://github.com/csukuangfj/piper-phonemize/releases/download/v1.5.9/$ARCHIVE"
+          echo "$SHA256  $RUNNER_TEMP/$ARCHIVE" | shasum -a 256 -c -
+          mkdir -p "$dir"
+          tar -xjf "$RUNNER_TEMP/$ARCHIVE" -C "$dir"
+          echo "PIPER_PHONEMIZE_LIB_DIR=$dir/lib" >> "$GITHUB_ENV"
 
       - name: Check formatting
         run: cargo fmt --all --check
